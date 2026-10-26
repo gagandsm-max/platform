@@ -156,6 +156,7 @@ public class ApiExceptionHandler {
                  "ERR_SENSOR_CONTROL_SCHEMA_UNSUPPORTED" ->
                     HttpStatus.CONFLICT;
             case "DATABASE_UNAVAILABLE" -> HttpStatus.SERVICE_UNAVAILABLE;
+            case "DATA_INTEGRITY_ERROR", "INTERNAL_ERROR" -> HttpStatus.INTERNAL_SERVER_ERROR;
             default -> HttpStatus.BAD_REQUEST;
         };
     }

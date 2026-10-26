@@ -1,5 +1,8 @@
 package com.platform.core.ingestion.authority;
 
+import com.platform.core.ingestion.IngestionException;
+import org.springframework.http.HttpStatus;
+
 import java.security.cert.X509Certificate;
 
 /**
@@ -18,4 +21,22 @@ public interface SensorAuthorityResolver {
      * @throws com.platform.core.ingestion.IngestionException if authority is unavailable or unauthorized
      */
     SensorScope resolve(X509Certificate clientCertificate);
+
+    /**
+     * Credential-aware identity observation from the matched server credential.
+     *
+     * <p>Fail-closed when credential identity cannot be established from authoritative
+     * server state. Never derives credential identity from request fields, CN/SAN, or a
+     * plain {@link SensorScope}. Result is an identity observation, not admission proof.
+     *
+     * @param clientCertificate verified TLS client certificate
+     * @return immutable resolved authority including credential id and DER fingerprint
+     * @throws com.platform.core.ingestion.IngestionException if authority is unavailable or unauthorized
+     */
+    default ResolvedSensorAuthority resolveAuthority(X509Certificate clientCertificate) {
+        throw new IngestionException(
+                HttpStatus.FORBIDDEN,
+                "ERR_SENSOR_AUTHORITY_UNAVAILABLE",
+                "Credential-aware Sensor authority resolution is unavailable");
+    }
 }

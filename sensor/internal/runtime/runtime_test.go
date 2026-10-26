@@ -236,3 +236,193 @@ func TestComponentStartFailureShutsDownAlreadyStartedComponents(t *testing.T) {
 		t.Fatalf("first component shutdown count=%d, want 1", first.stopped.Load())
 	}
 }
+
+// barrierComponent blocks inside Ready until release is signaled, enabling a
+// deterministic finite interleaving with Drain/Shutdown (issue #242).
+type barrierComponent struct {
+	fakeComponent
+	readyEntered chan struct{}
+	readyRelease chan struct{}
+}
+
+func (b *barrierComponent) Ready(ctx context.Context) error {
+	select {
+	case <-b.readyEntered:
+	default:
+		close(b.readyEntered)
+	}
+	select {
+	case <-b.readyRelease:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return b.readyErr
+}
+
+func newBarrierComponent(name string, cap Capability) *barrierComponent {
+	return &barrierComponent{
+		fakeComponent: fakeComponent{name: name, cap: cap},
+		readyEntered:  make(chan struct{}),
+		readyRelease:  make(chan struct{}),
+	}
+}
+
+func TestRefreshHealthDoesNotOverwriteDrain(t *testing.T) {
+	sched := &fakeScheduler{}
+	reg := NewExecutorRegistry()
+	comp := newBarrierComponent("syslog", CapabilitySyslog)
+	rt, err := New(Config{Role: RoleStreamingEvent, EnabledCapabilities: []Capability{CapabilitySyslog}}, sched, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.RegisterComponent(comp); err != nil {
+		t.Fatal(err)
+	}
+	// Start path also calls RefreshHealth; release once so Start can finish READY.
+	startDone := make(chan error, 1)
+	go func() { startDone <- rt.Start(context.Background()) }()
+	select {
+	case <-comp.readyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start RefreshHealth did not enter Ready")
+	}
+	close(comp.readyRelease)
+	if err = <-startDone; err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Snapshot().State; got != StateReady {
+		t.Fatalf("after start state=%s, want READY", got)
+	}
+
+	// Arm a new barrier for the overlapping RefreshHealth.
+	comp.readyEntered = make(chan struct{})
+	comp.readyRelease = make(chan struct{})
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- rt.RefreshHealth(context.Background()) }()
+	select {
+	case <-comp.readyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshHealth did not enter Ready")
+	}
+	if err = rt.Drain(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Snapshot().State; got != StateDraining {
+		t.Fatalf("after Drain state=%s, want DRAINING", got)
+	}
+	close(comp.readyRelease)
+	select {
+	case err = <-refreshDone:
+		if err != nil {
+			t.Fatalf("RefreshHealth returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshHealth did not complete")
+	}
+	if got := rt.Snapshot().State; got != StateDraining {
+		t.Fatalf("after overlapping RefreshHealth state=%s, want DRAINING (stale READY publish)", got)
+	}
+	if _, err = rt.Submit(scheduler.Job{Kind: "SYSLOG", Class: scheduler.ClassStreaming}); err == nil {
+		t.Fatal("Submit accepted work after Drain; drain boundary violated")
+	}
+	_ = rt.Shutdown(context.Background())
+}
+
+func TestRefreshHealthDoesNotOverwriteShutdown(t *testing.T) {
+	sched := &fakeScheduler{}
+	reg := NewExecutorRegistry()
+	comp := newBarrierComponent("syslog", CapabilitySyslog)
+	rt, err := New(Config{Role: RoleStreamingEvent, EnabledCapabilities: []Capability{CapabilitySyslog}}, sched, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.RegisterComponent(comp); err != nil {
+		t.Fatal(err)
+	}
+	startDone := make(chan error, 1)
+	go func() { startDone <- rt.Start(context.Background()) }()
+	select {
+	case <-comp.readyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Start RefreshHealth did not enter Ready")
+	}
+	close(comp.readyRelease)
+	if err = <-startDone; err != nil {
+		t.Fatal(err)
+	}
+
+	comp.readyEntered = make(chan struct{})
+	comp.readyRelease = make(chan struct{})
+
+	refreshDone := make(chan error, 1)
+	go func() { refreshDone <- rt.RefreshHealth(context.Background()) }()
+	select {
+	case <-comp.readyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshHealth did not enter Ready")
+	}
+	if err = rt.Shutdown(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Snapshot().State; got != StateStopped {
+		t.Fatalf("after Shutdown state=%s, want STOPPED", got)
+	}
+	for _, c := range rt.Snapshot().Components {
+		if c.State != ComponentStopped {
+			t.Fatalf("component %s state=%s, want STOPPED conserved", c.Name, c.State)
+		}
+	}
+	close(comp.readyRelease)
+	select {
+	case err = <-refreshDone:
+		if err != nil {
+			t.Fatalf("RefreshHealth returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RefreshHealth did not complete")
+	}
+	snap := rt.Snapshot()
+	if snap.State != StateStopped {
+		t.Fatalf("after overlapping RefreshHealth state=%s, want STOPPED", snap.State)
+	}
+	for _, c := range snap.Components {
+		if c.State != ComponentStopped {
+			t.Fatalf("component %s resurrected to %s after stale refresh", c.Name, c.State)
+		}
+	}
+}
+
+func TestRefreshHealthOrdinaryReadyDegradedControls(t *testing.T) {
+	sched := &fakeScheduler{}
+	reg := NewExecutorRegistry()
+	comp := &fakeComponent{name: "syslog", cap: CapabilitySyslog}
+	rt, err := New(Config{Role: RoleStreamingEvent, EnabledCapabilities: []Capability{CapabilitySyslog}}, sched, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.RegisterComponent(comp); err != nil {
+		t.Fatal(err)
+	}
+	if err = rt.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Snapshot().State; got != StateReady {
+		t.Fatalf("state=%s, want READY", got)
+	}
+	comp.readyErr = errors.New("listener unavailable")
+	if err = rt.RefreshHealth(context.Background()); err == nil {
+		t.Fatal("expected degraded refresh error")
+	}
+	if got := rt.Snapshot().State; got != StateDegraded {
+		t.Fatalf("state=%s, want DEGRADED", got)
+	}
+	comp.readyErr = nil
+	if err = rt.RefreshHealth(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if got := rt.Snapshot().State; got != StateReady {
+		t.Fatalf("state=%s, want READY after recovery", got)
+	}
+	_ = rt.Shutdown(context.Background())
+}

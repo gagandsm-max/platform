@@ -76,16 +76,48 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=4
 TEST_DESC="Multi-stage Container Builds (Core, Sensor, UI, Analytics, Agent)"
+# Log source identity without rendering .env or secret-bearing Compose values.
+echo "Effective checkout: $(git rev-parse HEAD)"
+echo "Checkout parents: $(git show -s --format=%P HEAD)"
+echo "CI ref: ${GITHUB_REF:-local}; event SHA: ${GITHUB_SHA:-unset}"
+echo "PR head ref: ${GITHUB_HEAD_REF:-unset}; base ref: ${GITHUB_BASE_REF:-unset}"
+if [[ "${GITHUB_REF:-}" == refs/pull/*/merge ]]; then
+    echo "Merge base parent: $(git rev-parse HEAD^1)"
+    echo "Merge PR head parent: $(git rev-parse HEAD^2)"
+fi
+echo "Checkout status (paths only):"
+git status --short
+echo "Core tracked tree: $(git rev-parse HEAD:core)"
+echo "Core build inputs (context ./core; Dockerfile copies pom.xml and src):"
+sha256sum compose.yaml compose.kafka-guarded.yaml core/Dockerfile core/pom.xml
+if [ -f core/.dockerignore ]; then
+    sha256sum core/.dockerignore
+fi
+find core/src -type f -print0 | sort -z | xargs -0 sha256sum
+
 echo "Building all images..."
-if docker compose build --quiet; then
-    # Also build agent test container
-    if docker build -q -t platform-agent:dev agent/ > /dev/null; then
-        pass ${TEST_NUM} "${TEST_DESC}"
-    else
-        fail ${TEST_NUM} "${TEST_DESC}" "Agent container build failed"
-    fi
+if docker compose --progress plain build; then
+    echo "Compose build exit code: 0"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Docker Compose build failed"
+    BUILD_RC=$?
+    fail ${TEST_NUM} "${TEST_DESC}" "Docker Compose build failed (exit ${BUILD_RC}); stopping before stack startup"
+    exit "${BUILD_RC}"
+fi
+if docker build --progress=plain -t platform-agent:dev agent/; then
+    echo "Agent build exit code: 0"
+else
+    BUILD_RC=$?
+    fail ${TEST_NUM} "${TEST_DESC}" "Agent container build failed (exit ${BUILD_RC}); stopping before stack startup"
+    exit "${BUILD_RC}"
+fi
+# compose.yaml binds the Core service to this image; retain its immutable ID.
+if BUILT_CORE_IMAGE_ID=$(docker image inspect --format '{{.Id}}' platform-core:dev) &&
+   [[ "${BUILT_CORE_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+    echo "Built Core image ID: ${BUILT_CORE_IMAGE_ID}"
+    pass ${TEST_NUM} "${TEST_DESC}"
+else
+    fail ${TEST_NUM} "${TEST_DESC}" "Built Core image ID missing or invalid"
+    exit 1
 fi
 
 # ------------------------------------------------------------------------------
@@ -106,6 +138,16 @@ TEST_NUM=6
 TEST_DESC="Platform Dev Stack Startup & Health Convergence"
 echo "Starting dev stack..."
 bash deploy/docker/kafka/deployment-preflight.sh up || exit 1
+# No later health/integration result is credited without this provenance gate.
+if RUNNING_CORE_IMAGE_ID=$(docker inspect --type container --format '{{.Image}}' platform-core) &&
+   [[ "${RUNNING_CORE_IMAGE_ID}" =~ ^sha256:[0-9a-f]{64}$ ]] &&
+   [ "${RUNNING_CORE_IMAGE_ID}" = "${BUILT_CORE_IMAGE_ID}" ]; then
+    echo "Running Core image ID: ${RUNNING_CORE_IMAGE_ID} (matches built image)"
+else
+    echo "Built Core image ID: ${BUILT_CORE_IMAGE_ID}; running Core image ID: ${RUNNING_CORE_IMAGE_ID:-missing}"
+    fail ${TEST_NUM} "${TEST_DESC}" "Core image identity missing or mismatched; stopping before later checks"
+    exit 1
+fi
 echo "Waiting for services to become healthy (up to 60s)..."
 START_TIMEOUT=60
 ELAPSED=0

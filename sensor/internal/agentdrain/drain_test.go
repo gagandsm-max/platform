@@ -2330,3 +2330,2735 @@ func TestDeliveryHealthConcurrentSnapshotAndAckRace(t *testing.T) {
 		t.Fatalf("acks=%d calls=%d", snap.DurableAcks, calls.Load())
 	}
 }
+
+// Issue #230 repro: after Core 413 retainBlocked → DEGRADED, an exact-replay
+// singleton ERR_MALFORMED_RECORD parks successfully but health stays DEGRADED.
+func TestIssue230QuarantineClearsStaleDeliveryDegraded(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	var calls atomic.Uint64
+	var firstBatchID string
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		n := calls.Add(1)
+		if n == 1 {
+			firstBatchID = b.BatchID
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		if b.BatchID != firstBatchID || len(b.Records) != 1 {
+			t.Errorf("exact frozen replay broken: call=%d batchID=%q first=%q records=%d", n, b.BatchID, firstBatchID, len(b.Records))
+		}
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("first 413: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("expected DEGRADED after 413: %+v", snap)
+	}
+
+	ok, parkErr := d.RunOnce(context.Background())
+	if ok || parkErr == nil {
+		t.Fatalf("singleton quarantine: ok=%v err=%v", ok, parkErr)
+	}
+	var de *Error
+	if !errors.As(parkErr, &de) || de.Code != CodePoison {
+		t.Fatalf("want poison park error, got %v", parkErr)
+	}
+
+	st, statsErr := s.Stats()
+	if statsErr != nil {
+		t.Fatal(statsErr)
+	}
+	if st.RecordCount != 0 {
+		t.Fatalf("poisoned record must leave spool, count=%d", st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("poison count=%d", d.Metrics().PoisonCount.Load())
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("quarantine must not count DurableAcks, got %d", d.Metrics().DurableAcks.Load())
+	}
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
+		t.Fatalf("Issue #230: delivery must recover after durable quarantine: %+v", snap)
+	}
+	if snap.DurableAcks != 0 {
+		t.Fatalf("snapshot DurableAcks=%d", snap.DurableAcks)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// ackFailSpool fails AcknowledgeThrough when armed so poison publish can succeed
+// while spool removal fails closed (pre-commit: durable AckedThrough does not advance).
+type ackFailSpool struct {
+	Spool
+	failAck bool
+}
+
+func (a *ackFailSpool) AcknowledgeThrough(seq uint64) error {
+	if a.failAck {
+		return errors.New("injected AcknowledgeThrough failure")
+	}
+	return a.Spool.AcknowledgeThrough(seq)
+}
+
+// partialAckSpool distinguishes pre-commit vs post-commit AcknowledgeThrough failures.
+// Post-commit modes call the real spool first (watermark durable) then surface cleanup
+// errors matching DiskSpool's post-persist failure classes — without changing spool.go.
+type partialAckSpool struct {
+	Spool
+	dir            string
+	mode           string // pre_commit | post_commit_remove | post_commit_fsync | post_commit_stats_uncertain
+	ackedAttempted bool
+	// failStats is atomic so concurrent Snapshot refreshStats cannot race the
+	// post_commit_stats_uncertain AcknowledgeThrough arming path.
+	failStats atomic.Bool
+}
+
+func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
+	p.ackedAttempted = true
+	switch p.mode {
+	case "pre_commit":
+		return errors.New("injected AcknowledgeThrough failure before durable state")
+	case "post_commit_remove", "post_commit_fsync", "post_commit_stats_uncertain":
+		var orphan []byte
+		recordPath := filepath.Join(p.dir, fmt.Sprintf("record-%020d.json", seq))
+		if p.mode == "post_commit_remove" {
+			raw, err := os.ReadFile(recordPath)
+			if err != nil {
+				return err
+			}
+			orphan = raw
+		}
+		if err := p.Spool.AcknowledgeThrough(seq); err != nil {
+			return err
+		}
+		if p.mode == "post_commit_remove" {
+			if err := os.WriteFile(recordPath, orphan, 0640); err != nil {
+				return err
+			}
+			return errors.New("acknowledged record metadata is durable but file cleanup failed")
+		}
+		if p.mode == "post_commit_stats_uncertain" {
+			p.failStats.Store(true)
+			return errors.New("injected post-commit cleanup failure with uncertain stats")
+		}
+		return errors.New("injected final spool directory fsync failure")
+	default:
+		return p.Spool.AcknowledgeThrough(seq)
+	}
+}
+
+func (p *partialAckSpool) Stats() (spool.Stats, error) {
+	if p.failStats.Load() {
+		return spool.Stats{}, errors.New("injected Stats failure after partial acknowledgement")
+	}
+	return p.Spool.Stats()
+}
+
+func (p *partialAckSpool) ReconcileAckedCleanup() error {
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := p.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable on wrapped spool")
+}
+
+func (p *partialAckSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	type reporter interface {
+		UnresolvedAckedCleanup() (bool, uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.UnresolvedAckedCleanup()
+	}
+	return false, 0, nil
+}
+
+func (p *partialAckSpool) AckedThrough() (uint64, error) {
+	type reporter interface {
+		AckedThrough() (uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.AckedThrough()
+	}
+	return 0, errors.New("AckedThrough unavailable on wrapped spool")
+}
+
+// noWatermarkProofSpool forces every watermark inspector to fail so reconcile
+// cannot clear a Core delivery block without inventing durable ACK proof.
+type noWatermarkProofSpool struct {
+	*partialAckSpool
+}
+
+func (n *noWatermarkProofSpool) AckedThrough() (uint64, error) {
+	return 0, errors.New("injected AckedThrough failure")
+}
+
+func (n *noWatermarkProofSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	return false, 0, errors.New("injected UnresolvedAckedCleanup failure")
+}
+
+func (n *noWatermarkProofSpool) Stats() (spool.Stats, error) {
+	return spool.Stats{}, errors.New("injected Stats failure")
+}
+
+func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
+	cases := []struct {
+		name  string
+		arm   func(*Drain)
+		disarm func(*Drain)
+	}{
+		{
+			name: "poison_dir_fsync",
+			arm: func(d *Drain) {
+				d.syncDir = func(string) error { return errors.New("injected poison dir fsync failure") }
+			},
+			disarm: func(d *Drain) { d.syncDir = nil },
+		},
+		{
+			name: "poison_file_publish",
+			arm: func(d *Drain) {
+				d.poisonRename = func(string, string) error {
+					return errors.New("injected poison rename failure")
+				}
+			},
+			disarm: func(d *Drain) { d.poisonRename = nil },
+		},
+		{
+			name: "acknowledge_through",
+			arm: func(d *Drain) {
+				d.spool = &ackFailSpool{Spool: d.spool, failAck: true}
+			},
+			disarm: func(d *Drain) {
+				if w, ok := d.spool.(*ackFailSpool); ok {
+					d.spool = w.Spool
+				}
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendNDurable(t, s, 1)
+			calls := 0
+			tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+				calls++
+				if calls == 1 {
+					return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+				}
+				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+			})
+			d, err := New(Config{
+				SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+				InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+			}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d.wait = func(context.Context, time.Duration) error { return nil }
+			if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+				t.Fatalf("413 setup: ok=%v err=%v", ok, err)
+			}
+			if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+				t.Fatalf("precondition DEGRADED missing: %+v", snap)
+			}
+			tc.arm(d)
+			ok, err := d.RunOnce(context.Background())
+			tc.disarm(d)
+			if ok || err == nil {
+				t.Fatalf("poison failure must surface: ok=%v err=%v", ok, err)
+			}
+			st, _ := s.Stats()
+			if st.RecordCount != 1 {
+				t.Fatalf("failed poison must retain spool head, count=%d", st.RecordCount)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("failed poison must not advance counts: poison=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			snap := d.Snapshot()
+			if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+				t.Fatalf("poison failure must retain prior DEGRADED: %+v", snap)
+			}
+			if snap.PendingRecords != 1 {
+				t.Fatalf("pending after failed poison=%d", snap.PendingRecords)
+			}
+		})
+	}
+}
+
+func TestIssue230LocalMalformedQuarantineClearsPreexistingBlock(t *testing.T) {
+	// Atypical but reachable: delivery already DEGRADED from a prior retainBlocked,
+	// then a locally recognized malformed singleton is durably parked.
+	s, dir := openSpool(t)
+	payload := []byte(`{"tenantId":"incomplete"}`)
+	rec, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: payload})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.markDeliveryBlocked("ERR_BATCH_TOO_LARGE", spool.Batch{FirstSequence: rec.Sequence, LastSequence: rec.Sequence})
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("preexisting block missing: %+v", snap)
+	}
+
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		t.Fatalf("local malformed park: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Attempts.Load() != 0 {
+		t.Fatalf("local quarantine counters: poison=%d acks=%d attempts=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load(), d.Metrics().Attempts.Load())
+	}
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
+		t.Fatalf("local quarantine must clear obsolete block: %+v", snap)
+	}
+}
+
+func TestIssue230HeadOnlyQuarantineRetainsReplayableTail(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 2)
+	calls := 0
+	var firstHeadSeq uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		switch calls {
+		case 1:
+			firstHeadSeq = b.FirstIngressSequence
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		case 2:
+			if b.FirstIngressSequence != firstHeadSeq || len(b.Records) != 1 {
+				t.Errorf("quarantine attempt identity drift: %+v", b)
+			}
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+		default:
+			return coreclient.AgentTelemetryAck{
+				Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+			}, nil
+		}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("413: ok=%v err=%v", ok, err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		t.Fatalf("head quarantine: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 1 {
+		t.Fatalf("after head quarantine health=%+v", snap)
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 1 {
+		t.Fatalf("tail must remain, count=%d", st.RecordCount)
+	}
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("tail replay ACK: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.PendingRecords != 0 || final.DurableAcks != 1 {
+		t.Fatalf("tail ACK health=%+v", final)
+	}
+}
+
+func TestIssue230StaleLegacyObservationCannotReassertAfterQuarantine(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 2)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterLegacySizeObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for legacy size observation barrier")
+	}
+
+	ok, err := d.RunOnce(context.Background())
+	var de *Error
+	if ok || !errors.As(err, &de) || de.Code != CodePoison {
+		close(release)
+		wg.Wait()
+		t.Fatalf("quarantine during stale observation: ok=%v err=%v", ok, err)
+	}
+	close(release)
+	wg.Wait()
+
+	if snap.Blocked || snap.State != DeliveryStateUp {
+		t.Fatalf("stale legacy observation reasserted after quarantine: %+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.PendingRecords != 1 {
+		t.Fatalf("post-quarantine health=%+v", final)
+	}
+}
+
+func TestIssue230ConcurrentSnapshotAndQuarantineRace(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+
+	var calls atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls.Add(1)
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		ok, err := d.RunOnce(context.Background())
+		var de *Error
+		if ok || !errors.As(err, &de) || de.Code != CodePoison {
+			t.Errorf("quarantine under concurrent Snapshot: ok=%v err=%v", ok, err)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	snap := d.Snapshot()
+	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
+		t.Fatalf("concurrent Snapshot/quarantine left stale degradation: %+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || snap.DurableAcks != 0 || calls.Load() != 1 {
+		t.Fatalf("poison=%d acks=%d calls=%d", d.Metrics().PoisonCount.Load(), snap.DurableAcks, calls.Load())
+	}
+}
+
+// setupIssue230PartialAckDrain prepares DEGRADED-via-413 then arms a partialAckSpool
+// for the subsequent singleton poison park.
+func setupIssue230PartialAckDrain(t *testing.T, records int, mode string) (*Drain, *spool.DiskSpool, string, *partialAckSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, records)
+	calls := 0
+	var firstBatchID string
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		if calls == 1 {
+			firstBatchID = b.BatchID
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		if b.BatchID != firstBatchID || len(b.Records) != 1 {
+			t.Errorf("exact frozen replay identity broken: call=%d batchID=%q first=%q records=%d",
+				calls, b.BatchID, firstBatchID, len(b.Records))
+		}
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("413 setup: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("precondition DEGRADED missing: %+v", snap)
+	}
+	wrap := &partialAckSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+func TestIssue230PartialAckPreCommitRetainsDegraded(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "pre_commit")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("pre-commit ack failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool pre-commit failure, got %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough != 0 || st.RecordCount != 1 {
+		t.Fatalf("pre-commit must not advance watermark: acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("pre-commit must not advance poison/acks: poison=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("pre-commit must retain DEGRADED: %+v", snap)
+	}
+}
+
+func TestIssue230PartialAckPostCommitRemoveClearsObsoleteBlock(t *testing.T) {
+	d, s, dir, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("post-commit remove failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool post-commit failure, got %v", err)
+	}
+	if !strings.Contains(de.msg, "watermark durable but spool cleanup failed") {
+		t.Fatalf("want partial-ack message, got %q", de.msg)
+	}
+	st, statsErr := s.Stats()
+	if statsErr != nil {
+		t.Fatal(statsErr)
+	}
+	if st.AckedThrough < 1 {
+		t.Fatalf("post-commit remove must leave durable AckedThrough advanced, got %d", st.AckedThrough)
+	}
+	if st.RecordCount != 0 {
+		t.Fatalf("logical pending must exclude acked orphan, count=%d", st.RecordCount)
+	}
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan record file must remain after injected remove failure: %v", err)
+	}
+	poisonEntries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
+	if len(poisonEntries) == 0 {
+		t.Fatal("poison quarantine file must be preserved")
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d DurableAcks=%d (no false Core ACK)", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete ERR_BATCH_TOO_LARGE must not remain: %+v", snap)
+	}
+	if snap.DurableAcks != 0 {
+		t.Fatalf("snapshot must not report Core ACK: %+v", snap)
+	}
+	if !wrap.ackedAttempted {
+		t.Fatal("AcknowledgeThrough was not attempted")
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+func TestIssue230PartialAckPostCommitFsyncClearsObsoleteBlock(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("post-commit fsync failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool || !strings.Contains(de.msg, "watermark durable") {
+		t.Fatalf("want partial-ack CodeSpool, got %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("fsync post-commit state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete delivery block must clear while cleanup fault remains: %+v", snap)
+	}
+}
+
+// TestIssue230PartialAckStatsFailureClearsObsolete413WithAckedThrough proves the
+// P2 recovery defect: after durable post-commit AcknowledgeThrough, a transient
+// Stats() failure must not retain Core 413. O(1) AckedThrough is authoritative.
+func TestIssue230PartialAckStatsFailureClearsObsolete413WithAckedThrough(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("post-commit cleanup/inspect failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool, got %v", err)
+	}
+	if !strings.Contains(de.msg, "watermark durable but spool cleanup failed") {
+		t.Fatalf("want reconciled partial-ack message, got %q", de.msg)
+	}
+	if acked, err := s.AckedThrough(); err != nil || acked < 1 {
+		t.Fatalf("fixture expected durable watermark underneath Stats failure: acked=%d err=%v", acked, err)
+	}
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("fixture must keep Stats failing so AckedThrough is the proof path")
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d DurableAcks=%d (no false Core ACK)", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+}
+
+// TestIssue230PartialAckStatsFailureRecoversOnSubsequentEmptyRunOnce proves that
+// after post-watermark ACK + Stats failure, later RunOnce calls (empty logical
+// backlog) clear cleanup DEGRADED without inventing a Core ACK.
+func TestIssue230PartialAckStatsFailureRecoversOnSubsequentEmptyRunOnce(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+	// Keep Stats failing: recovery must use O(1) AckedThrough, not directory Stats.
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("Stats must remain failing during empty-backlog recovery")
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 {
+		t.Fatalf("logical backlog must be empty for this recovery case: %+v", st)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("empty recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	// Disarm Stats only to read accurate pending metrics after recovery proof.
+	wrap.failStats.Store(false)
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
+		t.Fatalf("empty-backlog recovery must clear cleanup fault: %+v", final)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || final.DurableAcks != 0 {
+		t.Fatalf("recovery must not invent Core ACK: metrics=%d snap=%+v", d.Metrics().DurableAcks.Load(), final)
+	}
+}
+
+// TestIssue230PartialAckNoWatermarkProofRetainsDegraded is the negative case:
+// when every watermark inspector fails, obsolete 413 must remain (no invented proof).
+func TestIssue230PartialAckNoWatermarkProofRetainsDegraded(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+		Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+	}}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("no-proof path must surface spool error: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool, got %v", err)
+	}
+	if strings.Contains(de.msg, "watermark durable but spool cleanup failed") {
+		t.Fatalf("no watermark proof must not claim reconciled recovery: %q", de.msg)
+	}
+	// Underlying DiskSpool watermark may be durable, but Drain must not clear
+	// without an authoritative inspector succeeding.
+	if acked, err := s.AckedThrough(); err != nil || acked < 1 {
+		t.Fatalf("fixture expected durable watermark underneath failed inspectors: acked=%d err=%v", acked, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("no-proof path must not count poison recovery: poison=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("no watermark proof must retain DEGRADED 413: %+v", snap)
+	}
+}
+
+// TestIssue230PartialAckStatsFailureConcurrentSnapshot preserves deliveryGen /
+// cleanupGen fencing while Stats fails after durable partial ACK.
+func TestIssue230PartialAckStatsFailureConcurrentSnapshot(t *testing.T) {
+	d, s, _, wrap := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	var parkErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		var ok bool
+		ok, parkErr = d.RunOnce(context.Background())
+		if ok || parkErr == nil {
+			t.Errorf("partial quarantine must return cleanup error: ok=%v err=%v", ok, parkErr)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	var de *Error
+	if !errors.As(parkErr, &de) || de.Code != CodeSpool || !strings.Contains(de.msg, "watermark durable") {
+		t.Fatalf("want reconciled CodeSpool partial ack, got %v", parkErr)
+	}
+	if _, statsErr := wrap.Stats(); statsErr == nil {
+		t.Fatal("Stats must still fail after concurrent park")
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("concurrent stats-failure partial ack state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	assertCleanupFaultDespiteStatsFailure(t, d.Snapshot())
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PartialAckPostCommitWithReplayableTail(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 2, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park must surface cleanup error: ok=%v err=%v", ok, err)
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 1 || st.AckedThrough < 1 {
+		t.Fatalf("tail must remain pending under advanced watermark: acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 1)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must clear while cleanup fault and tail remain: %+v", snap)
+	}
+	// Disarm wrapper so tail Core ACK uses real spool acknowledgement.
+	d.spool = s
+	d.transport = p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("tail replay ACK: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	// Recovery runs at RunOnce start (orphan cleanup + dir sync); tail ACK must not
+	// be the sole reason health recovered.
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 || final.DurableAcks != 1 {
+		t.Fatalf("tail ACK health=%+v", final)
+	}
+}
+
+func TestIssue230PartialAckRestartAfterPostCommit(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	streamID := s.StreamID()
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	acked, err := s.AckedThrough()
+	if err != nil || acked < 1 {
+		t.Fatalf("durable watermark before restart: acked=%d err=%v", acked, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	persisted, err := reopened.AckedThrough()
+	if err != nil || persisted != acked {
+		t.Fatalf("restart must preserve AckedThrough: got %d want %d err=%v", persisted, acked, err)
+	}
+	st, err := reopened.Stats()
+	if err != nil || st.RecordCount != 0 {
+		t.Fatalf("restart logical backlog: %+v err=%v", st, err)
+	}
+	d2, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: streamID, AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, reopened, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d2.Snapshot()
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" || snap.PendingRecords != 0 || snap.DurableAcks != 0 {
+		t.Fatalf("restart after fsync partial ack must not resurrect delivery block or invent Core ACK: %+v", snap)
+	}
+	// No orphaned record files after successful remove+injected fsync: cleanup fault
+	// is process-local and correctly absent after restart.
+	if snap.State != DeliveryStateUp || snap.ReasonCode != "" {
+		t.Fatalf("fsync-class restart without orphans must be UP: %+v", snap)
+	}
+	poisonEntries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
+	if len(poisonEntries) == 0 {
+		t.Fatal("poison files must survive restart")
+	}
+}
+
+func TestIssue230PartialAckConcurrentSnapshotAndQuarantine(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 16; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 64; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	var parkErr error
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		var ok bool
+		ok, parkErr = d.RunOnce(context.Background())
+		if ok || parkErr == nil {
+			t.Errorf("partial quarantine must return cleanup error: ok=%v err=%v", ok, parkErr)
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	var de *Error
+	if !errors.As(parkErr, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool partial ack, got %v", parkErr)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("concurrent partial ack state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.DurableAcks != 0 || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("concurrent Snapshot/partial-quarantine health=%+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("poison=%d", d.Metrics().PoisonCount.Load())
+	}
+}
+
+func TestIssue230PartialAckLegacySizeRejectedObservation(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	seedLegacySizeRejectedSidecar(t, s, dir)
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legacy sizeRejected must observe DEGRADED: %+v", snap)
+	}
+	wrap := &partialAckSpool{Spool: s, dir: dir, mode: "post_commit_fsync"}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("legacy delivery block must clear; cleanup fault must remain: %+v", snap)
+	}
+}
+
+func TestIssue230PartialAckEmptyLogicalBacklogNoFalseCoreAck(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok {
+		t.Fatal("partial acknowledgement must not report RunOnce success (false Core ACK)")
+	}
+	if err == nil {
+		t.Fatal("storage cleanup failure must remain visible")
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Successes.Load() != 0 {
+		t.Fatalf("no false Core ACK counters: DurableAcks=%d Successes=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().Successes.Load())
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 || st.AckedThrough < 1 {
+		t.Fatalf("empty logical backlog expected: %+v", st)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.DurableAcks != 0 {
+		t.Fatalf("empty backlog must not invent Core ACK: %+v", snap)
+	}
+}
+
+func assertCleanupFaultDegraded(t *testing.T, snap DeliveryStatus, pending int64) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolCleanupFailed {
+		t.Fatalf("want cleanup DEGRADED/%s, got %+v", reasonSpoolCleanupFailed, snap)
+	}
+	if snap.Blocked {
+		t.Fatalf("cleanup fault must not claim Core delivery Blocked: %+v", snap)
+	}
+	if snap.PendingRecords != pending {
+		t.Fatalf("pending=%d want %d in %+v", snap.PendingRecords, pending, snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// assertCleanupFaultDespiteStatsFailure checks cleanup DEGRADED / cleared-413 while
+// PendingRecords may be stale because refreshStats cannot complete under injected
+// Stats failure. Does not invent Core ACK or DEVICE_DOWN semantics.
+func assertCleanupFaultDespiteStatsFailure(t *testing.T, snap DeliveryStatus) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolCleanupFailed {
+		t.Fatalf("want cleanup DEGRADED/%s, got %+v", reasonSpoolCleanupFailed, snap)
+	}
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete Core 413 must not remain under Stats failure: %+v", snap)
+	}
+	if snap.DurableAcks != 0 {
+		t.Fatalf("must not invent Core ACK: %+v", snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan required for this case: %v", err)
+	}
+
+	// Block recovery fsync so tryRecoverCleanupFault cannot clear the fault
+	// even if orphan removal already succeeded.
+	d.syncDir = func(path string) error {
+		if path == d.cfg.AgentSpoolDir {
+			return errors.New("injected spool-dir recovery fsync failure")
+		}
+		return defaultSyncDir(path)
+	}
+	d.spool = s
+	appendNDurable(t, s, 1)
+	d.transport = p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("unrelated upload ACK: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+	// Empty backlog + successful unrelated upload must not clear cleanup fault.
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+
+	// Proven recovery: directory sync succeeds (orphans already removable/absent).
+	// Elapse the paced retry window scheduled by the injected fsync failure above.
+	d.syncDir = nil
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("idle recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("recovery must leave no acked orphan, err=%v", err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
+		t.Fatalf("cleanup recovery must clear fault: %+v", final)
+	}
+}
+
+func TestIssue230CleanupFaultRestartOpenRecoversOrphan(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	streamID := s.StreamID()
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	acked, err := s.AckedThrough()
+	if err != nil || acked < 1 {
+		t.Fatalf("watermark: acked=%d err=%v", acked, err)
+	}
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan must exist before restart: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	// DiskSpool.recover removes validated acked orphans on Open when removal succeeds.
+	if _, err := os.Stat(orphan); !os.IsNotExist(err) {
+		t.Fatalf("spool recover should remove acked orphan when possible, err=%v", err)
+	}
+	d2, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: streamID, AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, reopened, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	healed := d2.Snapshot()
+	if healed.Blocked || healed.State != DeliveryStateUp || healed.ReasonCode != "" || healed.DurableAcks != 0 {
+		t.Fatalf("restart after successful spool orphan recover must be UP: %+v", healed)
+	}
+}
+
+func TestIssue230SnapshotDoesNotScanPlantedAckedOrphans(t *testing.T) {
+	s, dir := openSpool(t)
+	r := appendDurable(t, s, 1)
+	recordPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", r.Sequence))
+	raw, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AcknowledgeThrough(r.Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(recordPath, raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap := d.Snapshot(); snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.DurableAcks != 0 {
+		t.Fatalf("Snapshot must not directory-scan planted orphans into DEGRADED or invent ACK: %+v", snap)
+	}
+	if _, err := os.Stat(recordPath); err != nil {
+		t.Fatalf("Snapshot must not delete planted orphan: %v", err)
+	}
+}
+
+func TestIssue230UnresolvedCleanupReporterReassertsCheaply(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 1)
+	if snap.DurableAcks != 0 {
+		t.Fatalf("unresolved cleanup must not invent Core ACK: %+v", snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+func TestIssue230CleanupReconcilePreservesPendingAndQuarantinesUnsafe(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	ackedOrphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(ackedOrphan); err != nil {
+		t.Fatalf("acked orphan required: %v", err)
+	}
+	pending := appendDurable(t, s, 2)
+	pendingPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", pending.Sequence))
+	pendingRaw, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatalf("pending telemetry required: %v", err)
+	}
+
+	zeroPath := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(0)))
+	if err := os.WriteFile(zeroPath, []byte(`{"not":"a-record"}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	badName := filepath.Join(dir, "record-not-a-sequence.json")
+	if err := os.WriteFile(badName, []byte("garbage"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	// Symlink must not use a pending-looking record sequence name: Stats() would
+	// fail-closed on unsafe pending paths before cleanup recovery can run.
+	symlinkPath := filepath.Join(dir, "unsafe-acked-looking-link")
+	target := filepath.Join(dir, "outside-target")
+	if err := os.WriteFile(target, []byte("secret"), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(target, symlinkPath); err != nil {
+		t.Fatal(err)
+	}
+
+	d.spool = s
+	// Recover cleanup without selecting/uploading pending work.
+	d.tryRecoverCleanupFault()
+	if _, err := os.Stat(ackedOrphan); !os.IsNotExist(err) {
+		t.Fatalf("validated acked orphan must be removed by DiskSpool, err=%v", err)
+	}
+	if _, err := os.Stat(zeroPath); !os.IsNotExist(err) {
+		t.Fatalf("sequence-zero artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(badName); !os.IsNotExist(err) {
+		t.Fatalf("invalid-name artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Lstat(symlinkPath); !os.IsNotExist(err) {
+		t.Fatalf("symlink artifact must be quarantined, err=%v", err)
+	}
+	if _, err := os.Stat(target); err != nil {
+		t.Fatalf("symlink target must not be deleted: %v", err)
+	}
+	gotPending, err := os.ReadFile(pendingPath)
+	if err != nil || !reflect.DeepEqual(gotPending, pendingRaw) {
+		t.Fatalf("pending valid telemetry must remain intact")
+	}
+	qEntries, err := os.ReadDir(filepath.Join(dir, "quarantine"))
+	if err != nil || len(qEntries) < 3 {
+		t.Fatalf("expected quarantined unsafe artifacts, got %d err=%v", len(qEntries), err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 1 || final.DurableAcks != 0 {
+		t.Fatalf("after safe reconcile health=%+v", final)
+	}
+}
+
+type unresolvedCleanupSpool struct {
+	Spool
+	unresolved bool
+	seq        uint64
+}
+
+func (u *unresolvedCleanupSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	return u.unresolved, u.seq, nil
+}
+
+func (u *unresolvedCleanupSpool) ReconcileAckedCleanup() error {
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := u.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+type countingUnresolvedSpool struct {
+	Spool
+	unresolved      bool
+	seq             uint64
+	unresolvedCalls atomic.Uint64
+	reconcileCalls  atomic.Uint64
+}
+
+func (u *countingUnresolvedSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	u.unresolvedCalls.Add(1)
+	return u.unresolved, u.seq, nil
+}
+
+func (u *countingUnresolvedSpool) ReconcileAckedCleanup() error {
+	u.reconcileCalls.Add(1)
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := u.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+func TestIssue230SnapshotCleanupObservationIsO1NotDirectoryScan(t *testing.T) {
+	s, dir := openSpool(t)
+	const backlog = 200
+	appendNDurable(t, s, backlog)
+	wrap := &countingUnresolvedSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 25; i++ {
+		snap := d.Snapshot()
+		assertCleanupFaultDegraded(t, snap, int64(backlog))
+		if snap.DurableAcks != 0 || strings.Contains(fmt.Sprintf("%+v", snap), "DEVICE_DOWN") {
+			t.Fatalf("health must stay truthful under backlog: %+v", snap)
+		}
+	}
+	if wrap.reconcileCalls.Load() != 0 {
+		t.Fatalf("Snapshot must not invoke ReconcileAckedCleanup (got %d)", wrap.reconcileCalls.Load())
+	}
+	if wrap.unresolvedCalls.Load() < 1 {
+		t.Fatal("Snapshot must use O(1) UnresolvedAckedCleanup reporter")
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != backlog {
+		t.Fatalf("pending backlog must remain intact: %+v err=%v", st, err)
+	}
+}
+
+func TestIssue230CleanupFaultConcurrentSnapshotAndSpoolOps(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	d.spool = s
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 40; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for j := 0; j < 8; j++ {
+			_, _ = s.Stats()
+			_ = s.ReconcileAckedCleanup()
+		}
+	}()
+	close(start)
+	wg.Wait()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery after concurrent ops: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.DurableAcks != 0 {
+		t.Fatalf("concurrent cleanup recovery health=%+v", final)
+	}
+}
+
+func TestIssue230CleanupFaultClearsAfterFsyncRecovery(t *testing.T) {
+	d, s, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	d.spool = s
+	// Empty backlog: recovery is orphan cleanup (none) + spool dir sync only.
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
+		t.Fatalf("fsync recovery must clear cleanup fault: %+v", final)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("recovery must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230CleanupFaultNotClearedBySnapshotAlone(t *testing.T) {
+	d, _, _, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_fsync")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("partial park: ok=%v err=%v", ok, err)
+	}
+	for i := 0; i < 8; i++ {
+		assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	}
+}
+
+// TestIssue230StaleCleanupObservationCannotReassertAfterClear proves the P2-1
+// race: Snapshot observes unresolved cleanup, concurrent recovery clears the
+// fault (cleanupGen advances), then the stale observer must not reassert
+// DEGRADED.
+func TestIssue230StaleCleanupObservationCannotReassertAfterClear(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: true, seq: 1}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	observed := make(chan struct{})
+	release := make(chan struct{})
+	d.afterCleanupUnresolvedObserve = func() {
+		close(observed)
+		<-release
+	}
+
+	var snap DeliveryStatus
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		snap = d.Snapshot()
+	}()
+
+	select {
+	case <-observed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for cleanup unresolved observation barrier")
+	}
+
+	// Concurrent recovery: spool flag cleared and drain generation advanced.
+	wrap.unresolved = false
+	d.clearCleanupFault()
+	close(release)
+	wg.Wait()
+
+	if snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.Blocked {
+		t.Fatalf("stale cleanup observation reasserted DEGRADED: %+v", snap)
+	}
+	final := d.Snapshot()
+	if final.State != DeliveryStateUp || final.ReasonCode != "" || final.Blocked {
+		t.Fatalf("post-clear healthy state lost: %+v", final)
+	}
+}
+
+// TestIssue230CleanupObservationStillAssertsTrueFault ensures generation fencing
+// does not suppress a live unresolved-cleanup signal after a prior clear.
+func TestIssue230CleanupObservationStillAssertsTrueFault(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	wrap := &unresolvedCleanupSpool{Spool: s, unresolved: false, seq: 0}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.markCleanupFault(1)
+	d.clearCleanupFault()
+	wrap.unresolved = true
+	wrap.seq = 2
+	assertCleanupFaultDegraded(t, d.Snapshot(), 1)
+}
+
+// TestIssue230CleanupRecoveryBackoffPacesExpensiveRetries proves P2-2: under
+// persistent reconcile failure, RunOnce does not rescan every IdleInterval.
+// Skipped attempts leave the fault set and must not invent Core ACKs.
+func TestIssue230CleanupRecoveryBackoffPacesExpensiveRetries(t *testing.T) {
+	s, dir := openSpool(t)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+		IdleInterval: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	// faultSeq 0 is covered by an empty AckedThrough watermark so recovery
+	// reaches the expensive reconcile path without a prior partial ACK.
+	d.markCleanupFault(0)
+
+	const iterations = 25
+	for i := 0; i < iterations; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	calls := wrap.reconcileCalls.Load()
+	if calls != 1 {
+		t.Fatalf("expensive reconcile paced calls=%d want 1 across %d RunOnce", calls, iterations)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("paced recovery must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+
+	// Elapse the paced window: next RunOnce must attempt again, still fail, still faulted.
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("retry after pace: ok=%v err=%v", ok, err)
+	}
+	if got := wrap.reconcileCalls.Load(); got != 2 {
+		t.Fatalf("after pace window reconcileCalls=%d want 2", got)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+}
+
+// TestIssue230CleanupRecoveryBackoffKeepsPendingDeliveryOperational proves
+// paced cleanup recovery does not block pending telemetry delivery under fault.
+func TestIssue230CleanupRecoveryBackoffKeepsPendingDeliveryOperational(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 3)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	var uploads atomic.Uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		uploads.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+	}, wrap, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	d.markCleanupFault(0)
+
+	delivered := false
+	for i := 0; i < 5; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if err != nil {
+			t.Fatalf("delivery under cleanup fault: ok=%v err=%v", ok, err)
+		}
+		if ok {
+			delivered = true
+			break
+		}
+	}
+	if !delivered || uploads.Load() == 0 {
+		t.Fatalf("pending delivery must proceed under paced cleanup fault: delivered=%v uploads=%d", delivered, uploads.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	if wrap.reconcileCalls.Load() != 1 {
+		t.Fatalf("reconcileCalls=%d want 1 (paced)", wrap.reconcileCalls.Load())
+	}
+}
+
+// TestIssue230CleanupRecoveryBackoffUnderLargeBacklog verifies paced recovery
+// still avoids repeated directory reconcile while a large pending backlog exists.
+func TestIssue230CleanupRecoveryBackoffUnderLargeBacklog(t *testing.T) {
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 200)
+	wrap := &failingReconcileSpool{Spool: s, failErr: errors.New("injected reconcile failure")}
+	// Retain the backlog: transient upload failure keeps pending without deliveryBlocked
+	// masking the independent cleanup-fault health signal.
+	tr := &fakeTransport{err: transientErr{}}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+	}, wrap, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	d.markCleanupFault(0)
+
+	for i := 0; i < 40; i++ {
+		_, _ = d.RunOnce(context.Background())
+	}
+	if got := wrap.reconcileCalls.Load(); got != 1 {
+		t.Fatalf("large-backlog paced reconcileCalls=%d want 1", got)
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 200)
+	if snap.PendingRecords != 200 {
+		t.Fatalf("pending backlog disturbed: %+v", snap)
+	}
+}
+
+// failingReconcileSpool forces ReconcileAckedCleanup failures while counting calls.
+type failingReconcileSpool struct {
+	Spool
+	failErr        error
+	reconcileCalls atomic.Uint64
+}
+
+func (f *failingReconcileSpool) ReconcileAckedCleanup() error {
+	f.reconcileCalls.Add(1)
+	if f.failErr != nil {
+		return f.failErr
+	}
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := f.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+func (f *failingReconcileSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	type reporter interface {
+		UnresolvedAckedCleanup() (bool, uint64, error)
+	}
+	if r, ok := f.Spool.(reporter); ok {
+		return r.UnresolvedAckedCleanup()
+	}
+	return false, 0, nil
+}
+
+// partialCompleteSpool injects CompleteOutboundBatch pre/post-commit failures after a
+// valid Core ACK without changing spool production code beyond existing seams.
+type partialCompleteSpool struct {
+	Spool
+	dir            string
+	mode           string // pre_commit | post_commit_remove | post_commit_sidecar
+	failInspect    atomic.Bool
+	inspectCalls   atomic.Uint64
+	completeCalled atomic.Bool
+}
+
+func (p *partialCompleteSpool) CompleteOutboundBatch(seq uint64) error {
+	p.completeCalled.Store(true)
+	switch p.mode {
+	case "pre_commit":
+		return errors.New("injected CompleteOutboundBatch failure before durable state")
+	case "post_commit_remove":
+		recordPath := filepath.Join(p.dir, fmt.Sprintf("record-%020d.json", seq))
+		raw, err := os.ReadFile(recordPath)
+		if err != nil {
+			return err
+		}
+		if err := p.Spool.CompleteOutboundBatch(seq); err != nil {
+			return err
+		}
+		if err := os.WriteFile(recordPath, raw, 0640); err != nil {
+			return err
+		}
+		return errors.New("acknowledged record metadata is durable but file cleanup failed")
+	case "post_commit_sidecar":
+		// Durable ACK without clearing the frozen outbound-window sidecar.
+		if err := p.Spool.AcknowledgeThrough(seq); err != nil {
+			return err
+		}
+		return errors.New("injected outbound window sidecar clear/fsync failure")
+	default:
+		return p.Spool.CompleteOutboundBatch(seq)
+	}
+}
+
+func (p *partialCompleteSpool) Stats() (spool.Stats, error) {
+	p.inspectCalls.Add(1)
+	if p.failInspect.Load() {
+		return spool.Stats{}, errors.New("injected Stats inspection failure")
+	}
+	return p.Spool.Stats()
+}
+
+func (p *partialCompleteSpool) AckedThrough() (uint64, error) {
+	p.inspectCalls.Add(1)
+	if p.failInspect.Load() {
+		return 0, errors.New("injected AckedThrough inspection failure")
+	}
+	type reporter interface {
+		AckedThrough() (uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.AckedThrough()
+	}
+	return 0, errors.New("AckedThrough unavailable")
+}
+
+func (p *partialCompleteSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	p.inspectCalls.Add(1)
+	if p.failInspect.Load() {
+		return false, 0, errors.New("injected UnresolvedAckedCleanup inspection failure")
+	}
+	type reporter interface {
+		UnresolvedAckedCleanup() (bool, uint64, error)
+	}
+	if r, ok := p.Spool.(reporter); ok {
+		return r.UnresolvedAckedCleanup()
+	}
+	return false, 0, nil
+}
+
+func (p *partialCompleteSpool) ReconcileAckedCleanup() error {
+	type reconciler interface {
+		ReconcileAckedCleanup() error
+	}
+	if r, ok := p.Spool.(reconciler); ok {
+		return r.ReconcileAckedCleanup()
+	}
+	return errors.New("ReconcileAckedCleanup unavailable")
+}
+
+// setupIssue230CoreAckPartialComplete prepares DEGRADED-via-413 then returns a drain
+// whose next upload receives a valid Core ACK while CompleteOutboundBatch is wrapped.
+func setupIssue230CoreAckPartialComplete(t *testing.T, records int, mode string) (*Drain, *spool.DiskSpool, string, *partialCompleteSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, records)
+	calls := 0
+	var frozenBatchID string
+	var frozenFirst, frozenLast uint64
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls++
+		if calls == 1 {
+			frozenBatchID = b.BatchID
+			frozenFirst = b.FirstIngressSequence
+			frozenLast = b.LastIngressSequence
+			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
+		}
+		if b.BatchID != frozenBatchID || b.FirstIngressSequence != frozenFirst || b.LastIngressSequence != frozenLast {
+			t.Errorf("frozen Core ACK identity broken: batchID=%q want=%q first=%d/%d last=%d/%d",
+				b.BatchID, frozenBatchID, b.FirstIngressSequence, frozenFirst, b.LastIngressSequence, frozenLast)
+		}
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, "ERR_BATCH_TOO_LARGE") {
+		t.Fatalf("413 setup: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("precondition DEGRADED missing: %+v", snap)
+	}
+	wrap := &partialCompleteSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+func TestIssue230CoreAckPartialCompletePreCommitRetainsDegraded(t *testing.T) {
+	d, s, _, wrap := setupIssue230CoreAckPartialComplete(t, 1, "pre_commit")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("pre-commit CompleteOutboundBatch failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool, got %v", err)
+	}
+	if strings.Contains(de.msg, "durable agent ACK applied but spool cleanup failed") {
+		t.Fatalf("pre-commit must not claim durable reconcile: %q", de.msg)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough != 0 || st.RecordCount != 1 {
+		t.Fatalf("pre-commit must not advance watermark: acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Successes.Load() != 0 {
+		t.Fatalf("pre-commit must not count Core ACK: acks=%d successes=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().Successes.Load())
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("pre-commit must retain obsolete 413: %+v", snap)
+	}
+	if !wrap.completeCalled.Load() {
+		t.Fatal("CompleteOutboundBatch was not attempted")
+	}
+}
+
+func TestIssue230CoreAckPartialCompleteRecordCleanupClearsObsolete413(t *testing.T) {
+	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_remove")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("post-commit remove failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool || !strings.Contains(de.msg, "durable agent ACK applied but spool cleanup failed") {
+		t.Fatalf("want reconciled Core ACK cleanup error, got %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("post-commit remove state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	orphan := filepath.Join(dir, fmt.Sprintf("record-%020d.json", uint64(1)))
+	if _, err := os.Stat(orphan); err != nil {
+		t.Fatalf("orphan record must remain: %v", err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 || d.Metrics().Successes.Load() != 1 {
+		t.Fatalf("exact Core ACK must count once: acks=%d successes=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().Successes.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == "ERR_BATCH_TOO_LARGE" || snap.Blocked {
+		t.Fatalf("obsolete 413 must clear after durable Core ACK: %+v", snap)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// TestIssue230BlockedToCleanupTransitionAtomicUnderDeliveryMu reproduces the
+// P2 non-atomic health race with deterministic barriers: previously
+// clearDeliveryBlocked unlocked before markCleanupFault, so a concurrent
+// Snapshot could briefly observe both flags false and advertise UP while
+// cleanup remained unresolved. The blocked→cleanup transition must complete
+// under one deliveryMu critical section (no spool I/O while holding it).
+func TestIssue230BlockedToCleanupTransitionAtomicUnderDeliveryMu(t *testing.T) {
+	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for blocked-to-cleanup transition barrier")
+	}
+
+	// Snapshot starts while deliveryMu is held mid-transition. It must block
+	// until cleanupFault is latched; it must never publish UP for the gap.
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr == nil {
+		t.Fatalf("sidecar clear failure must surface: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must not remain after atomic transition: %+v", snap)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("stale outbound-window sidecar must remain: %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 {
+		t.Fatalf("durable watermark must remain: %+v", st)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("exact Core ACK must count once: %d", d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	assertCleanupFaultDegraded(t, final, 0)
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer"} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// TestIssue230DelayedPartialAckReconcileUsesAtomicTransition covers the paced
+// tryReconcilePendingPartialAck path sharing installProvenCleanupAfterPartialAck.
+// Inspector recovery must clear obsolete 413 without advertising a Core delivery
+// block; cleanupFault remains until verified orphan/sidecar reconcile.
+func TestIssue230DelayedPartialAckReconcileUsesAtomicTransition(t *testing.T) {
+	d, s, _, wrap := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("inspect-fail partial complete must surface: ok=%v err=%v", ok, err)
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("fail closed must retain 413: %+v", snap)
+	}
+
+	// Prevent same-RunOnce cleanup recovery from clearing the fault before Snapshot.
+	wrap.failInspect.Store(false)
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for delayed reconcile transition barrier")
+	}
+
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr != nil {
+		t.Fatalf("delayed recovery RunOnce: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must not remain after atomic delayed transition: %+v", snap)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("delayed recovery must count exact Core ACK once: %d", d.Metrics().DurableAcks.Load())
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("delayed recovery spool state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+}
+
+func TestIssue230CoreAckPartialCompleteSidecarCleanupClearsObsolete413(t *testing.T) {
+	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("sidecar clear failure must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeSpool || !strings.Contains(de.msg, "durable agent ACK applied but spool cleanup failed") {
+		t.Fatalf("want reconciled Core ACK sidecar cleanup error, got %v", err)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 || st.RecordCount != 0 {
+		t.Fatalf("sidecar post-commit state acked=%d count=%d", st.AckedThrough, st.RecordCount)
+	}
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	if _, err := os.Stat(sidecar); err != nil {
+		t.Fatalf("stale outbound-window sidecar must remain: %v", err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("Core ACK must count once: %d", d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || snap.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must clear after sidecar post-commit ACK: %+v", snap)
+	}
+
+	// Recovery clears stale sidecar under spool ownership and restores UP.
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	if _, err := os.Stat(sidecar); !os.IsNotExist(err) {
+		t.Fatalf("recovery must clear stale sidecar, err=%v", err)
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
+		t.Fatalf("sidecar recovery health=%+v", final)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("recovery must not invent a second Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PartialAckNoWatermarkProofRecoversWhenInspectorsReturn(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+		Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+	}}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("no-proof path must surface: ok=%v err=%v", ok, err)
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("fail closed must retain 413: %+v", snap)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("no-proof must not count yet: poison=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	d.deliveryMu.RLock()
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent == 0 {
+		t.Fatal("bounded reconciliation intent must be retained after inspector failure")
+	}
+
+	// Inspectors recover; empty logical backlog must still clear obsolete 413.
+	d.spool = s
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("delayed recovery RunOnce: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("delayed park recovery: poison=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must not remain after inspector recovery: %+v", final)
+	}
+	if final.State != DeliveryStateUp && final.ReasonCode != reasonSpoolCleanupFailed {
+		t.Fatalf("recovery health must be UP or cleanup DEGRADED: %+v", final)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN"} {
+		if strings.Contains(fmt.Sprintf("%+v", final), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, final)
+		}
+	}
+}
+
+func TestIssue230CoreAckPartialCompleteEmptyBacklogDelayedInspectRecovery(t *testing.T) {
+	d, s, _, wrap := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("inspect-fail partial complete must surface: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("no Core ACK count without watermark proof: %d", d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	if !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("fail closed must retain 413: %+v", snap)
+	}
+	st, _ := s.Stats()
+	if st.RecordCount != 0 || st.AckedThrough < 1 {
+		t.Fatalf("empty logical backlog expected underneath: %+v", st)
+	}
+
+	wrap.failInspect.Store(false)
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("empty delayed recovery: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("delayed recovery must count exact Core ACK once: %d", d.Metrics().DurableAcks.Load())
+	}
+	final := d.Snapshot()
+	if final.Blocked || final.ReasonCode == "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("obsolete 413 must clear on delayed recovery: %+v", final)
+	}
+}
+
+func TestIssue230CoreAckPartialCompleteRestartPreservesFrozenWindowIdentity(t *testing.T) {
+	d, s, dir, _ := setupIssue230CoreAckPartialComplete(t, 2, "pre_commit")
+	// Capture frozen window before failed complete.
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	raw, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("pre-commit complete failure: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatal("pre-commit must not count Core ACK")
+	}
+	after, err := os.ReadFile(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(raw) != string(after) {
+		t.Fatalf("frozen outbound-window identity must be unchanged\nbefore=%s\nafter=%s", raw, after)
+	}
+	_ = s.Close()
+	reopened, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	batch, err := reopened.ReadOrReserveOutboundBatch(1, 1024*1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if batch.FirstSequence != 1 || batch.LastSequence != 1 || len(batch.Records) != 1 {
+		t.Fatalf("restart must preserve frozen window: %#v", batch)
+	}
+}
+
+func TestIssue230WatermarkInspectionFailurePacesRecoveryReads(t *testing.T) {
+	s, dir := openSpool(t)
+	wrap := &countingInspectFailSpool{Spool: s}
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		InitialBackoff: time.Hour, MaxBackoff: time.Hour, JitterFraction: 0,
+		IdleInterval: time.Millisecond,
+	}, wrap, &fakeTransport{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	d.markCleanupFault(1)
+
+	before := wrap.o1Calls.Load()
+	for i := 0; i < 20; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	delta := wrap.o1Calls.Load() - before
+	// First recovery attempt probes O(1) inspectors; paced skips must not repeat
+	// that work every IdleInterval. refreshStats may still call Stats separately.
+	if delta == 0 || delta > 4 {
+		t.Fatalf("O(1) watermark inspection must be paced under failure: o1Delta=%d", delta)
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("paced inspect failure must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+// countingInspectFailSpool fails O(1) watermark inspectors while leaving Stats
+// available for refreshStats pending counters.
+type countingInspectFailSpool struct {
+	Spool
+	o1Calls atomic.Uint64
+}
+
+func (c *countingInspectFailSpool) AckedThrough() (uint64, error) {
+	c.o1Calls.Add(1)
+	return 0, errors.New("injected AckedThrough inspection failure")
+}
+
+func (c *countingInspectFailSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	c.o1Calls.Add(1)
+	return false, 0, errors.New("injected UnresolvedAckedCleanup inspection failure")
+}
+
+func (c *countingInspectFailSpool) ReconcileAckedCleanup() error {
+	return errors.New("reconcile must not run while inspectors fail")
+}
+
+func TestIssue230CoreAckPartialCompleteConcurrentSnapshot(t *testing.T) {
+	d, _, _, _ := setupIssue230CoreAckPartialComplete(t, 1, "post_commit_remove")
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 12; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 40; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	var parkErr error
+	go func() {
+		defer wg.Done()
+		<-start
+		_, parkErr = d.RunOnce(context.Background())
+	}()
+	close(start)
+	wg.Wait()
+	var de *Error
+	if parkErr == nil || !errors.As(parkErr, &de) || de.Code != CodeSpool {
+		t.Fatalf("want CodeSpool under concurrency, got %v", parkErr)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+	snap := d.Snapshot()
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.Blocked || strings.Contains(snap.ReasonCode, "DEVICE_DOWN") {
+		t.Fatalf("concurrent snapshot health=%+v", snap)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Issue230 pending-intent correction regressions (conditional P2 accounting/health)
+// ---------------------------------------------------------------------------
+
+var issue230AuthorityPoisonCodes = []string{
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION",
+	"ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION",
+}
+
+func assertPendingAckUncertain(t *testing.T, snap DeliveryStatus, seq uint64) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != reasonSpoolAckUncertain {
+		t.Fatalf("want pending-ack DEGRADED/%s, got %+v", reasonSpoolAckUncertain, snap)
+	}
+	if snap.Blocked {
+		t.Fatalf("pending-ack uncertainty must not claim Core delivery Blocked: %+v", snap)
+	}
+	if seq != 0 && (snap.FirstSequence != seq || snap.LastSequence != seq) {
+		t.Fatalf("pending-ack seq mismatch want=%d got first=%d last=%d", seq, snap.FirstSequence, snap.LastSequence)
+	}
+	for _, forbidden := range []string{"DEVICE_DOWN", "password", "Bearer", reasonSpoolCleanupFailed} {
+		if strings.Contains(fmt.Sprintf("%+v", snap), forbidden) {
+			t.Fatalf("leaked %q in %+v", forbidden, snap)
+		}
+	}
+}
+
+// setupIssue230PendingIntentNoPrior413 arms a normal Core ACK (no prior 413) with
+// CompleteOutboundBatch wrapping and optional inspector failure.
+func setupIssue230PendingIntentNoPrior413(t *testing.T, mode string) (*Drain, *spool.DiskSpool, string, *partialCompleteSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+		JitterFraction: 0,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	wrap := &partialCompleteSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+// setupIssue230AuthorityPoisonPartialPark stages a singleton authority-poison Core
+// reject with AcknowledgeThrough wrapping under real DiskSpool.
+func setupIssue230AuthorityPoisonPartialPark(t *testing.T, poisonCode, mode string) (*Drain, *spool.DiskSpool, string, *partialAckSpool) {
+	t.Helper()
+	s, dir := openSpool(t)
+	appendNDurable(t, s, 1)
+	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: poisonCode, Message: "authority", HTTPStatus: 422}
+	})
+	d, err := New(Config{
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond,
+		JitterFraction: 0,
+	}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	wrap := &partialAckSpool{Spool: s, dir: dir, mode: mode}
+	d.spool = wrap
+	return d, s, dir, wrap
+}
+
+func TestIssue230PendingIntentAuthorityPoisonCodesConserveOnce(t *testing.T) {
+	for _, code := range issue230AuthorityPoisonCodes {
+		t.Run(code, func(t *testing.T) {
+			d, s, dir, _ := setupIssue230AuthorityPoisonPartialPark(t, code, "post_commit_stats_uncertain")
+			wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+				Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+			}}
+			d.spool = wrap
+			ok, err := d.RunOnce(context.Background())
+			if ok || err == nil {
+				t.Fatalf("no-proof authority poison park must surface: ok=%v err=%v", ok, err)
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("uncertain park must not count yet: poison=%d auth=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			d.deliveryMu.RLock()
+			intent, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+			d.deliveryMu.RUnlock()
+			if intent == 0 || coreACK || !auth {
+				t.Fatalf("intent must retain authority-poison class: seq=%d coreACK=%v auth=%v", intent, coreACK, auth)
+			}
+			assertPendingAckUncertain(t, d.Snapshot(), intent)
+
+			// Barrier: repeated RunOnce must not select/upload/park or double-count.
+			for i := 0; i < 5; i++ {
+				ok, err := d.RunOnce(context.Background())
+				if ok || err != nil {
+					t.Fatalf("barrier iteration %d: ok=%v err=%v", i, ok, err)
+				}
+			}
+			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+				t.Fatalf("barrier must not count while unproven: poison=%d auth=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+			}
+
+			d.spool = s
+			d.deliveryMu.Lock()
+			d.cleanupRetryAfter = time.Time{}
+			d.deliveryMu.Unlock()
+			if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+				t.Fatalf("deferred authority recovery: ok=%v err=%v", ok, err)
+			}
+			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("authority poison must count once: poison=%d auth=%d acks=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			}
+			// Repeat Snapshot/RunOnce must not duplicate counts.
+			for i := 0; i < 3; i++ {
+				_ = d.Snapshot()
+				d.deliveryMu.Lock()
+				d.cleanupRetryAfter = time.Time{}
+				d.deliveryMu.Unlock()
+				if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+					t.Fatalf("post-recovery iteration %d: ok=%v err=%v", i, ok, err)
+				}
+			}
+			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+				t.Fatalf("no duplicate authority counts: poison=%d auth=%d",
+					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+			}
+		})
+	}
+}
+
+func TestIssue230PendingIntentGenericPoisonDoesNotAuthorityCount(t *testing.T) {
+	d, s, dir, _ := setupIssue230PartialAckDrain(t, 1, "post_commit_stats_uncertain")
+	wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+		Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
+	}}
+	d.spool = wrap
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("no-proof generic poison must surface: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	intent, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if intent == 0 || coreACK || auth {
+		t.Fatalf("generic poison intent: seq=%d coreACK=%v auth=%v", intent, coreACK, auth)
+	}
+	// With prior 413, Snapshot retains Core block (fail closed); intent still present.
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_BATCH_TOO_LARGE" {
+		t.Fatalf("prior 413 must remain visible while intent pending: %+v", snap)
+	}
+
+	d.spool = s
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("deferred generic poison recovery: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("generic poison: poison=%d auth=%d acks=%d",
+			d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentUnknownProofBlocksSecondDelivery(t *testing.T) {
+	d, s, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	trCalls := atomic.Uint64{}
+	d.transport = p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		trCalls.Add(1)
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
+		}, nil
+	})
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK must surface: ok=%v err=%v", ok, err)
+	}
+	if trCalls.Load() != 1 {
+		t.Fatalf("first attempt upload count=%d", trCalls.Load())
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || d.Metrics().PoisonCount.Load() != 0 {
+		t.Fatalf("unknown proof must not count: acks=%d poison=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().PoisonCount.Load())
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	// Append a second durable record that must NOT be selected while intent pending.
+	appendNDurable(t, s, 1)
+	for i := 0; i < 8; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("barrier iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	if trCalls.Load() != 1 {
+		t.Fatalf("barrier must not upload a second batch: uploads=%d", trCalls.Load())
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough < 1 {
+		t.Fatalf("first watermark must remain durable underneath: %+v", st)
+	}
+}
+
+func TestIssue230PendingIntentNeverOverwrittenByLaterSuccessPath(t *testing.T) {
+	d, s, dir, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK must surface: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	origSeq, origCore, origAuth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if origSeq == 0 || !origCore || origAuth {
+		t.Fatalf("Core ACK intent: seq=%d core=%v auth=%v", origSeq, origCore, origAuth)
+	}
+
+	// Attempt to overwrite via markPendingPartialAckReconcile with different class.
+	d.markPendingPartialAckReconcile(999, false, true)
+	d.deliveryMu.RLock()
+	seq, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+	d.deliveryMu.RUnlock()
+	if seq != origSeq || coreACK != origCore || auth != origAuth {
+		t.Fatalf("intent overwritten: got seq=%d core=%v auth=%v want seq=%d core=%v auth=%v",
+			seq, coreACK, auth, origSeq, origCore, origAuth)
+	}
+
+	// Matching clear of a different seq must not erase the original intent.
+	d.clearPendingPartialAckReconcileMatching(999)
+	d.deliveryMu.RLock()
+	seq = d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if seq != origSeq {
+		t.Fatalf("non-matching clear erased intent: %d", seq)
+	}
+	_ = dir
+	_ = s
+}
+
+func TestIssue230PendingIntentPreCommitUncertaintyThenNonCommitRetry(t *testing.T) {
+	d, s, _, wrap := setupIssue230PendingIntentNoPrior413(t, "pre_commit")
+	// Force inspectors to fail on the pre-commit error path so intent is retained,
+	// then restore proof showing non-commit and allow one successful count.
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("pre-commit uncertain must surface: ok=%v err=%v", ok, err)
+	}
+	// pre_commit CompleteOutboundBatch never advances watermark; with inspectors
+	// failing, markPending retains intent. Snapshot must be uncertain DEGRADED.
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("pre-commit must not count: %d", d.Metrics().DurableAcks.Load())
+	}
+	d.deliveryMu.RLock()
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent == 0 {
+		t.Fatal("pre-commit inspector failure must retain pending intent")
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), intent)
+
+	// Authoritative non-commit proof clears intent without counting; permits retry.
+	wrap.failInspect.Store(false)
+	wrap.mode = "pre_commit"
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	ok, err = d.RunOnce(context.Background())
+	// Barrier clears on non-commit then selects batch again in same RunOnce —
+	// second CompleteOutboundBatch still pre_commit fails with proof => no pending.
+	if ok || err == nil {
+		t.Fatalf("retry pre-commit must surface: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("non-commit must not count: %d", d.Metrics().DurableAcks.Load())
+	}
+	d.deliveryMu.RLock()
+	intent = d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent != 0 {
+		t.Fatalf("authoritative non-commit must clear intent, got %d", intent)
+	}
+	st, _ := s.Stats()
+	if st.AckedThrough != 0 || st.RecordCount != 1 {
+		t.Fatalf("record must remain for retry: %+v", st)
+	}
+
+	// One successful Core ACK path counts once.
+	wrap.mode = ""
+	d.spool = s
+	ok, err = d.RunOnce(context.Background())
+	if !ok || err != nil {
+		t.Fatalf("successful retry: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 || d.Metrics().Successes.Load() != 1 {
+		t.Fatalf("one success count: acks=%d successes=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().Successes.Load())
+	}
+}
+
+func TestIssue230PendingIntentCoreAckConservationVsPoison(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	wrap.failInspect.Store(false)
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+	// Keep cleanup unresolved so deferred path installs cleanupFault after counting.
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err != nil {
+		t.Fatalf("deferred Core ACK recovery: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+		t.Fatalf("Core ACK conservation: acks=%d poison=%d auth=%d",
+			d.Metrics().DurableAcks.Load(), d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+}
+
+func TestIssue230ProvenCleanupFaultContinuesDelivery(t *testing.T) {
+	d, s, dir, _ := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("sidecar cleanup failure must surface: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("proven cleanup must count Core ACK once: %d", d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	d.deliveryMu.RLock()
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent != 0 {
+		t.Fatalf("proven path must not leave pending intent: %d", intent)
+	}
+
+	// Second record must still be deliverable under proven cleanupFault.
+	appendNDurable(t, s, 1)
+	// Use real spool CompleteOutboundBatch for the second delivery; retain cleanupFault.
+	d.spool = s
+	// Prevent cleanup recovery from clearing fault before we prove delivery continues.
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Now().Add(time.Hour)
+	d.deliveryMu.Unlock()
+	ok, err = d.RunOnce(context.Background())
+	if !ok || err != nil {
+		t.Fatalf("delivery must continue under proven cleanupFault: ok=%v err=%v", ok, err)
+	}
+	if d.Metrics().DurableAcks.Load() != 2 {
+		t.Fatalf("second delivery DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+	assertCleanupFaultDegraded(t, d.Snapshot(), 0)
+	sidecar := filepath.Join(dir, "outbound-window.json")
+	if _, err := os.Stat(sidecar); err != nil && !os.IsNotExist(err) {
+		t.Fatalf("sidecar stat: %v", err)
+	}
+}
+
+func TestIssue230PendingOnlyDegradedAndAtomicHealthTransition(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	wrap.failInspect.Store(false)
+	d.spool = &failingReconcileSpool{
+		Spool:   wrap,
+		failErr: errors.New("injected ReconcileAckedCleanup failure"),
+	}
+	d.deliveryMu.Lock()
+	d.cleanupRetryAfter = time.Time{}
+	d.deliveryMu.Unlock()
+
+	inTransition := make(chan struct{})
+	release := make(chan struct{})
+	d.duringBlockedToCleanupTransition = func() {
+		close(inTransition)
+		<-release
+	}
+
+	var runOK bool
+	var runErr error
+	var runDone sync.WaitGroup
+	runDone.Add(1)
+	go func() {
+		defer runDone.Done()
+		runOK, runErr = d.RunOnce(context.Background())
+	}()
+
+	select {
+	case <-inTransition:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for pending→cleanup transition barrier")
+	}
+
+	var snap DeliveryStatus
+	var snapDone sync.WaitGroup
+	snapDone.Add(1)
+	go func() {
+		defer snapDone.Done()
+		snap = d.Snapshot()
+	}()
+
+	close(release)
+	snapDone.Wait()
+	runDone.Wait()
+
+	if runOK || runErr != nil {
+		t.Fatalf("atomic pending recovery RunOnce: ok=%v err=%v", runOK, runErr)
+	}
+	assertCleanupFaultDegraded(t, snap, 0)
+	if snap.ReasonCode == reasonSpoolAckUncertain {
+		t.Fatalf("Snapshot must not observe pending-uncertain after consume: %+v", snap)
+	}
+	if d.Metrics().DurableAcks.Load() != 1 {
+		t.Fatalf("atomic transition DurableAcks=%d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentCancellationAndRetryPacing(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	d.cfg.InitialBackoff = time.Hour
+	d.cfg.MaxBackoff = time.Hour
+	d.jitter = func(base time.Duration, _ float64) time.Duration { return base }
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+
+	// Prime one deferred reconcile attempt so scheduleCleanupRetry latches Hour backoff.
+	ok, err = d.RunOnce(context.Background())
+	if ok || err != nil {
+		t.Fatalf("prime paced reconcile: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	retryAfter := d.cleanupRetryAfter
+	d.deliveryMu.RUnlock()
+	if retryAfter.IsZero() || !time.Now().Before(retryAfter) {
+		t.Fatalf("pending reconcile must schedule future backoff, got %v", retryAfter)
+	}
+
+	before := wrap.inspectCalls.Load()
+	for i := 0; i < 10; i++ {
+		ok, err := d.RunOnce(context.Background())
+		if ok || err != nil {
+			t.Fatalf("paced barrier iteration %d: ok=%v err=%v", i, ok, err)
+		}
+	}
+	delta := wrap.inspectCalls.Load() - before
+	// Under Hour backoff, tryReconcile must not re-probe O(1) inspectors.
+	// refreshStats may still call Stats once per RunOnce (~10); unpaced reconcile
+	// would add ~2 O(1) probes per iteration on top of Stats.
+	if delta > 14 {
+		t.Fatalf("pending reconcile O(1) inspection must be paced under backoff: delta=%d", delta)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	ok, err = d.RunOnce(ctx)
+	if ok || err == nil {
+		t.Fatalf("cancelled RunOnce must surface: ok=%v err=%v", ok, err)
+	}
+	var de *Error
+	if !errors.As(err, &de) || de.Code != CodeCancelled {
+		t.Fatalf("want CodeCancelled, got %v", err)
+	}
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("cancellation must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}
+
+func TestIssue230PendingIntentGenerationConcurrencyControls(t *testing.T) {
+	d, _, _, wrap := setupIssue230PendingIntentNoPrior413(t, "post_commit_sidecar")
+	wrap.failInspect.Store(true)
+	ok, err := d.RunOnce(context.Background())
+	if ok || err == nil {
+		t.Fatalf("uncertain Core ACK: ok=%v err=%v", ok, err)
+	}
+	d.deliveryMu.RLock()
+	genBefore := d.deliveryGen
+	d.deliveryMu.RUnlock()
+
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for j := 0; j < 30; j++ {
+				_ = d.Snapshot()
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		<-start
+		for j := 0; j < 10; j++ {
+			_, _ = d.RunOnce(context.Background())
+		}
+	}()
+	close(start)
+	wg.Wait()
+
+	assertPendingAckUncertain(t, d.Snapshot(), 1)
+	d.deliveryMu.RLock()
+	genAfter := d.deliveryGen
+	intent := d.pendingPartialAckSeq
+	d.deliveryMu.RUnlock()
+	if intent == 0 {
+		t.Fatal("concurrent barrier must retain pending intent")
+	}
+	if genAfter < genBefore {
+		t.Fatalf("deliveryGen must not regress: before=%d after=%d", genBefore, genAfter)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("concurrency must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
+	}
+}

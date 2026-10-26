@@ -289,10 +289,14 @@ public class SensorControlService {
     /**
      * Replace entity allowlist. When {@code allowAllTenantEntities} is true, allowlist is cleared
      * and the principal flag is set; otherwise the provided entity set becomes the exclusive allowlist.
+     *
+     * <p>Acquires the principal {@code FOR UPDATE} before entity existence checks or child allowlist
+     * DML and uses that locked row. The later flag UPDATE is not a substitute for this initial lock.
      */
     @Transactional("transactionManager")
     public void replaceEntityAllowlist(String sensorId, boolean allowAllTenantEntities, Set<UUID> entityIds) {
-        SensorPrincipal principal = requirePrincipal(sensorId);
+        SensorPrincipal unlocked = requirePrincipal(sensorId);
+        SensorPrincipal principal = repository.lockPrincipalForUpdate(unlocked.tenantId(), unlocked.sensorId());
         Instant now = Instant.now();
         int allowlistSize = entityIds == null ? 0 : entityIds.size();
         if (allowAllTenantEntities) {
