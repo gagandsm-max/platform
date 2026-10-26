@@ -93,6 +93,9 @@ done
 echo "--> Dev disk hygiene guardrails"
 bash "${ROOT_DIR}/tests/test-dev-disk-hygiene.sh"
 
+echo "--> Post-reboot verifier strict-auth fixtures"
+bash "${ROOT_DIR}/tests/test-post-reboot-verify.sh"
+
 echo "--> Mother Reference validator unit tests"
 python3 -m unittest discover -s "${ROOT_DIR}/project_documentation/tools" -p 'test_validate_mother_references.py' -v
 

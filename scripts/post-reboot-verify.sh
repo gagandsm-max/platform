@@ -93,41 +93,257 @@ else
     FAILED=$((FAILED + 1))
 fi
 
+# TLS trust material for HTTPS probes (server SAN includes 127.0.0.1).
+CERT_DIR="${REPO_ROOT}/deploy/docker/certs"
+CA_CERT="${CERT_DIR}/ca.crt"
+# Engineering fixture identities from DevSensorEnrollmentBootstrap (not production defaults).
+EXPECTED_SENSOR_IDENTITY="sensor-net-01"
+EXPECTED_TENANT_ID="018f0e0a-0000-7000-8000-000000000001"
+MAX_HEARTBEAT_BYTES=8192
+
+PROBE_BODY="$(mktemp)"
+cleanup_probe_body() { rm -f "${PROBE_BODY}"; }
+trap cleanup_probe_body EXIT
+
+https_probe_status() {
+    # Args: url [extra curl args...]
+    # Status-only probe: discard response body. Prints HTTP status on stdout.
+    # -q first disables ambient curlrc; --noproxy '*' keeps fixed loopback
+    # destinations off any configured proxy (does not edit user curl config).
+    local url="$1"
+    shift
+    curl -q \
+        -sS \
+        --cacert "${CA_CERT}" \
+        --noproxy '*' \
+        --connect-timeout 5 \
+        --max-time 15 \
+        -o /dev/null \
+        -w "%{http_code}" \
+        "$@" \
+        "${url}"
+}
+
+https_probe_heartbeat() {
+    # Args: url [extra curl args...]
+    # Stream the body with a hard byte ceiling. Retains at most MAX+1 bytes so
+    # the schema validator can distinguish overflow; closes the consumer early
+    # to cancel/reap the producer even when Content-Length is absent/chunked.
+    # Prints HTTP status on stdout. Returns nonzero if the body consumer fails
+    # (fail closed even when curl/HTTP would otherwise pass); otherwise curl's
+    # exit (write-error from intentional ceiling cancel is expected when
+    # retained > MAX). Capture/reap the specific consumer PID — bare wait must
+    # not ignore a failed reader/writer that left a valid-looking prefix.
+    local url="$1"
+    shift
+    local http_code_file curl_ec=0 consumer_pid="" consumer_ec=0 consumer_fd
+    http_code_file="$(mktemp)"
+    : > "${PROBE_BODY}"
+    set +e
+    exec {consumer_fd}> >(head -c "$((MAX_HEARTBEAT_BYTES + 1))" > "${PROBE_BODY}")
+    consumer_pid=$!
+    if [ -z "${consumer_pid}" ]; then
+        exec {consumer_fd}>&- 2>/dev/null
+        rm -f "${http_code_file}"
+        set -e
+        return 1
+    fi
+    # -q first disables ambient curlrc; --noproxy '*' keeps fixed loopback
+    # destinations off any configured proxy (does not edit user curl config).
+    curl -q \
+        -sS \
+        --cacert "${CA_CERT}" \
+        --noproxy '*' \
+        --connect-timeout 5 \
+        --max-time 15 \
+        -o "/dev/fd/${consumer_fd}" \
+        -w "%{http_code}" \
+        "$@" \
+        "${url}" > "${http_code_file}"
+    curl_ec=$?
+    # Close the write end so the consumer sees EOF; reap this PID specifically.
+    exec {consumer_fd}>&-
+    wait "${consumer_pid}"
+    consumer_ec=$?
+    set -e
+    cat "${http_code_file}"
+    rm -f "${http_code_file}"
+    if [ "${consumer_ec}" -ne 0 ]; then
+        return "${consumer_ec}"
+    fi
+    return "${curl_ec}"
+}
+
+probe_body_retained_bytes() {
+    wc -c < "${PROBE_BODY}" | tr -d '[:space:]'
+}
+
+validate_sensor_heartbeat_body() {
+    # Reads body path from $1. Exit 0 only for exact fixture authority + schema shape.
+    # Never prints the body. Expected identities are constants — not derived from the body.
+    local body_path="$1"
+    python3 - "${body_path}" "${EXPECTED_SENSOR_IDENTITY}" "${EXPECTED_TENANT_ID}" "${MAX_HEARTBEAT_BYTES}" <<'PY'
+import json
+import re
+import sys
+
+body_path, expected_sensor, expected_tenant, max_bytes_s = sys.argv[1:5]
+max_bytes = int(max_bytes_s)
+try:
+    with open(body_path, "rb") as fh:
+        raw = fh.read(max_bytes + 1)
+except OSError:
+    sys.exit(1)
+if len(raw) > max_bytes:
+    sys.exit(2)
+try:
+    text = raw.decode("utf-8")
+except UnicodeDecodeError:
+    sys.exit(3)
+
+def no_duplicate_keys(pairs):
+    obj = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError(f"duplicate JSON key: {key}")
+        obj[key] = value
+    return obj
+
+try:
+    obj = json.loads(text, object_pairs_hook=no_duplicate_keys)
+except Exception:
+    sys.exit(4)
+if not isinstance(obj, dict):
+    sys.exit(5)
+
+required = ("status", "authenticated", "sensor_identity", "tenant_id", "received_at")
+allowed = set(required)
+if set(obj.keys()) != allowed:
+    sys.exit(6)
+
+status = obj.get("status")
+authenticated = obj.get("authenticated")
+sensor_identity = obj.get("sensor_identity")
+tenant_id = obj.get("tenant_id")
+received_at = obj.get("received_at")
+
+if not isinstance(status, str) or status != "ACCEPTED":
+    sys.exit(7)
+if authenticated is not True:
+    sys.exit(8)
+if not isinstance(sensor_identity, str) or sensor_identity != expected_sensor:
+    sys.exit(9)
+if not isinstance(tenant_id, str) or tenant_id != expected_tenant:
+    sys.exit(10)
+if not isinstance(received_at, str):
+    sys.exit(11)
+# schemas/edge/common-definitions.schema.json#/$defs/utcTimestamp
+if not re.fullmatch(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z",
+    received_at,
+):
+    sys.exit(12)
+if not (20 <= len(received_at) <= 64):
+    sys.exit(13)
+if not (1 <= len(sensor_identity) <= 255):
+    sys.exit(14)
+if not re.fullmatch(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}",
+    tenant_id,
+):
+    sys.exit(15)
+sys.exit(0)
+PY
+}
+
+if [ ! -f "${CA_CERT}" ]; then
+    echo "[FAIL] Missing Platform CA for HTTPS verification (${CA_CERT})."
+    FAILED=$((FAILED + 1))
+fi
+
 # 5. Verify Platform Web UI HTTPS Endpoint
 echo "--> [5/7] Verifying Platform Web UI HTTPS endpoint..."
-UI_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1:23000/ || echo "000")
-if [ "${UI_STATUS}" = "200" ]; then
-    echo "[OK] Web UI HTTPS endpoint responds with HTTP 200."
-else
-    echo "[FAIL] Web UI HTTPS endpoint returned HTTP ${UI_STATUS}."
+if [ ! -f "${CA_CERT}" ]; then
+    echo "[FAIL] Web UI HTTPS probe skipped: CA certificate missing."
     FAILED=$((FAILED + 1))
+else
+    set +e
+    UI_STATUS="$(https_probe_status "https://127.0.0.1:23000/")"
+    UI_CURL_EC=$?
+    set -e
+    if [ "${UI_CURL_EC}" -ne 0 ]; then
+        echo "[FAIL] Web UI HTTPS transport failed (curl_exit=${UI_CURL_EC})."
+        FAILED=$((FAILED + 1))
+    elif [ "${UI_STATUS}" != "200" ]; then
+        echo "[FAIL] Web UI HTTPS endpoint returned HTTP ${UI_STATUS}."
+        FAILED=$((FAILED + 1))
+    else
+        echo "[OK] Web UI HTTPS endpoint responds with HTTP 200."
+    fi
 fi
 
 # 6. Verify Platform Core HTTPS Actuator Health Endpoint
 echo "--> [6/7] Verifying Platform Core direct HTTPS Actuator health..."
-CORE_HEALTH=$(curl -k -s -o /dev/null -w "%{http_code}" https://127.0.0.1:28443/actuator/health || echo "000")
-if [ "${CORE_HEALTH}" = "200" ]; then
-    echo "[OK] Core direct HTTPS endpoint responds with HTTP 200."
-else
-    echo "[FAIL] Core direct HTTPS endpoint returned HTTP ${CORE_HEALTH}."
+if [ ! -f "${CA_CERT}" ]; then
+    echo "[FAIL] Core HTTPS probe skipped: CA certificate missing."
     FAILED=$((FAILED + 1))
+else
+    set +e
+    CORE_HEALTH="$(https_probe_status "https://127.0.0.1:28443/actuator/health")"
+    CORE_CURL_EC=$?
+    set -e
+    if [ "${CORE_CURL_EC}" -ne 0 ]; then
+        echo "[FAIL] Core HTTPS transport failed (curl_exit=${CORE_CURL_EC})."
+        FAILED=$((FAILED + 1))
+    elif [ "${CORE_HEALTH}" != "200" ]; then
+        echo "[FAIL] Core direct HTTPS endpoint returned HTTP ${CORE_HEALTH}."
+        FAILED=$((FAILED + 1))
+    else
+        echo "[OK] Core direct HTTPS endpoint responds with HTTP 200."
+    fi
 fi
 
-# 7. Verify Sensor mTLS Ingestion Transport
+# 7. Verify Sensor mTLS Ingestion Transport + typed heartbeat authority
 echo "--> [7/7] Verifying Sensor -> Core mTLS transport..."
-CERT_DIR="${REPO_ROOT}/deploy/docker/certs"
-MTLS_RESP=$(curl -k -s \
-    --cert "${CERT_DIR}/sensor-net.crt" \
-    --key "${CERT_DIR}/sensor-net.key" \
-    -X POST https://127.0.0.1:28443/api/v1/sensor/heartbeat \
-    -H "Content-Type: application/json" \
-    -d '{"sensor_id":"sensor-net-01"}' || echo '{"status":"FAIL"}')
-
-if echo "${MTLS_RESP}" | grep -q '"ACCEPTED"'; then
-    echo "[OK] Sensor mTLS client certificate successfully authenticated by Core."
-else
-    echo "[FAIL] Sensor mTLS authentication failed. Response: ${MTLS_RESP}"
+SENSOR_CERT="${CERT_DIR}/sensor-net.crt"
+SENSOR_KEY="${CERT_DIR}/sensor-net.key"
+if [ ! -f "${CA_CERT}" ] || [ ! -f "${SENSOR_CERT}" ] || [ ! -f "${SENSOR_KEY}" ]; then
+    echo "[FAIL] Sensor heartbeat probe skipped: TLS material missing."
     FAILED=$((FAILED + 1))
+else
+    set +e
+    HB_STATUS="$(https_probe_heartbeat "https://127.0.0.1:28443/api/v1/sensor/heartbeat" \
+        --cert "${SENSOR_CERT}" \
+        --key "${SENSOR_KEY}" \
+        -X POST \
+        -H "Content-Type: application/json" \
+        -d '{"sensor_id":"sensor-net-01"}')"
+    HB_CURL_EC=$?
+    set -e
+    HB_RETAINED="$(probe_body_retained_bytes)"
+    # Byte-ceiling cancel closes the body pipe early; curl may then exit with a
+    # write error. Prefer the size/validation path over a false transport fail.
+    if [ "${HB_RETAINED}" -gt "${MAX_HEARTBEAT_BYTES}" ]; then
+        echo "[FAIL] Sensor heartbeat response failed authority/schema validation (code=2)."
+        FAILED=$((FAILED + 1))
+    elif [ "${HB_CURL_EC}" -ne 0 ]; then
+        echo "[FAIL] Sensor heartbeat transport failed (curl_exit=${HB_CURL_EC})."
+        FAILED=$((FAILED + 1))
+    elif [ "${HB_STATUS}" != "200" ]; then
+        echo "[FAIL] Sensor heartbeat returned HTTP ${HB_STATUS}."
+        FAILED=$((FAILED + 1))
+    else
+        set +e
+        validate_sensor_heartbeat_body "${PROBE_BODY}"
+        HB_VALID_EC=$?
+        set -e
+        if [ "${HB_VALID_EC}" -eq 0 ]; then
+            echo "[OK] Sensor mTLS heartbeat accepted with expected fixture authority."
+        else
+            echo "[FAIL] Sensor heartbeat response failed authority/schema validation (code=${HB_VALID_EC})."
+            FAILED=$((FAILED + 1))
+        fi
+    fi
 fi
 
 echo "========================================================================"
