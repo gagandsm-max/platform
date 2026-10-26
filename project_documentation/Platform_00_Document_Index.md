@@ -606,3 +606,13 @@ Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED 
 - HA ≠ DR. Deterministic RCA without mandatory LLM preserved. `REQ-MIA-033` applicability clarified (CPU-only for certified local-AI profiles), not weakened. Approved NCM Phase 1/1.5 split preserved. Platform_07 remains review-only unless a current OSS source contradiction is proven.
 
 Tranche A allowlist ownership: `AGENTS.md`, `Platform_00`, `Platform_01`, `Platform_02`, `Platform_03`, `Platform_07` (VERIFY_ONLY by default), `Platform_08`, `Platform_12`. Subsequent technical/security/sizing/specialized-master reconciliation proceeds in Tranches B–D from certified main after each gated merge.
+
+---
+
+## A.16 2026-10-26 — LLDP/CDP, dependency suppression and deterministic RCA clarification
+
+Founder requested verified LLDP/CDP support and explicit topology-first, rule-based non-AI fault isolation. These are **already specified** under REQ-NET-007 and the canonical temporal graph/RCA/alert-quality requirements. This bounded reconciliation sharpens executable behavior and negative certification tests, not product scope or implementation maturity. It introduces no new formal REQ/PRD/BUILD ID, service, OSS dependency, database, mandatory ML/GNN/LLM or change to the Phase-1 / Phase-1.5 certification envelopes. The Mother Reference set remains exactly the v3.3.0 set; v3.4.0 remains reserved under Issue #200.
+
+Governed changes are distributed to: Platform_02 product behavior (neighbors, safe downstream alerts, deterministic methods); Platform_03 graph authority and fault propagation; Platform_04 service ownership; Platform_05 collector/correlation/RCA algorithms; Platform_06 dataflow; Platform_08 traceability using existing IDs; Platform_10 protocol/security behavior; Platform_12 architecture decision; Platform_17 typed topology/incident evidence contracts; Platform_22 alert assurance and false-suppression tests.
+
+**Maturity truth:** presence of LLDP/CDP, topology, codebook and suppression text is SPECIFIED, not proof of implemented Core/Sensor adapters or tests. Production source/physical negative/capacity/tenant/security evidence is required for BUILD-041/043/046/066/072/080–084/100 certification. Device-down remains evidence qualified; LLDP/CDP adjacency does not imply a directed upstream parent or automatic child-device-down claim. Issue #211 tracks implementation-to-reference reconciliation and release gates.

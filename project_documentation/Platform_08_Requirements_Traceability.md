@@ -1194,3 +1194,19 @@ Maturity remains `SPECIFIED` until corresponding production source exists. Docum
 ## 18. v3.3.0 formal-ID allocation note
 
 ACP-001..ACP-018 adds only the collision-free IDs indexed above: `REQ-EMC-023..026`, `REQ-NET-017`, `REQ-OTEL-001..006`, `REQ-NCM-006..012`, `REQ-INT-006..013`, `REQ-CMDB-001..007` and `PRD-EMC-023..026`. Investigation Workbench remains under `REQ-RCA-012`; Path Intelligence strengthens `REQ-NET-016`; browser journeys remain `PRD-EGC-013/REQ-EGC-012`; database and virtualization depth extend `REQ-INF-007` and `REQ-INF-004`. No duplicate subsystem family is created.
+
+## 19. 2026-10-26 LLDP/CDP and deterministic RCA coverage interpretation (no new IDs)
+
+This is an interpretation/certification supplement to existing indexed IDs, NOT another formal registry, change in count (412 REQ / 205 PRD), BUILD renumbering or implementation claim.
+
+| Existing requirement | More specific acceptance/evidence obligation | Owning BUILD gate | Maturity |
+|---|---|---|---|
+| REQ-NET-007 — CDP/LLDP/ARP/FDB discovery/topology | SNMP LLDP-MIB/CISCO-CDP-MIB read-only neighbor evidence, canonical local-port/interface mapping, multi-vendor and missing/one-sided/conflicting/stale records; no cross-tenant neighbors, automatic licensing or unproven parent direction | BUILD-041/043/046, BUILD-066/072 | SPECIFIED / NOT CERTIFIED |
+| REQ-RCA-003 — edge provenance/historical graph | Typed adjacency versus directed physical/service/failure dependency, first/last observation, as-of incident snapshot, alternate paths, redundancy and confidence/quality | BUILD-072 | SPECIFIED / NOT CERTIFIED |
+| REQ-RCA-004 — deterministic hybrid RCA | Optional non-ML rule/codebook signature matrix with TRUE/FALSE/UNKNOWN symptoms, threshold/trap/syslog/diagnostic sequencing, counterevidence, version/traceability; ML/GNN/LLM can be disabled | BUILD-080–084, BUILD-100 | SPECIFIED / NOT CERTIFIED |
+| REQ-RCA-005 — causal chain, evidence and blast radius | Explicit primary candidate or INCONCLUSIVE, correlated downstream child alerts, independent path/service/Sensor validation, unknown versus down, suppression reasons/revisions and recovery checks | BUILD-082/083/084/100 | SPECIFIED / NOT CERTIFIED |
+| Existing Platform_22 PRD-MIA-001/007/008/051–057 | Evidence qualification, reversible notification-only suppression, as-of graph/redundancy counterfactuals, preserved child alert evidence, no false parent/ML causal proof | BUILD-080–084/100/101 | SPECIFIED / NOT CERTIFIED |
+
+Physical acceptance matrix: (a) LLDP/CDP cross-vendor and identity negatives; (b) core-link failure with correlated downstream UNREACHABLE and one parent incident; (c) redundant LAG/ECMP or alternate Sensor/path continuing healthy with NO false parent/outage or child mute; (d) Sensor or SNMP-auth failure producing MONITORING_DEGRADED/UNKNOWN; (e) independent downstream child outage not suppressed; (f) late/stale/flapping/conflicting graph edges and as-of RCA revision; (g) authenticated vs spoofed Trap/Syslog; (h) codebook no-match/unknown/contradiction returns INCONCLUSIVE; (i) governed diagnostic sequence, cost/rate and tenant denial; (j) source→accepted→graph→alert→incident→RCA accounting, fail/restart/replay and declared estate workload. Numeric time windows or thresholds are customer policy, not globally selected values.
+
+This supplement does NOT re-certify the earlier historical base RTM checkmarks. Production certification requires actual source, tests and security/load/failure evidence, not this document change.

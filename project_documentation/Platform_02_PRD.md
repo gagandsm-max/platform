@@ -563,6 +563,13 @@ Network discovery shall support:
 
 Discovery shall not automatically consume licences or monitor every discovered entity. Results enter a Review Queue: Provision, Leave Unmanaged, Ignore, Exclude Permanently.
 
+### 9.6.1 LLDP/CDP discovery and dependency qualification — REQ-NET-007
+
+LLDP (IEEE 802.1AB) and Cisco CDP are Phase-1 Network Sensor discovery evidence sources where target devices enable/support them. Prefer approved read-only SNMP LLDP-MIB and CISCO-CDP-MIB table reads, with capability-governed CLI/API/gNMI alternatives where supported; do not require privileged raw frame capture. Track reporting device/interface, advertised neighbor chassis/device and port, source protocol/Sensor, timestamp, TTL/freshness, quality, identity confidence and edge history. Bind local interface via reconciled interface identity rather than permanent ifIndex; treat remote advertisements as untrusted claims until tenant-scoped corroboration. Missing/disabled/stale neighbor data is UNKNOWN, not a proven link failure.
+
+LLDP/CDP reports **L2 adjacency**, not automatic parent-child outage causality. Verified directed upstream/dependent edges require additional routing/forwarding/path, power, redundant uplink, service/CMDB or governed manual evidence. Preserve one-sided/conflicting neighbors, LAG/STP/ECMP alternate paths and historical graph validity; never manufacture cross-tenant neighbors or automatically onboard/consume licences. Acceptance includes multi-vendor fixtures, reboot/port renumber, asymmetric discovery, stale/poisoned advertisements, redundant-path success, capacity limits and temporal change history. Specification does not imply an implemented collector.
+
+
 ### 9.7 Identity/deduplication
 
 Canonical entity identity shall use tenant-aware combinations of stable signals such as serial number, SNMP engine ID, sysObjectID, MAC, hardware UUID, cloud resource ID, hostname and network namespace rather than IP address alone.
@@ -1153,6 +1160,13 @@ ITSM change/maintenance windows may synchronize into Platform when configured.
 ---
 
 
+### 20.1.1 Topology-based correlated incidents and reversible downstream suppression
+
+Correlate qualified alerts by policy-defined event-time window and **incident-time validated** topology and service-dependency proximity. A verified failed core router/circuit may explain many downstream UNREACHABLE symptoms; it must not turn all child objects into DEVICE_DOWN. When independent evidence supports a shared root and redundancy/independent-child checks do not contradict it, raise a primary root incident and suppress **redundant notifications/tickets**, not source events, child alerts, device/service states or SLA evidence.
+
+Every grouped/suppressed child remains inspectable with its governing rule/version, graph revision, reason, evidence, confidence, first/last symptom time and parent incident link. Retract or revise suppression for stale/conflicting topology, alternate-path continuity, Sensor-only failure, independent downstream faults or parent recovery without child recovery. Without adequate evidence, report INCONCLUSIVE and avoid unsafe suppression. Storm windows and thresholds are governed policy, not universal hard-coded values.
+
+
 ## 21. Graph intelligence, GNN and RCA
 ### 21.1 Architecture principle
 
@@ -1211,6 +1225,13 @@ Every RCA shall expose:
 ### 21.5 Deterministic/learned separation
 
 Protocol-aware rules and canonical relationships provide deterministic constraints. Statistical/ML/GNN components provide learned scoring or anomaly evidence. The system shall never market “GNN = deterministic truth.”
+
+### 21.5.1 Five non-AI RCA engineering methods
+
+The existing BUILD-100 deterministic Core RCA shall work with ML, GNN and LLM disabled. Its five compatible methods are: (1) temporal topology and directed service-dependency fault propagation; (2) versioned if/then expert rules combining interface state, utilization, loss, CPU, latency, routing and change evidence; (3) bounded mathematical codebook/fault-signature matching using candidate faults versus expected, contradicted or missing symptoms; (4) static threshold/trap/syslog qualification with trustworthy source and counterevidence; and (5) bounded diagnostic sequences validating local Sensor/gateway health, multiple independent reachability checks and path/target verification.
+
+Codebook input uses TRUE, FALSE and UNKNOWN; stale/absent evidence cannot silently count as negative or positive. Rank candidate faults using explicit rule weights, symptom coverage, time order, graph relevance, redundancy and contradictions. A highest match is not confirmed causality; unsupported cases remain INCONCLUSIVE. Traps and syslogs may be source assertions, not automatically authenticated root-cause proof. AI baselines are optional corroborating or prioritization evidence only.
+
 
 ### 21.6 RCA quality benchmark
 
