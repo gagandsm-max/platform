@@ -113,8 +113,10 @@ class KafkaHealthHttpIntegrationTest {
                 port, path, response.statusCode(), elapsed, response.body());
         assertEquals(status, response.statusCode());
         assertTrue(elapsed < 3500, "controlled fixture response must complete within its finite allowance");
-        assertEquals(new ObjectMapper().valueToTree(Map.of("status", state)),
-                new ObjectMapper().readTree(response.body()), "anonymous probe exposes status only");
+        assertEquals(new ObjectMapper().valueToTree(Map.of("status", state,
+                        "groups", List.of("liveness", "readiness"))),
+                new ObjectMapper().readTree(response.body()),
+                "anonymous probe exposes status and public group names, without component details");
         assertTrue(response.headers().firstValue("content-type").orElse("").contains("json"));
     }
 
