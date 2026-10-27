@@ -12,6 +12,7 @@ import java.net.http.HttpResponse;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -38,14 +39,20 @@ class ClickHouseHealthIndicatorTest {
     }
 
     @Test
-    void kafkaDownHealthOmitsBootstrapServers() {
+    void kafkaFailedOrIncompleteHealthOmitsBootstrapServers() {
         KafkaHealthIndicator indicator = new KafkaHealthIndicator();
-        ReflectionTestUtils.setField(indicator, "bootstrapServers", "kafka:9092");
-        // Unreachable bootstrap in unit harness -> DOWN
-        Health health = indicator.health();
-        assertEquals(Status.DOWN, health.getStatus());
-        assertEquals(CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED, health.getDetails().get("reasonCode"));
-        assertFalse(health.getDetails().containsKey("bootstrapServers"));
-        assertFalse(health.getDetails().containsKey("error"));
+        try {
+            ReflectionTestUtils.setField(indicator, "bootstrapServers", "kafka:9092");
+            // Unreachable/slow bootstrap in the unit harness must not publish UP or leak
+            // bootstrap identity. DOWN = confirmed failure; UNKNOWN = incomplete probe evidence.
+            Health health = indicator.health();
+            assertNotEquals(Status.UP, health.getStatus());
+            assertEquals(CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED, health.getDetails().get("reasonCode"));
+            assertFalse(health.getDetails().containsKey("bootstrapServers"));
+            assertFalse(health.getDetails().containsKey("error"));
+            assertFalse(health.toString().contains("kafka:9092"));
+        } finally {
+            indicator.destroy();
+        }
     }
 }
