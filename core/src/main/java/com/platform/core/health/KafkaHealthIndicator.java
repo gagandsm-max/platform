@@ -38,9 +38,11 @@ import java.util.function.Function;
  * bounded probe worker. Stale/abandoned work cannot publish UP; the worker closes any late client.
  *
  * <p>Incomplete evidence remains classified as {@code evidenceState=UNKNOWN}, but operational
- * readiness is fail-closed via {@link Health#outOfService()} (HTTP 503 under Spring's default
- * status mapping). Confirmed broker failures remain {@link Health#down()}. {@link Health#up()}
- * is reserved for current, validated successful probes.
+ * status is fail-closed via {@link Health#outOfService()} (HTTP 503 under Spring's default
+ * status mapping). A healthy {@code ProbeResult} observed only after the HTTP caller budget
+ * expires is {@code OUT_OF_SERVICE}/{@code probeState=DEADLINE}, not {@link Health#down()}.
+ * Confirmed broker failures remain {@link Health#down()}. {@link Health#up()} is reserved for
+ * current, validated successful probes within budget.
  *
  * <p>This does not claim a universal three-second HTTP guarantee for every JVM/OS resolver.
  */
@@ -121,19 +123,29 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
             if (checkpoint != null) {
                 checkpoint.accept(session.abandoned);
             }
-            // Recheck stopped/abandoned after the wait so destroy(), deadline abandonment and
-            // concurrent completion cannot publish UP after the session becomes invalid.
+            // Recheck stopped/abandoned/deadline after the wait so destroy(), abandonment and
+            // a healthy ProbeResult observed only after the HTTP caller budget expires cannot
+            // publish UP. Late healthy evidence is OUT_OF_SERVICE/DEADLINE — never DOWN.
+            // DOWN remains reserved for confirmed probe failure.
+            boolean withinBudget = System.nanoTime() - started
+                    < TimeUnit.MILLISECONDS.toNanos(PROBE_BUDGET_MILLIS);
             if (result.healthy()
                     && !session.abandoned.get()
                     && !stopped
                     && !Thread.currentThread().isInterrupted()
-                    && System.nanoTime() - started < TimeUnit.MILLISECONDS.toNanos(PROBE_BUDGET_MILLIS)) {
+                    && withinBudget) {
                 return Health.up()
                         .withDetail("dependency", "kafka")
                         .withDetail("nodeCount", result.nodeCount())
                         .build();
             }
-            if (result.incomplete() || session.abandoned.get() || stopped) {
+            if (!withinBudget) {
+                session.abandoned.set(true);
+            }
+            if (result.incomplete()
+                    || session.abandoned.get()
+                    || stopped
+                    || (result.healthy() && !withinBudget)) {
                 String probeState = result.incomplete() && result.reason() != null
                         ? result.reason()
                         : (stopped ? "STOPPED" : "DEADLINE");

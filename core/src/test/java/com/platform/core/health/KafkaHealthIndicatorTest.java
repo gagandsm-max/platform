@@ -40,12 +40,28 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
+/**
+ * Focused Kafka health-indicator regressions.
+ *
+ * <p>Physical {@code GET /actuator/health} and {@code GET /actuator/health/readiness}
+ * servlet evidence: {@code NOT_RUN} in this lane (requires a Spring management web context
+ * without starting PostgreSQL/Kafka/ClickHouse). {@code /actuator/health} (full contributors)
+ * and {@code /actuator/health/readiness} (Spring probe group) are distinct; this suite does
+ * not claim Kafka membership in the readiness group — that is a separate architecture
+ * decision and must not be inferred from StatusHttpMapper unit coverage.
+ *
+ * <p>Permanently blocked OS DNS that never returns from {@code AdminClient.create} remains
+ * unprovable for probe-worker thread release; coverage below proves HTTP callers fail closed
+ * and that a late-returning create still cannot publish UP and still closes the client.
+ */
 @Timeout(8)
 class KafkaHealthIndicatorTest {
     private static final String SECRET = "password=private-bootstrap private-cluster-id";
     private static final List<Node> NODES = List.of(new Node(1, "private-host", 9092), new Node(2, "private-host", 9093));
     private static final SimpleHttpCodeStatusMapper HTTP_CODES = new SimpleHttpCodeStatusMapper();
     private static final SimpleStatusAggregator STATUS_AGGREGATOR = new SimpleStatusAggregator();
+    // Physical Actuator HTTP GET evidence gate — preserved pending; not exercised here.
+    static final String ACTUATOR_HTTP_GET_EVIDENCE = "NOT_RUN";
 
     @AfterEach
     void clearTestInterruption() {
@@ -135,19 +151,62 @@ class KafkaHealthIndicatorTest {
     }
 
     @Test
-    void incompleteEvidenceMapsToActuatorHttp503Not200() throws Exception {
+    void incompleteEvidenceMapsThroughStatusHttpMapperTo503Not200() throws Exception {
+        // StatusHttpMapper / StatusAggregator unit coverage only — not a physical
+        // GET /actuator/health exchange and not a claim that Kafka is in
+        // /actuator/health/readiness. Physical Actuator HTTP GET: NOT_RUN.
+        assertEquals("NOT_RUN", ACTUATOR_HTTP_GET_EVIDENCE);
         try (Fixture f = new Fixture()) {
             f.creationDelayMillis = 3100;
             Health health = f.indicator.health();
             assertFailClosedIncomplete(health, "DEADLINE");
             assertEquals(503, HTTP_CODES.getStatusCode(health.getStatus()),
-                    "OUT_OF_SERVICE must fail closed under Spring's default StatusHttpMapper");
+                    "OUT_OF_SERVICE maps to HTTP 503 under Spring's default StatusHttpMapper");
             assertEquals(200, HTTP_CODES.getStatusCode(Status.UNKNOWN),
-                    "baseline: UNKNOWN alone maps to HTTP 200 — must not be the operational readiness status");
+                    "baseline: UNKNOWN alone maps to HTTP 200 — must not be the operational status");
             Status aggregated = STATUS_AGGREGATOR.getAggregateStatus(Status.UP, health.getStatus());
             assertEquals(Status.OUT_OF_SERVICE, aggregated);
             assertEquals(503, HTTP_CODES.getStatusCode(aggregated),
-                    "aggregated readiness with incomplete Kafka evidence must remain HTTP 503");
+                    "composite status aggregation with incomplete Kafka evidence maps to HTTP 503");
+            assertTrue(awaitReleased(f, 5000));
+        }
+    }
+
+    @Test
+    void healthyResultResumedAfterCallerDeadlineIsOutOfServiceDeadlineNotDown() throws Exception {
+        try (Fixture f = new Fixture()) {
+            CountDownLatch atCheckpoint = new CountDownLatch(1);
+            CountDownLatch allowReturn = new CountDownLatch(1);
+            f.indicator.afterProbeResultCheckpoint = abandoned -> {
+                atCheckpoint.countDown();
+                try {
+                    assertTrue(allowReturn.await(10, TimeUnit.SECONDS));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            };
+            ExecutorService caller = Executors.newSingleThreadExecutor();
+            try {
+                long started = System.nanoTime();
+                Future<Health> pending = caller.submit(f.indicator::health);
+                assertTrue(atCheckpoint.await(3, TimeUnit.SECONDS),
+                        "must hold after observing a healthy ProbeResult");
+                // Expire the HTTP caller budget while still holding the healthy result.
+                long remaining = TimeUnit.MILLISECONDS.toNanos(2600) - (System.nanoTime() - started);
+                if (remaining > 0) {
+                    TimeUnit.NANOSECONDS.sleep(remaining);
+                }
+                allowReturn.countDown();
+                Health health = pending.get(3, TimeUnit.SECONDS);
+                assertNotEquals(Status.UP, health.getStatus(), "late healthy resume must not publish UP");
+                assertNotEquals(Status.DOWN, health.getStatus(),
+                        "DOWN is reserved for confirmed probe failure; late healthy is incomplete");
+                assertFailClosedIncomplete(health, "DEADLINE");
+            } finally {
+                allowReturn.countDown();
+                caller.shutdownNow();
+            }
             assertTrue(awaitReleased(f, 5000));
         }
     }
@@ -170,7 +229,10 @@ class KafkaHealthIndicatorTest {
                 assertTrue(createEntered.await(2, TimeUnit.SECONDS), "probe worker must enter create");
                 assertEquals(1, f.createCount.get(), "repeated requests must not start parallel AdminClient.create calls");
                 assertTrue(f.indicator.probePoolSize() <= 1);
-                assertTrue(f.indicator.inFlightWaiters() <= KafkaHealthIndicator.MAX_HTTP_WAITERS);
+                // Join barrier: all intended callers must be waiters before create is released.
+                assertTrue(awaitWaitersAtLeast(f.indicator, KafkaHealthIndicator.MAX_HTTP_WAITERS, 2000),
+                        "all coalesced callers must join the in-flight probe before create proceeds");
+                assertEquals(KafkaHealthIndicator.MAX_HTTP_WAITERS, f.indicator.inFlightWaiters());
                 releaseCreate.countDown();
                 for (Future<Health> future : futures) {
                     Health health = future.get(5, TimeUnit.SECONDS);
@@ -384,6 +446,72 @@ class KafkaHealthIndicatorTest {
                 caller.shutdownNow();
             }
             assertTrue(awaitReleased(f, 5000));
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void uninterruptibleConstructorIgnoresInterruptAndStillCannotPublishLateUp() throws Exception {
+        // Simulates AdminClient.create / OS DNS that clears/ignores Thread.interrupt and
+        // eventually returns. Permanently blocked OS DNS that never returns remains
+        // unprovable for probe-worker thread release (documented NOT_PROVABLE below).
+        try (Fixture f = new Fixture()) {
+            CountDownLatch createEntered = new CountDownLatch(1);
+            CountDownLatch releaseCreate = new CountDownLatch(1);
+            AtomicInteger interruptsCleared = new AtomicInteger();
+            f.createHook = () -> {
+                createEntered.countDown();
+                while (true) {
+                    try {
+                        if (releaseCreate.await(50, TimeUnit.MILLISECONDS)) {
+                            return;
+                        }
+                    } catch (InterruptedException ignored) {
+                        // Swallow — uninterruptible create continues until release.
+                        interruptsCleared.incrementAndGet();
+                    }
+                    if (Thread.interrupted()) {
+                        interruptsCleared.incrementAndGet();
+                    }
+                }
+            };
+            ExecutorService caller = Executors.newSingleThreadExecutor();
+            try {
+                Future<Health> pending = caller.submit(f.indicator::health);
+                assertTrue(createEntered.await(2, TimeUnit.SECONDS));
+                f.indicator.destroy();
+                Health whileBlocked = pending.get(5, TimeUnit.SECONDS);
+                assertFailClosedIncomplete(whileBlocked, "STOPPED");
+                assertTrue(interruptsCleared.get() >= 1,
+                        "destroy/shutdownNow must interrupt the stuck probe worker");
+                releaseCreate.countDown();
+                assertTrue(awaitReleased(f, 5000), "late-returning create must still close the client");
+                assertCloseDuration(f.admin);
+                Health afterStop = f.indicator.health();
+                assertFailClosedIncomplete(afterStop, "STOPPED");
+                assertNotEquals(Status.UP, afterStop.getStatus());
+            } finally {
+                releaseCreate.countDown();
+                caller.shutdownNow();
+            }
+        }
+        // NOT_PROVABLE under permanently blocked OS DNS: the single probe worker may remain
+        // inside AdminClient.create forever; this lane only proves fail-closed HTTP waiters
+        // and that a late-returning create cannot publish UP and still closes the client.
+    }
+
+    @Test
+    void destroyAfterHealthyProbeCompletionStillGuaranteesNoLateUpOnReuse() throws Exception {
+        try (Fixture f = new Fixture()) {
+            Health first = f.indicator.health();
+            assertEquals(Status.UP, first.getStatus());
+            assertTrue(awaitReleased(f, 5000));
+            f.indicator.destroy();
+            Health afterDestroy = f.indicator.health();
+            assertFailClosedIncomplete(afterDestroy, "STOPPED");
+            assertNotEquals(Status.UP, afterDestroy.getStatus(),
+                    "post-destroy health must never publish UP even after a prior healthy probe");
+            assertEquals(1, f.createCount.get(), "stopped indicator must not start a new create");
         }
     }
 
