@@ -92,6 +92,7 @@ done
 
 echo "--> Dev disk hygiene guardrails"
 bash "${ROOT_DIR}/tests/test-dev-disk-hygiene.sh"
+bash "${ROOT_DIR}/tests/test-kafka-health-probe-bounds.sh"
 
 echo "--> Post-reboot verifier strict-auth fixtures"
 bash "${ROOT_DIR}/tests/test-post-reboot-verify.sh"
