@@ -674,20 +674,27 @@ class KafkaHealthIndicatorTest {
                 assertTrue(releaseCreate.await(5, TimeUnit.SECONDS));
             };
             ExecutorService caller = Executors.newSingleThreadExecutor();
+            ExecutorService destroyer = Executors.newSingleThreadExecutor();
             try {
                 Future<Health> pending = caller.submit(f.indicator::health);
                 assertTrue(createEntered.await(2, TimeUnit.SECONDS));
-                f.indicator.destroy();
-                Health health = pending.get(3, TimeUnit.SECONDS);
-                assertNotEquals(Status.UP, health.getStatus());
+                // Keep the constructor held until STOPPED reaches the waiter, then
+                // return the client before shutdownNow interrupts this interruptible fixture.
+                Future<?> destroyDone = destroyer.submit(f.indicator::destroy);
+                Health health = pending.get(1, TimeUnit.SECONDS);
+                assertFailClosedIncomplete(health, "STOPPED");
+                assertFalse(destroyDone.isDone(), "shutdown must still await the held constructor");
                 releaseCreate.countDown();
+                destroyDone.get(3, TimeUnit.SECONDS);
                 assertTrue(awaitReleased(f, 5000));
+                assertClosedOnce(f);
                 assertTrue(f.indicator.probePoolSize() <= 1);
                 Health afterStop = f.indicator.health();
                 assertFailClosedIncomplete(afterStop, "STOPPED");
             } finally {
                 releaseCreate.countDown();
                 caller.shutdownNow();
+                destroyer.shutdownNow();
             }
         }
     }
