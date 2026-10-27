@@ -845,7 +845,7 @@ class KafkaHealthIndicatorTest {
         volatile RuntimeException creationFailure;
         volatile CreateHook createHook;
 
-        Fixture() {
+        Fixture() throws Exception {
             when(admin.describeCluster()).thenReturn(cluster);
             when(cluster.nodes()).thenReturn(nodes);
             when(cluster.clusterId()).thenReturn(clusterId);
