@@ -520,7 +520,12 @@ case "\$cmd" in
         echo "RM_CALLED" >>"${stub_logfail}/rm.log"
         exit 0
         ;;
-    kill|inspect)
+    kill)
+        exit 0
+        ;;
+    inspect)
+        # wait already returned; retain path must see a stopped owned container.
+        echo false
         exit 0
         ;;
     *)
@@ -557,7 +562,7 @@ rm -rf "$wrap_logfail" "$stub_logfail"
 # ---- Wrapper: host cancellation while owned child ignores soft signal (F01/F02) ----
 # Exercises production platform_ui_typecheck_docker under a responsive daemon.
 # PID1 ignores TERM so soft-signal alone would hang unbounded docker wait;
-# finite cancel budget must force-remove and return promptly. Log finalization
+# finite cancel budget must escalate-stop and return promptly. Log finalization
 # must run before deleting the only log source (cancel-path F02).
 wrap_cancel="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-cancel.XXXXXX")"
 make_wrapper_root "$wrap_cancel"
@@ -566,7 +571,7 @@ cancel_log="${wrap_cancel}/wrapper.out"
 CANCEL_BUDGET_DECLARED=$cancel_budget
 set +e
 # Background the wrapper bash itself so TERM reaches the trap owner (F01).
-# PID1 inside the container ignores TERM; budgeted force-rm must still return.
+# PID1 inside the container ignores TERM; budgeted escalate-stop must still return.
 UI_TYPECHECK_CANCEL_BUDGET_SEC="$cancel_budget" \
 UI_TYPECHECK_LOG_DRAIN_BUDGET_SEC=2 \
 UI_TYPECHECK_REMOTE_CMD='trap "" TERM; set +e; . /runner/run-ui-typecheck.sh; platform_ui_typecheck_run_phases' \
@@ -658,6 +663,166 @@ else
     fi
 fi
 rm -rf "$wrap_cancel"
+
+# ---- Wrapper: TERM-ignore + failed follow + failed snapshot (stop-before-retain) ----
+# Combined cancel regression with fake Docker: soft signal leaves the workload
+# running; escalate must stop the owned cid before log finalization. Follow and
+# final snapshot both fail so evidence is retained. Assert STOPPED state from the
+# stub BEFORE fixture cleanup — must not go green merely because cleanup rm -f
+# later removes a still-running container.
+stub_cancel_logs="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-docker-cancel-logs.XXXXXX")"
+cat >"${stub_cancel_logs}/docker" <<EOF
+#!/bin/bash
+cmd="\${1:-}"
+shift || true
+state_file="${stub_cancel_logs}/running.state"
+kill_log="${stub_cancel_logs}/kill.log"
+rm_log="${stub_cancel_logs}/rm.log"
+case "\$cmd" in
+    run)
+        echo true >"\$state_file"
+        echo "stubcid-cancel-logs-\$\$"
+        exit 0
+        ;;
+    wait)
+        # Soft-cancelled path kills this waiter; do not exit on its own.
+        sleep 120
+        exit 0
+        ;;
+    logs)
+        follow=0
+        for a in "\$@"; do
+            [ "\$a" = "-f" ] && follow=1
+        done
+        if [ "\$follow" -eq 1 ]; then
+            echo "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" >&2
+            exit 1
+        fi
+        echo "Error: cannot read container logs" >&2
+        exit 1
+        ;;
+    kill)
+        sig="KILL"
+        target=""
+        while [ "\$#" -gt 0 ]; do
+            case "\$1" in
+                -s)
+                    shift
+                    sig="\${1:-KILL}"
+                    shift || true
+                    ;;
+                *)
+                    target="\$1"
+                    shift || true
+                    ;;
+            esac
+        done
+        echo "sig=\$sig target=\$target" >>"\$kill_log"
+        case "\$sig" in
+            KILL|SIGKILL|9)
+                echo false >"\$state_file"
+                ;;
+            *)
+                # Soft signal (TERM/15/INT/...): TERM-ignoring workload stays up.
+                echo true >"\$state_file"
+                ;;
+        esac
+        exit 0
+        ;;
+    inspect)
+        if [ -f "\$state_file" ]; then
+            cat "\$state_file"
+        else
+            echo unknown
+        fi
+        exit 0
+        ;;
+    rm)
+        echo "RM_CALLED" >>"\$rm_log"
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "${stub_cancel_logs}/docker"
+: >"${stub_cancel_logs}/kill.log"
+: >"${stub_cancel_logs}/rm.log"
+echo true >"${stub_cancel_logs}/running.state"
+wrap_cancel_logs="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-cancel-logs.XXXXXX")"
+make_wrapper_root "$wrap_cancel_logs"
+cancel_logs_budget=2
+cancel_logs_out_file="${wrap_cancel_logs}/wrapper.out"
+set +e
+PATH="${stub_cancel_logs}:$PATH" \
+UI_TYPECHECK_CANCEL_BUDGET_SEC="$cancel_logs_budget" \
+UI_TYPECHECK_LOG_DRAIN_BUDGET_SEC=1 \
+bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+    bash "$HELPER" "$wrap_cancel_logs" >"$cancel_logs_out_file" 2>&1 &
+cancel_logs_pid=$!
+# Allow run + log follower to start, then TERM the trap-owning wrapper.
+for _ in $(seq 1 50); do
+    if grep -Fq 'UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL' "$cancel_logs_out_file" 2>/dev/null; then
+        break
+    fi
+    if ! kill -0 "$cancel_logs_pid" 2>/dev/null; then
+        break
+    fi
+    sleep 0.1
+done
+cancel_logs_t0=$SECONDS
+kill -TERM "$cancel_logs_pid" 2>/dev/null || true
+wait "$cancel_logs_pid"
+cancel_logs_rc=$?
+cancel_logs_elapsed=$((SECONDS - cancel_logs_t0))
+set -e
+cancel_logs_out="$(cat "$cancel_logs_out_file")"
+# Capture owned workload state BEFORE any fixture cleanup can mask a leak.
+cancel_logs_running_before_cleanup="$(cat "${stub_cancel_logs}/running.state" 2>/dev/null || echo missing)"
+cancel_logs_kill_log="$(cat "${stub_cancel_logs}/kill.log" 2>/dev/null || true)"
+cancel_logs_rm_log="$(cat "${stub_cancel_logs}/rm.log" 2>/dev/null || true)"
+echo "---- wrapper cancel+log-fail retain stopped: exit=${cancel_logs_rc} elapsed_s=${cancel_logs_elapsed} ----"
+printf '%s\n' "$cancel_logs_out"
+echo "---- stub kill log ----"
+printf '%s\n' "$cancel_logs_kill_log"
+echo "running.state before fixture cleanup=${cancel_logs_running_before_cleanup}"
+
+case "$cancel_logs_rc" in
+    143|15) pass "wrapper/cancel-logfail/host-term-exit exit=${cancel_logs_rc}" ;;
+    *) fail "wrapper/cancel-logfail/host-term-exit unexpected exit=${cancel_logs_rc}" ;;
+esac
+cancel_logs_slack=$((cancel_logs_budget + 10))
+if [ "$cancel_logs_elapsed" -le "$cancel_logs_slack" ]; then
+    pass "wrapper/cancel-logfail/within-budget elapsed_s=${cancel_logs_elapsed}"
+else
+    fail "wrapper/cancel-logfail/within-budget elapsed_s=${cancel_logs_elapsed} slack=${cancel_logs_slack}"
+fi
+assert_contains "wrapper/cancel-logfail/escalated" "UI_TYPECHECK_CANCEL_ESCALATED" "$cancel_logs_out"
+assert_contains "wrapper/cancel-logfail/stopped-marker" "UI_TYPECHECK_CANCEL_STOPPED" "$cancel_logs_out"
+assert_not_contains "wrapper/cancel-logfail/no-stop-unverified" "UI_TYPECHECK_CANCEL_STOP_UNVERIFIED" "$cancel_logs_out"
+assert_contains "wrapper/cancel-logfail/logs-incomplete" "UI_TYPECHECK_LOGS_INCOMPLETE" "$cancel_logs_out"
+assert_contains "wrapper/cancel-logfail/cleanup-retained" "UI_TYPECHECK_CLEANUP_RETAINED" "$cancel_logs_out"
+assert_not_contains "wrapper/cancel-logfail/no-cleanup-uncertain" "UI_TYPECHECK_CLEANUP_UNCERTAIN" "$cancel_logs_out"
+# Soft TERM/15 must have been sent, then hard KILL escalation.
+if grep -Eq 'sig=(15|TERM|SIGTERM) ' <<<"$cancel_logs_kill_log" \
+    && grep -Eq 'sig=KILL ' <<<"$cancel_logs_kill_log"; then
+    pass "wrapper/cancel-logfail/soft-then-kill-recorded"
+else
+    fail "wrapper/cancel-logfail/soft-then-kill-recorded kill_log=${cancel_logs_kill_log}"
+fi
+# Critical: stopped BEFORE fixture cleanup (not merely after rm -f of leftovers).
+if [ "$cancel_logs_running_before_cleanup" = "false" ]; then
+    pass "wrapper/cancel-logfail/stopped-before-fixture-cleanup"
+else
+    fail "wrapper/cancel-logfail/stopped-before-fixture-cleanup state=${cancel_logs_running_before_cleanup}"
+fi
+if [ -s "${stub_cancel_logs}/rm.log" ] || [ -n "$cancel_logs_rm_log" ]; then
+    fail "wrapper/cancel-logfail/no-rm-while-retained unexpectedly removed container"
+else
+    pass "wrapper/cancel-logfail/no-rm-while-retained"
+fi
+rm -rf "$wrap_cancel_logs" "$stub_cancel_logs"
 
 echo "========================================================================"
 echo "UI typecheck phase-diagnostics harness: PASSED=${PASSED} FAILED=${FAILED}"

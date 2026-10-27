@@ -108,8 +108,9 @@ platform_ui_typecheck_run_phases() {
 }
 
 # Finite soft-signal cancellation budget (seconds) under a responsive Docker
-# daemon. After the soft signal, cleanup force-removes the owned container if
-# it has not exited. Daemon-unreachable cleanup remains uncertain.
+# daemon. After the soft signal expires, cancel escalates to a hard stop of the
+# owned workload, then finalizes logs before any remove/retain decision.
+# Daemon-unreachable stop/cleanup remains uncertain.
 # UI_TYPECHECK_CANCEL_BUDGET_SEC may override for harness injection.
 platform_ui_typecheck_cancel_budget_sec() {
     local v="${UI_TYPECHECK_CANCEL_BUDGET_SEC:-8}"
@@ -130,9 +131,10 @@ platform_ui_typecheck_log_drain_budget_sec() {
 }
 
 # Containerized runner. Preserves docker/child exit. Forwards TERM/INT/HUP to
-# the owned container with a finite cancellation budget, drains terminal logs
-# before deleting the container, and distinguishes Docker CLI/transport failure
-# from a validated container exit status. Does not log env/credentials.
+# the owned container with a finite soft-signal budget, escalates to a hard stop
+# of that owned workload if still running, drains terminal logs before any
+# delete/retain decision, and distinguishes Docker CLI/transport failure from a
+# validated container exit status. Does not log env/credentials.
 platform_ui_typecheck_docker() {
     local root_dir="$1"
     local image="${UI_TYPECHECK_IMAGE:-node:20-alpine}"
@@ -259,12 +261,26 @@ platform_ui_typecheck_docker() {
 
     _platform_ui_typecheck_cleanup_owned() {
         # Never delete the log source until finalization completes or explicit
-        # retain-for-evidence is recorded.
+        # retain-for-evidence is recorded. Retained evidence must be a stopped
+        # (or explicitly uncertain) owned container — never claim cleanup success
+        # while the workload is still running/unknown.
+        local retain_state=""
         _platform_ui_typecheck_finalize_logs "$drain_budget" || true
         if [ "$retain_container" -eq 0 ]; then
             _platform_ui_typecheck_force_rm
         elif [ -n "$cid" ]; then
-            printf 'UI_TYPECHECK_CLEANUP_RETAINED container=%s reason=incomplete_logs\n' "$cid" >&2
+            retain_state="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+            case "$retain_state" in
+                false|False)
+                    printf 'UI_TYPECHECK_CLEANUP_RETAINED container=%s reason=incomplete_logs\n' "$cid" >&2
+                    ;;
+                true|True)
+                    printf 'UI_TYPECHECK_CLEANUP_UNCERTAIN container=%s reason=incomplete_logs_still_running\n' "$cid" >&2
+                    ;;
+                *)
+                    printf 'UI_TYPECHECK_CLEANUP_UNCERTAIN container=%s reason=incomplete_logs_state_unknown\n' "$cid" >&2
+                    ;;
+            esac
         fi
         if [ -n "$log_file" ]; then
             rm -f "$log_file" >/dev/null 2>&1 || true
@@ -272,21 +288,65 @@ platform_ui_typecheck_docker() {
         fi
     }
 
+    # Soft-signal the owned container, then escalate to a hard stop if it is
+    # still running when the cancel budget expires. Preserves the container
+    # object for log recovery; removal is never a substitute for stopping.
+    _platform_ui_typecheck_stop_owned_for_cancel() {
+        local soft_sig="$1"
+        local i=0
+        local running_state=""
+        local escalate_budget=3
+
+        docker kill -s "$soft_sig" "$cid" >/dev/null 2>&1 || true
+        # Finite soft-signal wait; do not unbounded docker wait (F01).
+        while [ "$i" -lt "$cancel_budget" ]; do
+            _platform_ui_typecheck_emit_new_logs
+            case "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo false)" in
+                true|True) ;;
+                *) break ;;
+            esac
+            sleep 1
+            i=$((i + 1))
+        done
+
+        running_state="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+        case "$running_state" in
+            true|True)
+                # Soft budget exhausted on a TERM-ignoring workload: SIGKILL the
+                # exact owned cid only. Do not rm here — logs need the object.
+                printf 'UI_TYPECHECK_CANCEL_ESCALATED container=%s signal=KILL\n' "$cid" >&2
+                docker kill "$cid" >/dev/null 2>&1 || true
+                i=0
+                while [ "$i" -lt "$escalate_budget" ]; do
+                    _platform_ui_typecheck_emit_new_logs
+                    case "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo false)" in
+                        true|True) ;;
+                        *) break ;;
+                    esac
+                    sleep 1
+                    i=$((i + 1))
+                done
+                ;;
+        esac
+
+        running_state="$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo unknown)"
+        case "$running_state" in
+            false|False)
+                printf 'UI_TYPECHECK_CANCEL_STOPPED container=%s\n' "$cid" >&2
+                ;;
+            true|True)
+                printf 'UI_TYPECHECK_CANCEL_STOP_UNVERIFIED container=%s state=running\n' "$cid" >&2
+                ;;
+            *)
+                printf 'UI_TYPECHECK_CANCEL_STOP_UNVERIFIED container=%s state=unknown\n' "$cid" >&2
+                ;;
+        esac
+    }
+
     _platform_ui_typecheck_bounded_cancel() {
         local sig="$1"
-        local i=0
         if [ -n "$cid" ]; then
-            docker kill -s "$sig" "$cid" >/dev/null 2>&1 || true
-            # Finite soft-signal wait; do not unbounded docker wait (F01).
-            while [ "$i" -lt "$cancel_budget" ]; do
-                _platform_ui_typecheck_emit_new_logs
-                case "$(docker inspect -f '{{.State.Running}}' "$cid" 2>/dev/null || echo false)" in
-                    true|True) ;;
-                    *) break ;;
-                esac
-                sleep 1
-                i=$((i + 1))
-            done
+            _platform_ui_typecheck_stop_owned_for_cancel "$sig"
         fi
         if [ -n "$wait_pid" ]; then
             kill "$wait_pid" >/dev/null 2>&1 || true
@@ -294,6 +354,8 @@ platform_ui_typecheck_docker() {
             wait_pid=""
         fi
         # Same evidence rule as the normal path: finalize before delete (F02).
+        # Workload stop already attempted above so retention is of a stopped
+        # container when escalation succeeds.
         _platform_ui_typecheck_cleanup_owned
     }
 
