@@ -277,7 +277,7 @@ public class SensorControlService {
         }
         auditEmitter.emitControlEvent(
                 AuditCategory.SECURITY_ADMINISTRATION,
-                AuditActions.SENSOR_DISABLE,
+                AuditActions.SENSOR_REVOKE,
                 AuditOutcome.SUCCESS,
                 principal.tenantId(),
                 "SENSOR_REVOKED",
