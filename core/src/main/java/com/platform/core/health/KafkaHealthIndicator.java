@@ -26,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
 import java.util.function.Function;
 
 /**
@@ -35,6 +36,11 @@ import java.util.function.Function;
  * {@code request.timeout.ms}, future deadlines or {@code Thread.interrupt()}. The Actuator HTTP
  * thread therefore never constructs the client itself: it only waits a finite budget for the
  * bounded probe worker. Stale/abandoned work cannot publish UP; the worker closes any late client.
+ *
+ * <p>Incomplete evidence remains classified as {@code evidenceState=UNKNOWN}, but operational
+ * readiness is fail-closed via {@link Health#outOfService()} (HTTP 503 under Spring's default
+ * status mapping). Confirmed broker failures remain {@link Health#down()}. {@link Health#up()}
+ * is reserved for current, validated successful probes.
  *
  * <p>This does not claim a universal three-second HTTP guarantee for every JVM/OS resolver.
  */
@@ -47,6 +53,8 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
     private static final long CLOSE_CAP_MILLIS = 100;
     private static final long WORK_BUDGET_NANOS = TimeUnit.MILLISECONDS.toNanos(PROBE_BUDGET_MILLIS - CLOSE_CAP_MILLIS);
     private static final String PROBE_THREAD_NAME = "core-kafka-health-probe";
+    // Hard cap on Actuator threads waiting on one in-flight probe (no unbounded join pile-up).
+    static final int MAX_HTTP_WAITERS = 8;
 
     @Value("${spring.kafka.bootstrap-servers:kafka:9092}")
     private String bootstrapServers;
@@ -57,6 +65,10 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
     private final AtomicInteger probeThreadsLive = new AtomicInteger();
     private volatile boolean stopped;
     private ProbeSession inFlight;
+    // Package-visible deterministic race seam for focused tests only.
+    // Receives the active session's abandoned flag so tests can race destroy/deadline
+    // after a healthy ProbeResult is observed but before UP is published.
+    volatile Consumer<AtomicBoolean> afterProbeResultCheckpoint;
 
     public KafkaHealthIndicator() {
         this(AdminClient::create);
@@ -97,33 +109,23 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
             return failed();
         }
 
-        ProbeSession session;
-        synchronized (probeLock) {
-            if (stopped) {
-                return incomplete("STOPPED");
-            }
-            if (inFlight != null && !inFlight.future.isDone()) {
-                session = inFlight;
-            } else {
-                session = new ProbeSession();
-                try {
-                    probeExecutor.execute(() -> runProbe(session));
-                    inFlight = session;
-                } catch (RejectedExecutionException rejected) {
-                    // Worker may still be exiting after clearing inFlight, or stuck after
-                    // abandon. Prefer an existing in-flight session; otherwise fail closed.
-                    if (inFlight != null && !inFlight.future.isDone()) {
-                        session = inFlight;
-                    } else {
-                        return incomplete("BUSY");
-                    }
-                }
-            }
+        SessionAcquisition acquisition = acquireSession();
+        if (acquisition.session() == null) {
+            return acquisition.failure();
         }
+        ProbeSession session = acquisition.session();
 
         try {
             ProbeResult result = session.future.get(remainingWorkNanos(started), TimeUnit.NANOSECONDS);
+            Consumer<AtomicBoolean> checkpoint = afterProbeResultCheckpoint;
+            if (checkpoint != null) {
+                checkpoint.accept(session.abandoned);
+            }
+            // Recheck stopped/abandoned after the wait so destroy(), deadline abandonment and
+            // concurrent completion cannot publish UP after the session becomes invalid.
             if (result.healthy()
+                    && !session.abandoned.get()
+                    && !stopped
                     && !Thread.currentThread().isInterrupted()
                     && System.nanoTime() - started < TimeUnit.MILLISECONDS.toNanos(PROBE_BUDGET_MILLIS)) {
                 return Health.up()
@@ -131,8 +133,11 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
                         .withDetail("nodeCount", result.nodeCount())
                         .build();
             }
-            if (result.incomplete()) {
-                return incomplete(result.reason());
+            if (result.incomplete() || session.abandoned.get() || stopped) {
+                String probeState = result.incomplete() && result.reason() != null
+                        ? result.reason()
+                        : (stopped ? "STOPPED" : "DEADLINE");
+                return incomplete(probeState);
             }
             return failed();
         } catch (TimeoutException timeout) {
@@ -145,7 +150,47 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
         } catch (ExecutionException execution) {
             session.abandoned.set(true);
             return failed();
+        } finally {
+            session.releaseWaiter();
         }
+    }
+
+    private SessionAcquisition acquireSession() {
+        synchronized (probeLock) {
+            if (stopped) {
+                return SessionAcquisition.rejected(incomplete("STOPPED"));
+            }
+            if (inFlight != null && !inFlight.future.isDone()) {
+                return joinExisting(inFlight);
+            }
+            ProbeSession created = new ProbeSession();
+            if (!created.tryAcquireWaiter()) {
+                return SessionAcquisition.rejected(incomplete("BUSY"));
+            }
+            try {
+                // Capture effectively-final 'created' — never reassign the lambda target.
+                probeExecutor.execute(() -> runProbe(created));
+                inFlight = created;
+                return SessionAcquisition.joined(created);
+            } catch (RejectedExecutionException rejected) {
+                created.releaseWaiter();
+                if (inFlight != null && !inFlight.future.isDone()) {
+                    return joinExisting(inFlight);
+                }
+                return SessionAcquisition.rejected(incomplete("BUSY"));
+            }
+        }
+    }
+
+    private SessionAcquisition joinExisting(ProbeSession existing) {
+        if (existing.abandoned.get()) {
+            // Known-abandoned/stale probe: fail closed promptly; do not re-wait the budget.
+            return SessionAcquisition.rejected(incomplete(stopped ? "STOPPED" : "DEADLINE"));
+        }
+        if (!existing.tryAcquireWaiter()) {
+            return SessionAcquisition.rejected(incomplete("BUSY"));
+        }
+        return SessionAcquisition.joined(existing);
     }
 
     @Override
@@ -185,6 +230,12 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
     boolean hasInFlightProbe() {
         synchronized (probeLock) {
             return inFlight != null && !inFlight.future.isDone();
+        }
+    }
+
+    int inFlightWaiters() {
+        synchronized (probeLock) {
+            return inFlight == null ? 0 : inFlight.httpWaiters.get();
         }
     }
 
@@ -278,12 +329,13 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
         } finally {
             MDC.remove(SupportabilityMdcKeys.EVENT_CODE);
         }
-        // UNKNOWN = incomplete evidence (deadline/backpressure/shutdown). Not UP.
-        // Confirmed broker failure remains DOWN. No universal HTTP-code claim is made here:
-        // Spring's default StatusHttpMapper leaves UNKNOWN as non-503 unless separately mapped.
-        return Health.unknown()
+        // evidenceState remains UNKNOWN (incomplete evidence). Operational readiness is
+        // fail-closed via OUT_OF_SERVICE so Spring's default StatusHttpMapper yields HTTP 503.
+        // Confirmed broker failure remains DOWN. UP is only for validated successful probes.
+        return Health.outOfService()
                 .withDetail("dependency", "kafka")
                 .withDetail("reasonCode", CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED)
+                .withDetail("evidenceState", "UNKNOWN")
                 .withDetail("probeState", probeState)
                 .build();
     }
@@ -308,9 +360,36 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
         return Duration.ofMillis(millis);
     }
 
+    private record SessionAcquisition(ProbeSession session, Health failure) {
+        static SessionAcquisition joined(ProbeSession session) {
+            return new SessionAcquisition(session, null);
+        }
+
+        static SessionAcquisition rejected(Health failure) {
+            return new SessionAcquisition(null, failure);
+        }
+    }
+
     private static final class ProbeSession {
         private final CompletableFuture<ProbeResult> future = new CompletableFuture<>();
         private final AtomicBoolean abandoned = new AtomicBoolean();
+        private final AtomicInteger httpWaiters = new AtomicInteger();
+
+        boolean tryAcquireWaiter() {
+            for (;;) {
+                int current = httpWaiters.get();
+                if (current >= MAX_HTTP_WAITERS) {
+                    return false;
+                }
+                if (httpWaiters.compareAndSet(current, current + 1)) {
+                    return true;
+                }
+            }
+        }
+
+        void releaseWaiter() {
+            httpWaiters.decrementAndGet();
+        }
     }
 
     private record ProbeResult(boolean healthy, boolean incomplete, int nodeCount, String reason) {

@@ -44,7 +44,8 @@ class ClickHouseHealthIndicatorTest {
         try {
             ReflectionTestUtils.setField(indicator, "bootstrapServers", "kafka:9092");
             // Unreachable/slow bootstrap in the unit harness must not publish UP or leak
-            // bootstrap identity. DOWN = confirmed failure; UNKNOWN = incomplete probe evidence.
+            // bootstrap identity. DOWN = confirmed failure; OUT_OF_SERVICE + evidenceState=UNKNOWN
+            // = incomplete probe evidence with fail-closed readiness.
             Health health = indicator.health();
             assertNotEquals(Status.UP, health.getStatus());
             assertEquals(CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED, health.getDetails().get("reasonCode"));

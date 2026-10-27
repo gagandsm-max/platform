@@ -14,6 +14,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 import org.springframework.boot.actuate.health.Health;
+import org.springframework.boot.actuate.health.SimpleHttpCodeStatusMapper;
+import org.springframework.boot.actuate.health.SimpleStatusAggregator;
 import org.springframework.boot.actuate.health.Status;
 
 import java.net.InetAddress;
@@ -42,6 +44,8 @@ import static org.mockito.Mockito.*;
 class KafkaHealthIndicatorTest {
     private static final String SECRET = "password=private-bootstrap private-cluster-id";
     private static final List<Node> NODES = List.of(new Node(1, "private-host", 9092), new Node(2, "private-host", 9093));
+    private static final SimpleHttpCodeStatusMapper HTTP_CODES = new SimpleHttpCodeStatusMapper();
+    private static final SimpleStatusAggregator STATUS_AGGREGATOR = new SimpleStatusAggregator();
 
     @AfterEach
     void clearTestInterruption() {
@@ -55,6 +59,7 @@ class KafkaHealthIndicatorTest {
             Health health = f.indicator.health();
             assertEquals(Status.UP, health.getStatus());
             assertEquals(Map.of("dependency", "kafka", "nodeCount", 2), health.getDetails());
+            assertEquals(200, HTTP_CODES.getStatusCode(health.getStatus()));
             int request = Integer.parseInt(f.properties.getProperty(AdminClientConfig.REQUEST_TIMEOUT_MS_CONFIG));
             int api = Integer.parseInt(f.properties.getProperty(AdminClientConfig.DEFAULT_API_TIMEOUT_MS_CONFIG));
             assertTrue(request > 0 && request <= api && api <= 2400);
@@ -120,12 +125,30 @@ class KafkaHealthIndicatorTest {
             long httpElapsed = elapsedMillis(start);
             assertTrue(httpElapsed < 2800, "HTTP/actuator thread must return within probe budget even when create blocks");
             assertNotEquals(Status.UP, health.getStatus(), "blocking bootstrap must never publish UP");
-            assertUnknown(health, "DEADLINE");
+            assertFailClosedIncomplete(health, "DEADLINE");
             verify(f.admin, never()).describeCluster();
             assertTrue(awaitReleased(f, 5000), "abandoned create must still close the late client");
             assertEquals(1, assertCloseDuration(f.admin).toMillis(), "expired budget still needs whole-millisecond close, never join(0)");
             assertTrue(f.indicator.probePoolSize() <= 1);
             assertTrue(f.indicator.probeThreadsLive() <= 1);
+        }
+    }
+
+    @Test
+    void incompleteEvidenceMapsToActuatorHttp503Not200() throws Exception {
+        try (Fixture f = new Fixture()) {
+            f.creationDelayMillis = 3100;
+            Health health = f.indicator.health();
+            assertFailClosedIncomplete(health, "DEADLINE");
+            assertEquals(503, HTTP_CODES.getStatusCode(health.getStatus()),
+                    "OUT_OF_SERVICE must fail closed under Spring's default StatusHttpMapper");
+            assertEquals(200, HTTP_CODES.getStatusCode(Status.UNKNOWN),
+                    "baseline: UNKNOWN alone maps to HTTP 200 — must not be the operational readiness status");
+            Status aggregated = STATUS_AGGREGATOR.getAggregateStatus(Status.UP, health.getStatus());
+            assertEquals(Status.OUT_OF_SERVICE, aggregated);
+            assertEquals(503, HTTP_CODES.getStatusCode(aggregated),
+                    "aggregated readiness with incomplete Kafka evidence must remain HTTP 503");
+            assertTrue(awaitReleased(f, 5000));
         }
     }
 
@@ -138,15 +161,16 @@ class KafkaHealthIndicatorTest {
                 createEntered.countDown();
                 assertTrue(releaseCreate.await(5, TimeUnit.SECONDS));
             };
-            ExecutorService callers = Executors.newFixedThreadPool(8);
+            ExecutorService callers = Executors.newFixedThreadPool(KafkaHealthIndicator.MAX_HTTP_WAITERS);
             try {
                 List<Future<Health>> futures = new ArrayList<>();
-                for (int i = 0; i < 8; i++) {
+                for (int i = 0; i < KafkaHealthIndicator.MAX_HTTP_WAITERS; i++) {
                     futures.add(callers.submit(f.indicator::health));
                 }
                 assertTrue(createEntered.await(2, TimeUnit.SECONDS), "probe worker must enter create");
                 assertEquals(1, f.createCount.get(), "repeated requests must not start parallel AdminClient.create calls");
                 assertTrue(f.indicator.probePoolSize() <= 1);
+                assertTrue(f.indicator.inFlightWaiters() <= KafkaHealthIndicator.MAX_HTTP_WAITERS);
                 releaseCreate.countDown();
                 for (Future<Health> future : futures) {
                     Health health = future.get(5, TimeUnit.SECONDS);
@@ -155,6 +179,56 @@ class KafkaHealthIndicatorTest {
                 }
                 assertEquals(1, f.createCount.get());
                 assertClosedOnce(f);
+            } finally {
+                releaseCreate.countDown();
+                callers.shutdownNow();
+            }
+        }
+    }
+
+    @Test
+    void excessHttpWaitersFailClosedBusyWithoutGrowingProbeResources() throws Exception {
+        try (Fixture f = new Fixture()) {
+            CountDownLatch createEntered = new CountDownLatch(1);
+            CountDownLatch releaseCreate = new CountDownLatch(1);
+            f.createHook = () -> {
+                createEntered.countDown();
+                assertTrue(releaseCreate.await(5, TimeUnit.SECONDS));
+            };
+            int totalCallers = KafkaHealthIndicator.MAX_HTTP_WAITERS + 8;
+            ExecutorService callers = Executors.newFixedThreadPool(totalCallers);
+            try {
+                List<Future<Health>> futures = new ArrayList<>();
+                for (int i = 0; i < totalCallers; i++) {
+                    futures.add(callers.submit(f.indicator::health));
+                }
+                assertTrue(createEntered.await(2, TimeUnit.SECONDS));
+                assertEquals(1, f.createCount.get());
+                assertTrue(awaitWaitersAtLeast(f.indicator, KafkaHealthIndicator.MAX_HTTP_WAITERS, 2000));
+                assertEquals(KafkaHealthIndicator.MAX_HTTP_WAITERS, f.indicator.inFlightWaiters());
+                // Excess callers must observe BUSY while create is still held — before release
+                // clears the session and allows a second create.
+                assertTrue(awaitCompletedCount(futures, 8, 2000));
+                assertTrue(f.indicator.probePoolSize() <= 1);
+                assertTrue(f.indicator.probeThreadsLive() <= 1);
+
+                releaseCreate.countDown();
+                int up = 0;
+                int busy = 0;
+                for (Future<Health> future : futures) {
+                    Health health = future.get(5, TimeUnit.SECONDS);
+                    if (Status.UP.equals(health.getStatus())) {
+                        up++;
+                    } else {
+                        assertFailClosedIncomplete(health, "BUSY");
+                        busy++;
+                    }
+                }
+                // Waiters that joined before release observe UP; excess must have failed closed BUSY.
+                assertEquals(KafkaHealthIndicator.MAX_HTTP_WAITERS, up);
+                assertEquals(8, busy);
+                assertEquals(1, f.createCount.get());
+                assertTrue(awaitReleased(f, 5000));
             } finally {
                 releaseCreate.countDown();
                 callers.shutdownNow();
@@ -176,7 +250,7 @@ class KafkaHealthIndicatorTest {
                 Future<Health> pending = caller.submit(f.indicator::health);
                 assertTrue(createEntered.await(2, TimeUnit.SECONDS));
                 Health timedOut = pending.get(3, TimeUnit.SECONDS);
-                assertUnknown(timedOut, "DEADLINE");
+                assertFailClosedIncomplete(timedOut, "DEADLINE");
                 releaseCreate.countDown();
                 assertTrue(awaitReleased(f, 5000));
                 assertCloseDuration(f.admin);
@@ -187,6 +261,129 @@ class KafkaHealthIndicatorTest {
                 releaseCreate.countDown();
                 caller.shutdownNow();
             }
+        }
+    }
+
+    @Test
+    @Timeout(15)
+    void abandonedStuckCreateFailsClosedPromptlyForSubsequentCallersAndRecovers() throws Exception {
+        try (Fixture f = new Fixture()) {
+            CountDownLatch createEntered = new CountDownLatch(1);
+            CountDownLatch releaseCreate = new CountDownLatch(1);
+            f.createHook = () -> {
+                createEntered.countDown();
+                assertTrue(releaseCreate.await(30, TimeUnit.SECONDS));
+            };
+
+            long firstStart = System.nanoTime();
+            Health first = f.indicator.health();
+            assertTrue(elapsedMillis(firstStart) < 2800);
+            assertFailClosedIncomplete(first, "DEADLINE");
+            assertTrue(createEntered.await(2, TimeUnit.SECONDS));
+            assertEquals(1, f.createCount.get());
+
+            ExecutorService callers = Executors.newFixedThreadPool(16);
+            try {
+                List<Future<Health>> futures = new ArrayList<>();
+                long burstStart = System.nanoTime();
+                for (int i = 0; i < 16; i++) {
+                    futures.add(callers.submit(f.indicator::health));
+                }
+                for (Future<Health> future : futures) {
+                    Health health = future.get(1, TimeUnit.SECONDS);
+                    assertFailClosedIncomplete(health, "DEADLINE");
+                }
+                assertTrue(elapsedMillis(burstStart) < 1000,
+                        "abandoned/stale probes must fail closed promptly without re-waiting ~2.4s each");
+                assertEquals(1, f.createCount.get(), "stuck create must not start additional constructors");
+                assertTrue(f.indicator.probePoolSize() <= 1);
+                assertTrue(f.indicator.probeThreadsLive() <= 1);
+                assertTrue(f.indicator.inFlightWaiters() <= KafkaHealthIndicator.MAX_HTTP_WAITERS);
+            } finally {
+                callers.shutdownNow();
+            }
+
+            // Late AdminClient cleanup when the uninterruptible constructor finally returns.
+            releaseCreate.countDown();
+            assertTrue(awaitReleased(f, 5000), "late AdminClient must still be closed");
+            assertCloseDuration(f.admin);
+            assertTrue(awaitNoInFlight(f.indicator, 5000));
+
+            // Same-broker 503 -> 200 regression compatibility after recovery.
+            f.creationDelayMillis = 0;
+            f.released.set(false);
+            Health recovered = f.indicator.health();
+            assertEquals(Status.UP, recovered.getStatus());
+            assertEquals(200, HTTP_CODES.getStatusCode(recovered.getStatus()));
+            assertEquals(2, f.createCount.get());
+            assertTrue(awaitReleased(f, 5000));
+            verify(f.admin, atLeast(2)).close(any(Duration.class));
+        }
+    }
+
+    @Test
+    void destroyDuringHealthyResultCannotPublishLateUp() throws Exception {
+        try (Fixture f = new Fixture()) {
+            CountDownLatch atCheckpoint = new CountDownLatch(1);
+            CountDownLatch allowReturn = new CountDownLatch(1);
+            f.indicator.afterProbeResultCheckpoint = abandoned -> {
+                atCheckpoint.countDown();
+                try {
+                    assertTrue(allowReturn.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            };
+            ExecutorService caller = Executors.newSingleThreadExecutor();
+            try {
+                Future<Health> pending = caller.submit(f.indicator::health);
+                assertTrue(atCheckpoint.await(3, TimeUnit.SECONDS), "must reach post-result checkpoint with healthy probe");
+                f.indicator.destroy();
+                allowReturn.countDown();
+                Health health = pending.get(3, TimeUnit.SECONDS);
+                assertNotEquals(Status.UP, health.getStatus(), "destroy must prevent late UP after successful completion");
+                assertFailClosedIncomplete(health, "STOPPED");
+                assertEquals(503, HTTP_CODES.getStatusCode(health.getStatus()));
+            } finally {
+                allowReturn.countDown();
+                caller.shutdownNow();
+            }
+        }
+    }
+
+    @Test
+    void deadlineAbandonmentDuringHealthyResultCannotPublishLateUp() throws Exception {
+        try (Fixture f = new Fixture()) {
+            CountDownLatch atCheckpoint = new CountDownLatch(1);
+            CountDownLatch allowReturn = new CountDownLatch(1);
+            AtomicReference<AtomicBoolean> abandonedFlag = new AtomicReference<>();
+            f.indicator.afterProbeResultCheckpoint = abandoned -> {
+                abandonedFlag.set(abandoned);
+                atCheckpoint.countDown();
+                try {
+                    assertTrue(allowReturn.await(5, TimeUnit.SECONDS));
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    throw new IllegalStateException(interrupted);
+                }
+            };
+            // Hold at post-result checkpoint after a healthy ProbeResult, then abandon before UP publish.
+            ExecutorService caller = Executors.newSingleThreadExecutor();
+            try {
+                Future<Health> pending = caller.submit(f.indicator::health);
+                assertTrue(atCheckpoint.await(3, TimeUnit.SECONDS));
+                assertNotNull(abandonedFlag.get());
+                abandonedFlag.get().set(true);
+                allowReturn.countDown();
+                Health health = pending.get(3, TimeUnit.SECONDS);
+                assertNotEquals(Status.UP, health.getStatus(), "abandoned session must not publish UP");
+                assertFailClosedIncomplete(health, "DEADLINE");
+            } finally {
+                allowReturn.countDown();
+                caller.shutdownNow();
+            }
+            assertTrue(awaitReleased(f, 5000));
         }
     }
 
@@ -328,7 +525,7 @@ class KafkaHealthIndicatorTest {
                 assertTrue(awaitReleased(f, 5000));
                 assertTrue(f.indicator.probePoolSize() <= 1);
                 Health afterStop = f.indicator.health();
-                assertUnknown(afterStop, "STOPPED");
+                assertFailClosedIncomplete(afterStop, "STOPPED");
             } finally {
                 releaseCreate.countDown();
                 caller.shutdownNow();
@@ -377,15 +574,19 @@ class KafkaHealthIndicatorTest {
     private static void assertDown(Health health) {
         assertEquals(Status.DOWN, health.getStatus());
         assertEquals(Map.of("dependency", "kafka", "reasonCode", CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED), health.getDetails());
+        assertEquals(503, HTTP_CODES.getStatusCode(health.getStatus()));
         assertFalse(health.toString().contains(SECRET));
         assertFalse(health.getDetails().containsKey("nodeCount"));
     }
 
-    private static void assertUnknown(Health health, String probeState) {
-        assertEquals(Status.UNKNOWN, health.getStatus());
+    private static void assertFailClosedIncomplete(Health health, String probeState) {
+        assertEquals(Status.OUT_OF_SERVICE, health.getStatus(),
+                "incomplete evidence must use fail-closed OUT_OF_SERVICE, not UNKNOWN/UP");
         assertEquals("kafka", health.getDetails().get("dependency"));
         assertEquals(CoreSupportabilityEventCodes.KAFKA_HEALTH_PROBE_FAILED, health.getDetails().get("reasonCode"));
+        assertEquals("UNKNOWN", health.getDetails().get("evidenceState"));
         assertEquals(probeState, health.getDetails().get("probeState"));
+        assertEquals(503, HTTP_CODES.getStatusCode(health.getStatus()));
         assertFalse(health.toString().contains(SECRET));
         assertFalse(health.getDetails().containsKey("nodeCount"));
     }
@@ -399,6 +600,53 @@ class KafkaHealthIndicatorTest {
             Thread.sleep(10);
         }
         return f.released.get();
+    }
+
+    private static boolean awaitNoInFlight(KafkaHealthIndicator indicator, long timeoutMillis) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (System.nanoTime() < deadline) {
+            if (!indicator.hasInFlightProbe()) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return !indicator.hasInFlightProbe();
+    }
+
+    private static boolean awaitWaitersAtLeast(KafkaHealthIndicator indicator, int minimum, long timeoutMillis)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (System.nanoTime() < deadline) {
+            if (indicator.inFlightWaiters() >= minimum) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        return indicator.inFlightWaiters() >= minimum;
+    }
+
+    private static boolean awaitCompletedCount(List<Future<Health>> futures, int minimum, long timeoutMillis)
+            throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeoutMillis);
+        while (System.nanoTime() < deadline) {
+            int done = 0;
+            for (Future<Health> future : futures) {
+                if (future.isDone()) {
+                    done++;
+                }
+            }
+            if (done >= minimum) {
+                return true;
+            }
+            Thread.sleep(10);
+        }
+        int done = 0;
+        for (Future<Health> future : futures) {
+            if (future.isDone()) {
+                done++;
+            }
+        }
+        return done >= minimum;
     }
 
     private static long allowanceNanos(KafkaFuture<?> future) throws Exception {
