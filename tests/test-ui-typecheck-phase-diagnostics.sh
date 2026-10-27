@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
-# Behavioral harness for tests/run-ui-typecheck.sh phase helper (Issue #240).
-# Host cases stub phase commands; container cases use node:20-alpine with the
-# same helper. Does not alter dependencies, lockfiles, workflows or Docker daemon.
+# Behavioral harness for tests/run-ui-typecheck.sh (Issue #240).
+# Host/container cases stub phase commands; wrapper cases exercise the
+# production platform_ui_typecheck_docker path (cancellation budget, log
+# retention, docker-wait status, success/nonzero). Does not alter
+# dependencies, lockfiles, workflows or Docker daemon.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -261,74 +263,237 @@ run_container_case fail-copy 19 0 0 19
 run_container_case fail-install 0 23 0 23
 run_container_case fail-typecheck 0 0 11 11
 
-# ---- Container: signal/cleanup of owned long-running phase ----
-sigc_work="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-ctr-sig.XXXXXX")"
-mkdir -p "${sigc_work}/ui" "${sigc_work}/stubs"
-echo '{}' >"${sigc_work}/ui/package.json"
-cat >"${sigc_work}/stubs/copy.sh" <<'EOF'
-#!/bin/sh
-mkdir -p /app
-exit 0
-EOF
-cat >"${sigc_work}/stubs/install.sh" <<'EOF'
-#!/bin/sh
-# Long child so the harness can externally stop the owned container mid-phase.
-# PID 1 in a bare alpine container may ignore SIGTERM; the harness uses KILL.
-sleep 120
-exit 0
-EOF
-cat >"${sigc_work}/stubs/tsc.sh" <<'EOF'
-#!/bin/sh
-exit 0
-EOF
-chmod +x "${sigc_work}/stubs/"*.sh
-sigc_name="platform-ui-tc-sig-$$"
+# ==============================================================================
+# Production wrapper regressions (platform_ui_typecheck_docker) — Issue #240
+# Direct container KILL alone does not prove host-wrapper cancellation.
+# ==============================================================================
 
+make_wrapper_root() {
+    local work="$1"
+    mkdir -p "${work}/ui" "${work}/tests"
+    cp "$HELPER" "${work}/tests/run-ui-typecheck.sh"
+    echo '{"name":"wrapper-fixture"}' >"${work}/ui/package.json"
+}
+
+# ---- Wrapper: normal success + nonzero phase exit (stub cmds, real docker) ----
+wrap_ok="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-ok.XXXXXX")"
+make_wrapper_root "$wrap_ok"
 set +e
-cid="$(docker run -d --name "$sigc_name" \
-    -v "${ROOT_DIR}/tests/run-ui-typecheck.sh:/runner/run-ui-typecheck.sh:ro" \
-    -v "${sigc_work}/ui:/src:ro" \
-    -v "${sigc_work}/stubs:/stubs:ro" \
-    -e "UI_TYPECHECK_COPY_CMD=/stubs/copy.sh" \
-    -e "UI_TYPECHECK_INSTALL_CMD=/stubs/install.sh" \
-    -e "UI_TYPECHECK_TSC_CMD=/stubs/tsc.sh" \
-    node:20-alpine \
-    sh -c 'set -eu; . /runner/run-ui-typecheck.sh; platform_ui_typecheck_run_phases')"
-# Wait for install START, then SIGKILL the owned container.
-# SIGKILL is required for reliable stop when container PID1 does not forward TERM;
-# do not infer OOM or historical exit-146 meaning from the resulting status.
-for _ in $(seq 1 100); do
-    if docker logs "$cid" 2>&1 | grep -Fq 'UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL'; then
+wrap_ok_out="$(
+    UI_TYPECHECK_COPY_CMD='mkdir -p /app' \
+    UI_TYPECHECK_INSTALL_CMD='true' \
+    UI_TYPECHECK_TSC_CMD='true' \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_ok" 2>&1
+)"
+wrap_ok_rc=$?
+set -e
+echo "---- wrapper success: exit=${wrap_ok_rc} ----"
+printf '%s\n' "$wrap_ok_out"
+assert_eq "wrapper/success/exit" "0" "$wrap_ok_rc"
+assert_contains "wrapper/success/copy-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=SOURCE_COPY exit=0" "$wrap_ok_out"
+assert_contains "wrapper/success/install-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=0" "$wrap_ok_out"
+assert_contains "wrapper/success/tsc-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=TYPESCRIPT_CHECK exit=0" "$wrap_ok_out"
+assert_not_contains "wrapper/success/no-oom" "OOM" "$wrap_ok_out"
+rm -rf "$wrap_ok"
+
+wrap_fail="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-fail.XXXXXX")"
+make_wrapper_root "$wrap_fail"
+set +e
+wrap_fail_out="$(
+    UI_TYPECHECK_COPY_CMD='mkdir -p /app' \
+    UI_TYPECHECK_INSTALL_CMD='exit 42' \
+    UI_TYPECHECK_TSC_CMD='true' \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_fail" 2>&1
+)"
+wrap_fail_rc=$?
+set -e
+echo "---- wrapper nonzero phase: exit=${wrap_fail_rc} ----"
+printf '%s\n' "$wrap_fail_out"
+assert_eq "wrapper/nonzero/exit" "42" "$wrap_fail_rc"
+assert_contains "wrapper/nonzero/install-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=42" "$wrap_fail_out"
+assert_not_contains "wrapper/nonzero/no-tsc" "UI_TYPECHECK_PHASE_START phase=TYPESCRIPT_CHECK" "$wrap_fail_out"
+# Final COMPLETE retained in terminal output (F02 log retention).
+assert_contains "wrapper/nonzero/final-complete-retained" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=42" "$wrap_fail_out"
+rm -rf "$wrap_fail"
+
+# ---- Wrapper: Docker wait/transport failure preserves original CLI status (F03) ----
+stub_bin="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-docker-stub.XXXXXX")"
+cat >"${stub_bin}/docker" <<'EOF'
+#!/bin/bash
+# Deterministic docker CLI stub: run succeeds; wait fails with transport status.
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+    run)
+        echo "stubcid-waitfail-$$"
+        exit 0
+        ;;
+    logs)
+        # Mimic follower until killed; emit nothing material.
+        sleep 30
+        exit 0
+        ;;
+    wait)
+        echo "Error: Cannot connect to the Docker daemon" >&2
+        exit 125
+        ;;
+    kill|rm|inspect)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "${stub_bin}/docker"
+wrap_df="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-df.XXXXXX")"
+make_wrapper_root "$wrap_df"
+set +e
+wrap_df_out="$(
+    PATH="${stub_bin}:$PATH" \
+    UI_TYPECHECK_COPY_CMD='true' \
+    UI_TYPECHECK_INSTALL_CMD='true' \
+    UI_TYPECHECK_TSC_CMD='true' \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_df" 2>&1
+)"
+wrap_df_rc=$?
+set -e
+echo "---- wrapper docker-wait failure: exit=${wrap_df_rc} ----"
+printf '%s\n' "$wrap_df_out"
+assert_eq "wrapper/docker-wait-fail/exit" "125" "$wrap_df_rc"
+assert_contains "wrapper/docker-wait-fail/marker" "UI_TYPECHECK_DOCKER_WAIT_FAILED exit=125" "$wrap_df_out"
+rm -rf "$wrap_df" "$stub_bin"
+
+# ---- Wrapper: empty/invalid wait status (no Bash numeric-return collapse) ----
+stub_bin2="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-docker-stub2.XXXXXX")"
+cat >"${stub_bin2}/docker" <<'EOF'
+#!/bin/bash
+cmd="${1:-}"
+shift || true
+case "$cmd" in
+    run)
+        echo "stubcid-emptywait-$$"
+        exit 0
+        ;;
+    logs)
+        sleep 30
+        exit 0
+        ;;
+    wait)
+        # CLI reports success but prints no validated exit integer.
+        exit 0
+        ;;
+    kill|rm|inspect)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "${stub_bin2}/docker"
+wrap_inv="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-inv.XXXXXX")"
+make_wrapper_root "$wrap_inv"
+set +e
+wrap_inv_out="$(
+    PATH="${stub_bin2}:$PATH" \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_inv" 2>&1
+)"
+wrap_inv_rc=$?
+set -e
+echo "---- wrapper invalid wait status: exit=${wrap_inv_rc} ----"
+printf '%s\n' "$wrap_inv_out"
+assert_eq "wrapper/invalid-wait/exit" "1" "$wrap_inv_rc"
+assert_contains "wrapper/invalid-wait/marker" "UI_TYPECHECK_DOCKER_WAIT_INVALID" "$wrap_inv_out"
+rm -rf "$wrap_inv" "$stub_bin2"
+
+# ---- Wrapper: host cancellation while owned child ignores soft signal (F01) ----
+# Exercises production platform_ui_typecheck_docker under a responsive daemon.
+# PID1 ignores TERM so soft-signal alone would hang unbounded docker wait;
+# finite cancel budget must force-remove and return promptly.
+wrap_cancel="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-cancel.XXXXXX")"
+make_wrapper_root "$wrap_cancel"
+cancel_budget=3
+cancel_log="${wrap_cancel}/wrapper.out"
+CANCEL_BUDGET_DECLARED=$cancel_budget
+set +e
+# Background the wrapper bash itself so TERM reaches the trap owner (F01).
+# PID1 inside the container ignores TERM; budgeted force-rm must still return.
+UI_TYPECHECK_CANCEL_BUDGET_SEC="$cancel_budget" \
+UI_TYPECHECK_LOG_DRAIN_BUDGET_SEC=2 \
+UI_TYPECHECK_REMOTE_CMD='trap "" TERM; set +e; . /runner/run-ui-typecheck.sh; platform_ui_typecheck_run_phases' \
+UI_TYPECHECK_COPY_CMD='mkdir -p /app' \
+UI_TYPECHECK_INSTALL_CMD='sleep 120' \
+UI_TYPECHECK_TSC_CMD='true' \
+bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+    bash "$HELPER" "$wrap_cancel" >"$cancel_log" 2>&1 &
+cancel_pid=$!
+# Wait until install START, then TERM the host wrapper (not merely the container).
+for _ in $(seq 1 150); do
+    if grep -Fq 'UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL' "$cancel_log" 2>/dev/null; then
+        break
+    fi
+    cancel_cid="$(docker ps -q --filter "name=platform-ui-typecheck-${cancel_pid}" 2>/dev/null | head -n1 || true)"
+    if [ -n "$cancel_cid" ] && docker logs "$cancel_cid" 2>&1 | grep -Fq 'UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL'; then
+        break
+    fi
+    if ! kill -0 "$cancel_pid" 2>/dev/null; then
         break
     fi
     sleep 0.1
 done
-docker kill -s KILL "$cid" >/dev/null
-sigc_rc="$(docker wait "$cid")"
-sigc_out="$(docker logs "$cid" 2>&1)"
-docker rm -f "$cid" >/dev/null 2>&1 || true
+cancel_t0="$SECONDS"
+kill -TERM "$cancel_pid" 2>/dev/null || true
+wait "$cancel_pid"
+cancel_rc=$?
+cancel_elapsed=$((SECONDS - cancel_t0))
 set -e
+cancel_out="$(cat "$cancel_log")"
+echo "---- wrapper host-cancel (ignore soft): exit=${cancel_rc} elapsed_s=${cancel_elapsed} budget=${cancel_budget} ----"
+printf '%s\n' "$cancel_out"
+echo "CANCEL_BUDGET_SEC_DECLARED=${CANCEL_BUDGET_DECLARED}"
 
-echo "---- container signal case: exit=${sigc_rc} ----"
-printf '%s\n' "$sigc_out"
-assert_contains "container/signal/copy-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=SOURCE_COPY exit=0" "$sigc_out"
-assert_contains "container/signal/install-start" "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" "$sigc_out"
-assert_not_contains "container/signal/install-complete-absent" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL" "$sigc_out"
-assert_not_contains "container/signal/no-tsc" "UI_TYPECHECK_PHASE_START phase=TYPESCRIPT_CHECK" "$sigc_out"
-assert_not_contains "container/signal/no-oom" "OOM" "$sigc_out"
-assert_not_contains "container/signal/no-146-claim" "146 means" "$sigc_out"
-# Docker maps SIGKILL to 137; accept related nonzero without inventing meaning.
-case "$sigc_rc" in
-    137|143|130|1) pass "container/signal/cleanup-exit exit=${sigc_rc}" ;;
-    *) fail "container/signal/cleanup-exit unexpected exit=${sigc_rc}" ;;
+assert_contains "wrapper/cancel/copy-complete" "UI_TYPECHECK_PHASE_COMPLETE phase=SOURCE_COPY exit=0" "$cancel_out"
+assert_contains "wrapper/cancel/install-start" "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" "$cancel_out"
+assert_not_contains "wrapper/cancel/install-complete-absent" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL" "$cancel_out"
+assert_not_contains "wrapper/cancel/no-tsc" "UI_TYPECHECK_PHASE_START phase=TYPESCRIPT_CHECK" "$cancel_out"
+assert_not_contains "wrapper/cancel/no-oom" "OOM" "$cancel_out"
+assert_not_contains "wrapper/cancel/no-146-claim" "146 means" "$cancel_out"
+case "$cancel_rc" in
+    143|15) pass "wrapper/cancel/host-term-exit exit=${cancel_rc}" ;;
+    *) fail "wrapper/cancel/host-term-exit unexpected exit=${cancel_rc}" ;;
 esac
-# Prove container is gone (cleanup).
-if docker inspect "$cid" >/dev/null 2>&1; then
-    fail "container/signal/removed still present"
+# Responsive-daemon budget: soft wait <= cancel_budget, plus small slack for
+# rm/log drain — must not approach the 120s ignored-child sleep.
+cancel_slack=$((cancel_budget + 12))
+if [ "$cancel_elapsed" -le "$cancel_slack" ]; then
+    pass "wrapper/cancel/within-budget elapsed_s=${cancel_elapsed} slack=${cancel_slack}"
 else
-    pass "container/signal/removed"
+    fail "wrapper/cancel/within-budget elapsed_s=${cancel_elapsed} exceeded slack=${cancel_slack} (hang regression)"
 fi
-rm -rf "$sigc_work"
+# Owned container cleanup under a responsive daemon.
+leftover="$(docker ps -aq --filter "name=platform-ui-typecheck-${cancel_pid}" 2>/dev/null || true)"
+if [ -z "$leftover" ]; then
+    pass "wrapper/cancel/container-removed"
+else
+    still_run=0
+    for id in $leftover; do
+        if [ "$(docker inspect -f '{{.State.Running}}' "$id" 2>/dev/null || echo false)" = "true" ]; then
+            still_run=1
+        fi
+        docker rm -f "$id" >/dev/null 2>&1 || true
+    done
+    if [ "$still_run" -eq 0 ]; then
+        pass "wrapper/cancel/container-not-running (removed leftovers)"
+    else
+        fail "wrapper/cancel/container-removed still running after cancel"
+    fi
+fi
+rm -rf "$wrap_cancel"
 
 echo "========================================================================"
 echo "UI typecheck phase-diagnostics harness: PASSED=${PASSED} FAILED=${FAILED}"
