@@ -1,8 +1,13 @@
 package com.platform.core.sensorcontrol.pollgrant;
 
+import com.platform.core.sensorcontrol.SensorControlException;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.ConnectionHolder;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -37,6 +42,67 @@ public final class SensorPollGrantRepository {
                   FROM platform.sensor_poll_grant
                  WHERE tenant_id = :tenant AND sensor_id = :sensor AND grant_id = :grant
                 """, scope(tenantId, sensorId, grantId), (rs, row) -> map(rs)).stream().findFirst();
+    }
+
+    /**
+     * Read and hold the exact grant row with PostgreSQL {@code FOR SHARE} until the caller
+     * commits or rolls back. Existing principal and matched-credential authority locks must
+     * precede grant locking. Future multi-grant admission must lock grants in a deterministic
+     * order; this single-row helper does not enforce the complete admission lock order.
+     * Returns terminal rows too: a row lock is neither a grant-authorization decision nor
+     * proof of historical execution time. Missing and wrong-scope rows are equally empty.
+     * Never opens a replacement transaction or releases caller-owned locks.
+     */
+    public Optional<SensorPollGrant> findForShare(UUID tenantId, String sensorId, UUID grantId) {
+        requireActiveCallerTransaction("findForShare");
+        return jdbc.query("""
+                SELECT grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                       grant_generation, assignment_generation, protocol,
+                       issued_address_type, issued_address, profile_plan_id, profile_plan_version,
+                       issued_at, window_start, window_end, issued_by, status,
+                       revoked_at, revoked_by, revocation_class, revocation_reason, updated_at
+                  FROM platform.sensor_poll_grant
+                 WHERE tenant_id = :tenant AND sensor_id = :sensor AND grant_id = :grant
+                 FOR SHARE
+                """, scope(tenantId, sensorId, grantId), (rs, row) -> map(rs)).stream().findFirst();
+    }
+
+    /** Same connection-participation guard as SensorControlRepository's held-authority helpers. */
+    private void requireActiveCallerTransaction(String helperName) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw transactionRequired(helperName, "unlocked lookup is not held authority");
+        }
+        DataSource dataSource = jdbc.getJdbcTemplate().getDataSource();
+        if (dataSource == null) {
+            throw transactionRequired(helperName, "repository DataSource is unavailable");
+        }
+        Object resource = TransactionSynchronizationManager.getResource(dataSource);
+        if (!(resource instanceof ConnectionHolder holder)) {
+            throw transactionRequired(helperName, "repository connection is not bound to the caller transaction");
+        }
+        if (!holder.isSynchronizedWithTransaction()) {
+            throw transactionRequired(helperName, "repository connection is not synchronized with the caller transaction");
+        }
+        final Connection connection;
+        try {
+            connection = holder.getConnection();
+        } catch (IllegalStateException e) {
+            throw transactionRequired(helperName, "repository connection is not bound to the caller transaction");
+        }
+        final boolean autoCommit;
+        try {
+            autoCommit = connection.getAutoCommit();
+        } catch (SQLException e) {
+            throw transactionRequired(helperName, "unable to verify caller transaction participation");
+        }
+        if (autoCommit) {
+            throw transactionRequired(helperName, "bound repository connection remains autocommit");
+        }
+    }
+
+    private static SensorControlException transactionRequired(String helperName, String reason) {
+        return new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                "Active PostgreSQL transaction required for " + helperName + "; " + reason);
     }
 
     /** First committed terminal status and complete tuple win. A rolled-back attempt does not win. */
