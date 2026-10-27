@@ -58,7 +58,7 @@ class KafkaHealthHttpIntegrationTest {
         try (var context = (ServletWebServerApplicationContext) new SpringApplicationBuilder(TestApplication.class)
                 .web(WebApplicationType.SERVLET)
                 .run("--server.address=127.0.0.1", "--server.port=0", "--server.ssl.enabled=false",
-                        "--server.forward-headers-strategy=none", "--management.server.port=0",
+                        "--server.forward-headers-strategy=none",
                         "--management.health.defaults.enabled=false",
                         "--platform.security.directories.persistence-enabled=false",
                         "--platform.security.oidc.issuer-uri=", "--platform.security.oidc.audience=")) {
@@ -66,7 +66,7 @@ class KafkaHealthHttpIntegrationTest {
             var indicator = context.getBean("kafka", KafkaHealthIndicator.class);
             assertFalse(mockingDetails(indicator).isMock());
             assertFalse(mockingDetails(context.getBean(HealthEndpoint.class)).isMock());
-            // management.server.port=0 equals server.port=0: one isolated embedded server.
+            // Actuator shares the application's isolated loopback listener.
             int port = context.getWebServer().getPort();
             try (HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(2))
                     .followRedirects(HttpClient.Redirect.NEVER).build()) {
