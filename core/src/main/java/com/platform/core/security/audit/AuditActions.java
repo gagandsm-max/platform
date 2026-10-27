@@ -16,9 +16,10 @@ public final class AuditActions {
     public static final AuditAction SENSOR_CREDENTIAL_ROTATE = new AuditAction("sensor.credential.rotate");
     public static final AuditAction SENSOR_CREDENTIAL_REVOKE = new AuditAction("sensor.credential.revoke");
 
-    /** Sensor Control Authority — administration / placement. */
+    /** Sensor Control Authority — administration / placement (disable ≠ revoke). */
     public static final AuditAction SENSOR_ENROLL = new AuditAction("sensor.enroll");
     public static final AuditAction SENSOR_DISABLE = new AuditAction("sensor.disable");
+    public static final AuditAction SENSOR_REVOKE = new AuditAction("sensor.revoke");
     public static final AuditAction SENSOR_SCOPE_REPLACE = new AuditAction("sensor.scope.replace");
     public static final AuditAction DISCOVERY_PLACEMENT_ASSIGN = new AuditAction("discovery.placement.assign");
     public static final AuditAction DISCOVERY_PLACEMENT_REJECT = new AuditAction("discovery.placement.reject");
