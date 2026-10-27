@@ -54,10 +54,10 @@ docker run --rm \
     sh -c "cp -r /src /build && cd /build && mvn test -B -DexcludedGroups=postgres"
 
 echo "--> [3/4] Running UI Typecheck..."
-docker run --rm \
-    -v "${ROOT_DIR}/ui:/src:ro" \
-    node:20-alpine \
-    sh -c "cp -r /src /app && cd /app && npm ci --silent && npx tsc --noEmit"
+# Phase-diagnosed UI typecheck (Issue #240): same node:20-alpine image,
+# read-only ui mount, and copy -> npm ci -> tsc semantics with per-phase
+# START/COMPLETE records. See tests/run-ui-typecheck.sh.
+bash "${ROOT_DIR}/tests/run-ui-typecheck.sh"
 
 echo "--> [4/4] Running UI Core-Unavailable Resilience Test..."
 bash "${ROOT_DIR}/tests/test-ui-core-unavailable-resilience.sh"
