@@ -34,6 +34,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -177,7 +178,11 @@ class KafkaHealthIndicatorTest {
         try (Fixture f = new Fixture()) {
             CountDownLatch atCheckpoint = new CountDownLatch(1);
             CountDownLatch allowReturn = new CountDownLatch(1);
+            // Checkpoint runs on the health() caller thread after future.get — later than
+            // the submitting thread's start — so budget expiry must be relative to this.
+            AtomicLong checkpointAt = new AtomicLong();
             f.indicator.afterProbeResultCheckpoint = abandoned -> {
+                checkpointAt.set(System.nanoTime());
                 atCheckpoint.countDown();
                 try {
                     assertTrue(allowReturn.await(10, TimeUnit.SECONDS));
@@ -188,12 +193,14 @@ class KafkaHealthIndicatorTest {
             };
             ExecutorService caller = Executors.newSingleThreadExecutor();
             try {
-                long started = System.nanoTime();
                 Future<Health> pending = caller.submit(f.indicator::health);
                 assertTrue(atCheckpoint.await(3, TimeUnit.SECONDS),
                         "must hold after observing a healthy ProbeResult");
-                // Expire the HTTP caller budget while still holding the healthy result.
-                long remaining = TimeUnit.MILLISECONDS.toNanos(2600) - (System.nanoTime() - started);
+                assertTrue(checkpointAt.get() > 0);
+                // health()'s PROBE_BUDGET starts before the checkpoint; sleeping a full
+                // budget from the checkpoint guarantees the caller's withinBudget recheck fails.
+                long remaining = checkpointAt.get() + TimeUnit.MILLISECONDS.toNanos(2600)
+                        - System.nanoTime();
                 if (remaining > 0) {
                     TimeUnit.NANOSECONDS.sleep(remaining);
                 }
@@ -476,15 +483,38 @@ class KafkaHealthIndicatorTest {
                 }
             };
             ExecutorService caller = Executors.newSingleThreadExecutor();
+            ExecutorService destroyer = Executors.newSingleThreadExecutor();
             try {
                 Future<Health> pending = caller.submit(f.indicator::health);
                 assertTrue(createEntered.await(2, TimeUnit.SECONDS));
-                f.indicator.destroy();
-                Health whileBlocked = pending.get(5, TimeUnit.SECONDS);
+
+                // destroy() blocks on the uninterruptible constructor; keep it off the
+                // assertion thread so we can prove the HTTP waiter unblocks first.
+                Future<?> destroyDone = destroyer.submit(f.indicator::destroy);
+
+                long httpStart = System.nanoTime();
+                Health whileBlocked = pending.get(3, TimeUnit.SECONDS);
+                assertTrue(elapsedMillis(httpStart) < 1000,
+                        "HTTP caller must receive fail-closed STOPPED promptly while constructor remains blocked");
                 assertFailClosedIncomplete(whileBlocked, "STOPPED");
+                assertFalse(destroyDone.isDone(),
+                        "destroy must still be awaiting the uninterruptible constructor");
+
+                // Hold until shutdownNow has interrupted the stuck worker (after the first
+                // awaitTermination allowance), then release the constructor.
+                long interruptWaitDeadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+                while (interruptsCleared.get() < 1
+                        && !destroyDone.isDone()
+                        && System.nanoTime() < interruptWaitDeadline) {
+                    Thread.sleep(50);
+                }
                 assertTrue(interruptsCleared.get() >= 1,
                         "destroy/shutdownNow must interrupt the stuck probe worker");
+                assertFalse(destroyDone.isDone(),
+                        "shutdown must remain incomplete until the constructor is released");
+
                 releaseCreate.countDown();
+                destroyDone.get(5, TimeUnit.SECONDS);
                 assertTrue(awaitReleased(f, 5000), "late-returning create must still close the client");
                 assertCloseDuration(f.admin);
                 Health afterStop = f.indicator.health();
@@ -493,6 +523,7 @@ class KafkaHealthIndicatorTest {
             } finally {
                 releaseCreate.countDown();
                 caller.shutdownNow();
+                destroyer.shutdownNow();
             }
         }
         // NOT_PROVABLE under permanently blocked OS DNS: the single probe worker may remain

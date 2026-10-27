@@ -215,6 +215,16 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
                 session.abandoned.set(true);
             }
         }
+        // Publish STOPPED to HTTP waiters before blocking on executor termination.
+        // Uninterruptible AdminClient.create can keep the worker alive for the full
+        // shutdown allowance; waiters must not exhaust the probe budget and observe
+        // DEADLINE while STOPPED is delayed behind awaitTermination.
+        // CompletableFuture.complete is first-wins: a later runProbe completion is a no-op,
+        // and a prior probe completion leaves health()'s post-wait stopped/abandoned recheck
+        // as the late-UP guard. Late AdminClient release remains in runProbe's finally.
+        if (session != null) {
+            session.future.complete(ProbeResult.incomplete("STOPPED"));
+        }
         probeExecutor.shutdown();
         try {
             if (!probeExecutor.awaitTermination(PROBE_BUDGET_MILLIS + CLOSE_CAP_MILLIS, TimeUnit.MILLISECONDS)) {
@@ -224,9 +234,6 @@ public class KafkaHealthIndicator implements HealthIndicator, DisposableBean {
         } catch (InterruptedException interrupted) {
             probeExecutor.shutdownNow();
             Thread.currentThread().interrupt();
-        }
-        if (session != null) {
-            session.future.complete(ProbeResult.incomplete("STOPPED"));
         }
     }
 
