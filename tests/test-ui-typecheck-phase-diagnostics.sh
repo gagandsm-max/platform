@@ -411,10 +411,154 @@ assert_eq "wrapper/invalid-wait/exit" "1" "$wrap_inv_rc"
 assert_contains "wrapper/invalid-wait/marker" "UI_TYPECHECK_DOCKER_WAIT_INVALID" "$wrap_inv_out"
 rm -rf "$wrap_inv" "$stub_bin2"
 
-# ---- Wrapper: host cancellation while owned child ignores soft signal (F01) ----
+# ---- Wrapper: delayed terminal COMPLETE beyond live-follow drain budget (F02) ----
+# Fake Docker: wait returns 42 promptly; logs -f emits START then delays COMPLETE
+# past the drain budget; non-follow snapshot still has COMPLETE. Wrapper must
+# recover the terminal record (or report incomplete) before removing the source.
+stub_delay="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-docker-delay.XXXXXX")"
+cat >"${stub_delay}/docker" <<EOF
+#!/bin/bash
+cmd="\${1:-}"
+shift || true
+case "\$cmd" in
+    run)
+        echo "stubcid-delay-\$\$"
+        exit 0
+        ;;
+    wait)
+        echo 42
+        exit 0
+        ;;
+    logs)
+        follow=0
+        for a in "\$@"; do
+            [ "\$a" = "-f" ] && follow=1
+        done
+        if [ "\$follow" -eq 1 ]; then
+            echo "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" >&2
+            sleep 8
+            echo "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=42" >&2
+            exit 0
+        fi
+        echo "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" >&2
+        echo "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=42" >&2
+        exit 0
+        ;;
+    rm)
+        echo "RM_CALLED" >>"${stub_delay}/rm.log"
+        exit 0
+        ;;
+    kill|inspect)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "${stub_delay}/docker"
+: >"${stub_delay}/rm.log"
+wrap_delay="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-delay.XXXXXX")"
+make_wrapper_root "$wrap_delay"
+set +e
+delay_t0=$SECONDS
+wrap_delay_out="$(
+    PATH="${stub_delay}:$PATH" \
+    UI_TYPECHECK_LOG_DRAIN_BUDGET_SEC=2 \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_delay" 2>&1
+)"
+wrap_delay_rc=$?
+wrap_delay_elapsed=$((SECONDS - delay_t0))
+set -e
+echo "---- wrapper delayed terminal log: exit=${wrap_delay_rc} elapsed_s=${wrap_delay_elapsed} ----"
+printf '%s\n' "$wrap_delay_out"
+assert_eq "wrapper/delayed-tail/exit" "42" "$wrap_delay_rc"
+assert_contains "wrapper/delayed-tail/complete-retained" "UI_TYPECHECK_PHASE_COMPLETE phase=DEPENDENCY_INSTALL exit=42" "$wrap_delay_out"
+assert_contains "wrapper/delayed-tail/recovered-or-complete" "UI_TYPECHECK_LOGS_RECOVERED" "$wrap_delay_out"
+# Must not approach the 8s follow delay; drain budget + small slack only.
+if [ "$wrap_delay_elapsed" -le 6 ]; then
+    pass "wrapper/delayed-tail/bounded-drain elapsed_s=${wrap_delay_elapsed}"
+else
+    fail "wrapper/delayed-tail/bounded-drain elapsed_s=${wrap_delay_elapsed} (expected <=6)"
+fi
+if [ -s "${stub_delay}/rm.log" ]; then
+    pass "wrapper/delayed-tail/container-removed-after-recovery"
+else
+    fail "wrapper/delayed-tail/container-removed-after-recovery (rm not called)"
+fi
+rm -rf "$wrap_delay" "$stub_delay"
+
+# ---- Wrapper: logger failure / incomplete retrieval retains evidence (F02) ----
+stub_logfail="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-docker-logfail.XXXXXX")"
+cat >"${stub_logfail}/docker" <<EOF
+#!/bin/bash
+cmd="\${1:-}"
+shift || true
+case "\$cmd" in
+    run)
+        echo "stubcid-logfail-\$\$"
+        exit 0
+        ;;
+    wait)
+        echo 0
+        exit 0
+        ;;
+    logs)
+        follow=0
+        for a in "\$@"; do
+            [ "\$a" = "-f" ] && follow=1
+        done
+        if [ "\$follow" -eq 1 ]; then
+            echo "UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL" >&2
+            exit 1
+        fi
+        echo "Error: cannot read container logs" >&2
+        exit 1
+        ;;
+    rm)
+        echo "RM_CALLED" >>"${stub_logfail}/rm.log"
+        exit 0
+        ;;
+    kill|inspect)
+        exit 0
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+EOF
+chmod +x "${stub_logfail}/docker"
+: >"${stub_logfail}/rm.log"
+wrap_logfail="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-logfail.XXXXXX")"
+make_wrapper_root "$wrap_logfail"
+set +e
+wrap_logfail_out="$(
+    PATH="${stub_logfail}:$PATH" \
+    UI_TYPECHECK_LOG_DRAIN_BUDGET_SEC=2 \
+    bash -c 'set -euo pipefail; source "$1"; platform_ui_typecheck_docker "$2"' \
+        bash "$HELPER" "$wrap_logfail" 2>&1
+)"
+wrap_logfail_rc=$?
+set -e
+echo "---- wrapper logger failure/incomplete: exit=${wrap_logfail_rc} ----"
+printf '%s\n' "$wrap_logfail_out"
+assert_eq "wrapper/log-incomplete/exit" "0" "$wrap_logfail_rc"
+assert_contains "wrapper/log-incomplete/marker" "UI_TYPECHECK_LOGS_INCOMPLETE" "$wrap_logfail_out"
+assert_contains "wrapper/log-incomplete/retained-flag" "retained=1" "$wrap_logfail_out"
+assert_contains "wrapper/log-incomplete/cleanup-retained" "UI_TYPECHECK_CLEANUP_RETAINED" "$wrap_logfail_out"
+if [ -s "${stub_logfail}/rm.log" ]; then
+    fail "wrapper/log-incomplete/no-rm-while-retained unexpectedly removed container"
+else
+    pass "wrapper/log-incomplete/no-rm-while-retained"
+fi
+rm -rf "$wrap_logfail" "$stub_logfail"
+
+# ---- Wrapper: host cancellation while owned child ignores soft signal (F01/F02) ----
 # Exercises production platform_ui_typecheck_docker under a responsive daemon.
 # PID1 ignores TERM so soft-signal alone would hang unbounded docker wait;
-# finite cancel budget must force-remove and return promptly.
+# finite cancel budget must force-remove and return promptly. Log finalization
+# must run before deleting the only log source (cancel-path F02).
 wrap_cancel="$(mktemp -d "${TMPDIR:-/tmp}/ui-tc-wrap-cancel.XXXXXX")"
 make_wrapper_root "$wrap_cancel"
 cancel_budget=3
@@ -468,16 +612,36 @@ case "$cancel_rc" in
     *) fail "wrapper/cancel/host-term-exit unexpected exit=${cancel_rc}" ;;
 esac
 # Responsive-daemon budget: soft wait <= cancel_budget, plus small slack for
-# rm/log drain — must not approach the 120s ignored-child sleep.
+# log finalize/rm — must not approach the 120s ignored-child sleep.
 cancel_slack=$((cancel_budget + 12))
 if [ "$cancel_elapsed" -le "$cancel_slack" ]; then
     pass "wrapper/cancel/within-budget elapsed_s=${cancel_elapsed} slack=${cancel_slack}"
 else
     fail "wrapper/cancel/within-budget elapsed_s=${cancel_elapsed} exceeded slack=${cancel_slack} (hang regression)"
 fi
-# Owned container cleanup under a responsive daemon.
+# Cancel-path evidence: terminal START preserved, and either recovered snapshot
+# marker or explicit retained-incomplete status (never silent loss).
+if grep -Fq 'UI_TYPECHECK_LOGS_RECOVERED' <<<"$cancel_out" \
+    || grep -Fq 'UI_TYPECHECK_LOGS_INCOMPLETE' <<<"$cancel_out" \
+    || grep -Fq 'UI_TYPECHECK_CLEANUP_RETAINED' <<<"$cancel_out"; then
+    pass "wrapper/cancel/evidence-status-present"
+else
+    # Clean live-follow drain before delete also satisfies F02 when the
+    # follower exits promptly after soft-signal/force path — START already kept.
+    if grep -Fq 'UI_TYPECHECK_PHASE_START phase=DEPENDENCY_INSTALL' <<<"$cancel_out"; then
+        pass "wrapper/cancel/evidence-start-preserved-clean-drain"
+    else
+        fail "wrapper/cancel/evidence-status-present missing recovered/incomplete/start"
+    fi
+fi
+# Owned container cleanup under a responsive daemon (unless explicitly retained).
 leftover="$(docker ps -aq --filter "name=platform-ui-typecheck-${cancel_pid}" 2>/dev/null || true)"
-if [ -z "$leftover" ]; then
+if grep -Fq 'UI_TYPECHECK_CLEANUP_RETAINED' <<<"$cancel_out"; then
+    pass "wrapper/cancel/retained-evidence-status"
+    for id in $leftover; do
+        docker rm -f "$id" >/dev/null 2>&1 || true
+    done
+elif [ -z "$leftover" ]; then
     pass "wrapper/cancel/container-removed"
 else
     still_run=0
