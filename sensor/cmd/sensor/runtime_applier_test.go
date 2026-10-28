@@ -2,11 +2,13 @@ package main
 
 import (
 	"context"
+	"io"
 	"log/slog"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"platform/sensor/internal/config"
@@ -280,37 +282,55 @@ func TestControlReconcileLoopCoreFailureWaitsInterval(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	metrics := &control.Metrics{}
 	status := control.NewStatusTracker(metrics)
 	rec, err := control.NewReconciler(client, store, applierBaseline(), control.FuncApplier(func(context.Context, uint64, string, config.RuntimeConfig) error {
 		return nil
-	}), slog.Default(), metrics)
+	}), logger, metrics)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	done := make(chan struct{})
-	go runControlReconcileLoop(ctx, rec, status, 80*time.Millisecond, slog.Default(), done)
-	deadline := time.Now().Add(time.Second)
-	for client.callCount() < 1 && time.Now().Before(deadline) {
-		time.Sleep(2 * time.Millisecond)
-	}
-	first := client.callCount()
-	if first < 1 {
-		t.Fatal("expected immediate first reconcile")
-	}
-	time.Sleep(40 * time.Millisecond)
-	if client.callCount() != first {
-		t.Fatalf("busy-looped before interval: first=%d now=%d", first, client.callCount())
-	}
-	deadline = time.Now().Add(250 * time.Millisecond)
-	for client.callCount() <= first && time.Now().Before(deadline) {
-		time.Sleep(5 * time.Millisecond)
-	}
-	if client.callCount() <= first {
-		t.Fatal("expected next interval reconcile")
-	}
-	cancel()
-	<-done
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan struct{})
+		go runControlReconcileLoop(ctx, rec, status, 80*time.Millisecond, logger, done)
+		t.Cleanup(func() {
+			cancel()
+			synctest.Wait()
+			select {
+			case <-done:
+			default:
+				t.Error("loop did not exit after cancellation")
+			}
+		})
+
+		synctest.Wait()
+		if got := client.callCount(); got != 1 {
+			t.Fatalf("expected exactly one immediate reconcile: got=%d", got)
+		}
+		time.Sleep(80*time.Millisecond - time.Nanosecond)
+		synctest.Wait()
+		if got := client.callCount(); got != 1 {
+			t.Fatalf("reconciled before interval: want=1 got=%d", got)
+		}
+		time.Sleep(time.Nanosecond)
+		synctest.Wait()
+		if got := client.callCount(); got != 2 {
+			t.Fatalf("expected exactly two reconciles at interval: got=%d", got)
+		}
+
+		cancel()
+		synctest.Wait()
+		select {
+		case <-done:
+		default:
+			t.Fatal("loop did not exit after cancellation")
+		}
+		time.Sleep(80 * time.Millisecond)
+		synctest.Wait()
+		if got := client.callCount(); got != 2 {
+			t.Fatalf("calls after cancel: want=2 got=%d", got)
+		}
+	})
 }
