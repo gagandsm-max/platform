@@ -18,6 +18,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.util.LinkedHashMap;
@@ -63,6 +64,24 @@ import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Status;
  * uniqueness across grants, delivery, renewal and typed admission (G1b/G2).
  */
 public final class SensorPollGrantIssuer {
+
+    /**
+     * PostgreSQL 16 integer {@code timestamptz} inclusive minimum as Java Instant
+     * epoch seconds. Matches the JDBC/PostgreSQL storage contract — not an
+     * invented product TTL or epoch-policy bound.
+     */
+    static final Instant PG_TIMESTAMPTZ_MIN = Instant.ofEpochSecond(-210866803200L);
+    /**
+     * PostgreSQL 16 integer {@code timestamptz} exclusive upper bound as Java
+     * Instant epoch seconds.
+     */
+    static final Instant PG_TIMESTAMPTZ_EXCLUSIVE_END = Instant.ofEpochSecond(9224318016000L);
+    /**
+     * Largest Instant accepted under microsecond persistence
+     * ({@link #PG_TIMESTAMPTZ_EXCLUSIVE_END} minus one microsecond).
+     */
+    static final Instant PG_TIMESTAMPTZ_MAX_ACCEPTED =
+            PG_TIMESTAMPTZ_EXCLUSIVE_END.minusNanos(1_000L);
 
     private final SensorControlRepository sensors;
     private final EntityManagementEndpointRepository endpoints;
@@ -137,14 +156,14 @@ public final class SensorPollGrantIssuer {
                     "Management endpoint unavailable for issuance");
         }
 
-        Instant issuedAt = clock.instant();
+        Instant issuedAt = samplePersistableIssuedAt();
         if (issuedAt.isBefore(validated.windowStart()) || issuedAt.isAfter(validated.windowEnd())) {
             throw new SensorControlException(
                     SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
                     "Issued time must fall within the grant window");
         }
 
-        UUID grantId = Objects.requireNonNull(grantIds.get(), "grantId");
+        UUID grantId = requireGeneratedGrantId(grantIds);
         SensorPollGrant candidate = new SensorPollGrant(
                 grantId,
                 validated.tenantId(),
@@ -238,6 +257,49 @@ public final class SensorPollGrantIssuer {
                 "Poll grant could not be issued");
     }
 
+    private Instant samplePersistableIssuedAt() {
+        final Instant issuedAt;
+        try {
+            issuedAt = clock.instant();
+        } catch (RuntimeException ex) {
+            throw internalIssuedAtFailure();
+        }
+        if (issuedAt == null) {
+            throw internalIssuedAtFailure();
+        }
+        try {
+            requirePersistableInstant(issuedAt);
+        } catch (SensorControlException ex) {
+            throw internalIssuedAtFailure();
+        }
+        return issuedAt;
+    }
+
+    private static UUID requireGeneratedGrantId(Supplier<UUID> grantIds) {
+        final UUID grantId;
+        try {
+            grantId = grantIds.get();
+        } catch (RuntimeException ex) {
+            throw internalGrantIdFailure();
+        }
+        if (grantId == null) {
+            throw internalGrantIdFailure();
+        }
+        return grantId;
+    }
+
+    private static SensorControlException internalIssuedAtFailure() {
+        return new SensorControlException(
+                SensorControlException.ERR_SENSOR_STATE_INVALID,
+                "Poll grant issued time is unavailable");
+    }
+
+    private static SensorControlException internalGrantIdFailure() {
+        return new SensorControlException(
+                SensorControlException.ERR_SENSOR_STATE_INVALID,
+                "Poll grant identity could not be generated");
+    }
+
     private static ValidatedIssue validate(IssueRequest request) {
         UUID tenantId = requireUuid(request.tenantId(), "tenantId");
         String sensorId = requireSensorId(request.sensorId());
@@ -261,11 +323,44 @@ public final class SensorPollGrantIssuer {
                     SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
                     "Grant window end must be after window start");
         }
+        // Persistence-envelope check before any authority lock / transaction claim.
+        requirePersistableWindowInstant(windowStart);
+        requirePersistableWindowInstant(windowEnd);
 
         return new ValidatedIssue(
                 tenantId, sensorId, entityId, endpointId, protocol,
                 request.grantGeneration(), request.assignmentGeneration(),
                 planId, planVersion, windowStart, windowEnd, issuedBy);
+    }
+
+    /**
+     * Reject Instant values outside the PostgreSQL 16/JDBC {@code timestamptz}
+     * envelope. Exercises {@link Timestamp#from(Instant)} so conversion failures
+     * surface as the same typed window error without exposing JDBC details.
+     */
+    private static void requirePersistableWindowInstant(Instant value) {
+        try {
+            requirePersistableInstant(value);
+        } catch (SensorControlException ex) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
+                    "Grant window is outside the supported persistence range");
+        }
+    }
+
+    private static void requirePersistableInstant(Instant value) {
+        if (value.isBefore(PG_TIMESTAMPTZ_MIN) || value.isAfter(PG_TIMESTAMPTZ_MAX_ACCEPTED)) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
+                    "Grant window is outside the supported persistence range");
+        }
+        try {
+            Timestamp.from(value);
+        } catch (RuntimeException ex) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
+                    "Grant window is outside the supported persistence range");
+        }
     }
 
     private static UUID requireUuid(UUID value, String field) {
@@ -305,7 +400,8 @@ public final class SensorPollGrantIssuer {
     }
 
     private static String requireIssuedBy(String issuedBy) {
-        if (issuedBy == null || issuedBy.isEmpty() || issuedBy.length() > 256) {
+        // Reject null/empty/whitespace-only; do not trim or normalize a nonblank actor.
+        if (issuedBy == null || issuedBy.isBlank() || issuedBy.length() > 256) {
             throw new SensorControlException(
                     SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
                     "Poll grant request is invalid");

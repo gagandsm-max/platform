@@ -353,6 +353,151 @@ class SensorPollGrantIssuerTest {
     }
 
     @Test
+    void whitespaceOnlyActorsRejectWithoutTrimOrAuthority() {
+        for (String actor : List.of(" ", "\t", "\n", " \t\n\r ")) {
+            assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    assertThrows(SensorControlException.class, () -> issuer.issue(
+                            new SensorPollGrantIssuer.IssueRequest(
+                                    TENANT, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                                    1L, 0L, "planned-profile", "v1",
+                                    ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), actor))).getCode(),
+                    "whitespace-only actor must be request-invalid: " + actor.codePoints().toArray());
+        }
+        // Nonblank opaque actor with surrounding whitespace remains permitted (no trim).
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+        when(grants.insert(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        SensorPollGrant row = issuer.issue(new SensorPollGrantIssuer.IssueRequest(
+                TENANT, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                1L, 0L, "planned-profile", "v1",
+                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), " internal-actor "));
+        assertEquals(" internal-actor ", row.issuedBy());
+        verify(sensors).lockPrincipalForShare(TENANT, SENSOR);
+        verify(grants).insert(any());
+    }
+
+    @Test
+    void unsupportedWindowTimestampsRejectBeforeAuthority() {
+        Instant justBelowMin = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN.minusNanos(1);
+        Instant exclusiveUpper = SensorPollGrantIssuer.PG_TIMESTAMPTZ_EXCLUSIVE_END;
+        Instant pastExclusive = exclusiveUpper.plusNanos(1);
+
+        assertWindowRejectedBeforeAuthority(Instant.MIN, Instant.MIN.plusSeconds(60));
+        assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), Instant.MAX);
+        assertWindowRejectedBeforeAuthority(justBelowMin, SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN.plusSeconds(60));
+        assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), justBelowMin);
+        assertWindowRejectedBeforeAuthority(exclusiveUpper, exclusiveUpper.plusSeconds(1));
+        assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), exclusiveUpper);
+        assertWindowRejectedBeforeAuthority(pastExclusive, pastExclusive.plusSeconds(1));
+        assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), pastExclusive);
+
+        verify(sensors, never()).lockPrincipalForShare(any(), any());
+        verify(grants, never()).requireHeldCallerTransaction(any());
+        verify(endpoints, never()).findByTenantEntityAndIdForShare(any(), any(), any());
+        verify(grants, never()).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    private void assertWindowRejectedBeforeAuthority(Instant windowStart, Instant windowEnd) {
+        assertEquals(SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        request(Protocol.SNMP, 1L, 0L, "planned-profile", "v1",
+                                windowStart, windowEnd))).getCode(),
+                "window " + windowStart + " .. " + windowEnd);
+    }
+
+    @Test
+    void exactMinimumAndMaximumAcceptedWindowReachInsert() {
+        Instant min = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN;
+        Instant maxAccepted = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MAX_ACCEPTED;
+        Instant nearMin = min.plusSeconds(1);
+        Instant nearMax = maxAccepted.minusSeconds(1);
+
+        issuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(nearMin, ZoneOffset.UTC),
+                () -> GRANT);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+        when(grants.insert(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        SensorPollGrant minRow = issuer.issue(request(Protocol.SNMP, 1L, 0L, "planned-profile", "v1",
+                min, min.plusSeconds(60)));
+        assertEquals(min, minRow.windowStart());
+        assertEquals(nearMin, minRow.issuedAt());
+
+        clearInvocations(sensors, endpoints, grants, audit);
+        issuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(nearMax, ZoneOffset.UTC),
+                () -> GRANT);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+        when(grants.insert(any())).thenAnswer(invocation -> invocation.getArgument(0));
+        SensorPollGrant maxRow = issuer.issue(request(Protocol.SNMP, 1L, 0L, "planned-profile", "v1",
+                maxAccepted.minusSeconds(60), maxAccepted));
+        assertEquals(maxAccepted, maxRow.windowEnd());
+        assertEquals(nearMax, maxRow.issuedAt());
+        verify(grants, times(1)).insert(any());
+    }
+
+    @Test
+    void issuedAtOutsidePersistenceEnvelopeFailsAsInternalState() {
+        Instant impossible = Instant.MAX;
+        Clock broken = new Clock() {
+            @Override
+            public Instant instant() {
+                return impossible;
+            }
+
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+        };
+        issuer = new SensorPollGrantIssuer(sensors, endpoints, grants, audit, broken, () -> GRANT);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> issuer.issue(validRequest()));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, failure.getCode());
+        assertFalse(failure.getMessage().toLowerCase().contains("timestamp"));
+        assertFalse(failure.getMessage().toLowerCase().contains("jdbc"));
+        assertFalse(failure.getMessage().toLowerCase().contains("illegal"));
+        verify(grants, never()).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+        assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+    }
+
+    @Test
+    void nullGeneratedGrantIdFailsAsInternalStateWithoutInsertOrAudit() {
+        issuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> null);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> issuer.issue(validRequest()));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, failure.getCode());
+        assertNotEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID, failure.getCode());
+        verify(grants, never()).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+        assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+    }
+
+    @Test
     void duplicateInsertMapsToConflictWithoutSuccessAudit() {
         when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
         when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
