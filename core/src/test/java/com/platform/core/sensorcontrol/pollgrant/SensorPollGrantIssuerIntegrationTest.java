@@ -258,7 +258,9 @@ class SensorPollGrantIssuerIntegrationTest {
 
     @Test
     void typedInvalidActorRejectsWithoutMutation() {
-        for (String actor : List.of((String) null, "", " ", "\t", "\n", " \t\n ")) {
+        // List.of rejects null; keep the null actor case in a nullable-safe fixture.
+        String[] actors = {null, "", " ", "\t", "\n", " \t\n "};
+        for (String actor : actors) {
             SensorControlException failure = assertThrows(SensorControlException.class,
                     () -> pg.tx().execute(status -> issuer.issue(
                             new SensorPollGrantIssuer.IssueRequest(
@@ -537,6 +539,110 @@ class SensorPollGrantIssuerIntegrationTest {
         assertTrue(returned.issuedAt().equals(truncated) || returned.issuedAt().equals(rounded),
                 "persisted issued_at must be the microsecond projection of the sampled clock");
         assertEquals(1, countGrants());
+    }
+
+    /**
+     * Real PostgreSQL 16 + JDBC evidence that the declared timestamptz envelope
+     * bounds survive SensorPollGrantIssuer INSERT ... RETURNING and repository reload.
+     * A runtime failure at an exact constant remains production-correction evidence.
+     */
+    @Test
+    void exactPostgresqlTimestamptzBoundariesPersistThroughIssuerAndRepository() {
+        clearGrants();
+        UUID lowerGrant = UUID.fromString("018f0e0a-0000-7000-8000-000000000a01");
+        UUID upperGrant = UUID.fromString("018f0e0a-0000-7000-8000-000000000a02");
+
+        Instant min = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN;
+        Instant maxAccepted = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MAX_ACCEPTED;
+        Instant lowerIssuedAt = min.plusSeconds(1);
+        Instant lowerWindowEnd = min.plusSeconds(60);
+        Instant upperWindowStart = maxAccepted.minusSeconds(60);
+        Instant upperIssuedAt = maxAccepted.minusSeconds(1);
+
+        SensorPollGrantIssuer lowerIssuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(lowerIssuedAt, ZoneOffset.UTC),
+                () -> lowerGrant);
+        SensorPollGrant lowerReturned = pg.tx().execute(status -> lowerIssuer.issue(
+                new SensorPollGrantIssuer.IssueRequest(
+                        tenant, sensor, entity, endpoint, Protocol.SNMP,
+                        1L, 0L, "planned-profile", "v1",
+                        min, lowerWindowEnd, "internal-actor")));
+        assertExactBoundaryPersisted(lowerReturned, lowerGrant, min, lowerIssuedAt, lowerWindowEnd);
+
+        SensorPollGrantIssuer upperIssuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(upperIssuedAt, ZoneOffset.UTC),
+                () -> upperGrant);
+        SensorPollGrant upperReturned = pg.tx().execute(status -> upperIssuer.issue(
+                new SensorPollGrantIssuer.IssueRequest(
+                        tenant, sensor, entity, endpoint, Protocol.SNMP,
+                        2L, 0L, "planned-profile", "v1",
+                        upperWindowStart, maxAccepted, "internal-actor")));
+        assertExactBoundaryPersisted(
+                upperReturned, upperGrant, upperWindowStart, upperIssuedAt, maxAccepted);
+
+        int deleted = pg.tx().execute(status -> pg.jdbc().update(
+                "DELETE FROM platform.sensor_poll_grant WHERE grant_id IN (?, ?)",
+                lowerGrant, upperGrant));
+        assertEquals(2, deleted, "cleanup must delete exactly the two boundary grants");
+        assertEquals(0, countGrantRows(lowerGrant));
+        assertEquals(0, countGrantRows(upperGrant));
+        assertEquals(0, countGrants());
+    }
+
+    private void assertExactBoundaryPersisted(
+            SensorPollGrant returned,
+            UUID grantId,
+            Instant expectedWindowStart,
+            Instant expectedIssuedAt,
+            Instant expectedWindowEnd) {
+        assertNotNull(returned);
+        assertEquals(grantId, returned.grantId());
+        assertEquals(Status.ISSUED, returned.status());
+        SensorPollGrant reloaded = grants.find(tenant, sensor, grantId).orElseThrow();
+        assertEquals(returned, reloaded,
+                "INSERT ... RETURNING row must reload exactly through the repository");
+        assertEquals(expectedWindowStart, returned.windowStart());
+        assertEquals(expectedWindowEnd, returned.windowEnd());
+        assertEquals(expectedIssuedAt, returned.issuedAt());
+        assertEquals(returned.windowStart(), reloaded.windowStart());
+        assertEquals(returned.windowEnd(), reloaded.windowEnd());
+        assertEquals(returned.issuedAt(), reloaded.issuedAt());
+        assertEquals(0, returned.windowStart().getNano() % 1_000,
+                "window_start precision must be at most microseconds");
+        assertEquals(0, returned.windowEnd().getNano() % 1_000,
+                "window_end precision must be at most microseconds");
+        assertEquals(0, returned.issuedAt().getNano() % 1_000,
+                "issued_at precision must be at most microseconds");
+        assertEquals(1, countGrantRows(grantId),
+                "exactly one row must exist for boundary grant " + grantId);
+        assertNoPostgresqlInfinity(grantId);
+    }
+
+    private int countGrantRows(UUID grantId) {
+        Integer count = pg.jdbc().queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE grant_id = ?",
+                Integer.class, grantId);
+        return count == null ? 0 : count;
+    }
+
+    private void assertNoPostgresqlInfinity(UUID grantId) {
+        Boolean anyInfinity = pg.jdbc().queryForObject("""
+                SELECT window_start = '-infinity'::timestamptz
+                    OR window_start = 'infinity'::timestamptz
+                    OR window_end = '-infinity'::timestamptz
+                    OR window_end = 'infinity'::timestamptz
+                    OR issued_at = '-infinity'::timestamptz
+                    OR issued_at = 'infinity'::timestamptz
+                    OR window_start::text ILIKE '%infinity%'
+                    OR window_end::text ILIKE '%infinity%'
+                    OR issued_at::text ILIKE '%infinity%'
+                  FROM platform.sensor_poll_grant
+                 WHERE grant_id = ?
+                """, Boolean.class, grantId);
+        assertEquals(Boolean.FALSE, anyInfinity,
+                "boundary timestamptz must not silently map to PostgreSQL infinity");
     }
 
     @Test
