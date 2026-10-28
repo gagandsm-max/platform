@@ -609,12 +609,21 @@ docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valke
 
 # Start an explicit non-Compose probe so isolation can never pass vacuously.
 # Reuse the already-local Postgres image; do not pull or add a dependency.
+# Cover image VOLUME /var/lib/postgresql/data with bounded tmpfs so the probe
+# cannot retain an anonymous volume; tear down with rm -fv on exact name only.
 FOREIGN_PROBE_NAME="platform-isolation-probe-$$"
 FOREIGN_PROBE_IMAGE=$(docker inspect -f '{{.Config.Image}}' platform-postgres 2>/dev/null || echo "")
-docker rm -f "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
+cleanup_foreign_probe() {
+    docker rm -fv "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
+}
+# Exact-owned failure-safe cleanup (does not replace Test 19's subshell traps).
+trap cleanup_foreign_probe EXIT
+cleanup_foreign_probe
 FOREIGN_PROBE_STARTED=false
 if [ -n "${FOREIGN_PROBE_IMAGE}" ] && \
-   docker run -d --name "${FOREIGN_PROBE_NAME}" --entrypoint sh "${FOREIGN_PROBE_IMAGE}" \
+   docker run -d --name "${FOREIGN_PROBE_NAME}" \
+     --tmpfs /var/lib/postgresql/data:rw,exec,size=64m \
+     --entrypoint sh "${FOREIGN_PROBE_IMAGE}" \
      -c 'while :; do sleep 60; done' > /dev/null 2>&1; then
     FOREIGN_PROBE_STARTED=true
 fi
@@ -883,7 +892,7 @@ elif ! printf '%s\n' "${FOREIGN_BEFORE}" | grep -Fq "${FOREIGN_PROBE_NAME}|true"
     FOREIGN_OK=false
     FOREIGN_DETAIL="${FOREIGN_DETAIL}synthetic_probe_not_running_before_restart;"
 fi
-docker rm -f "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
+cleanup_foreign_probe
 # Host runtime isolation is a developer-workstation policy. GitHub-hosted CI
 # runners intentionally ship Java/Go/Node and other language runtimes. Platform
 # project execution remains containerized in CI, so an ephemeral runner's PATH

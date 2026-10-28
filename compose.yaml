@@ -119,6 +119,10 @@ services:
       CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-platform_dev_ch_password_change_in_prod}
     volumes:
       - ./deploy/docker/clickhouse/migrations:/migrations:ro
+    # Image declares VOLUME /var/lib/clickhouse; migrator must not retain an
+    # anonymous data volume. Server persistence remains platform_ch_data.
+    tmpfs:
+      - /var/lib/clickhouse
     networks:
       - platform_net
     depends_on:

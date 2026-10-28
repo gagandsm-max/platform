@@ -85,8 +85,125 @@ if count < len(svc):
 # Render uses --env-file /dev/null so host .env secrets are not interpolated.
 # Compose YAML placeholder defaults may still appear; that is repository text, not .env leakage.
 print(f"compose services with bounded logging: {len(svc)}")
+
+# Issue #266: service-scoped rendered checks (no PyYAML). Indentation-based extract.
+def service_block(name: str) -> str:
+    lines = text.splitlines()
+    start = None
+    for i, line in enumerate(lines):
+        if line == f"  {name}:":
+            start = i
+            break
+    if start is None:
+        raise SystemExit(f"rendered compose missing service {name}")
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"  [A-Za-z0-9_-]+:\s*$", lines[j]):
+            end = j
+            break
+    return "\n".join(lines[start:end])
+
+ch_migrate = service_block("clickhouse-migrate")
+ch_server = service_block("clickhouse")
+postgres = service_block("postgres")
+kafka = service_block("kafka")
+valkey = service_block("valkey")
+
+if not re.search(r"(?m)^\s+tmpfs:\s*$", ch_migrate) and "tmpfs:" not in ch_migrate:
+    raise SystemExit("clickhouse-migrate rendered config missing tmpfs key")
+# tmpfs destination must appear under the tmpfs key (list or map form).
+tmpfs_idx = ch_migrate.find("tmpfs:")
+path_idx = ch_migrate.find("/var/lib/clickhouse", tmpfs_idx if tmpfs_idx >= 0 else 0)
+if tmpfs_idx < 0 or path_idx < 0:
+    raise SystemExit("clickhouse-migrate tmpfs does not cover /var/lib/clickhouse")
+if "platform_ch_data" in ch_migrate:
+    raise SystemExit("clickhouse-migrate must not mount platform_ch_data")
+if "platform_ch_data" not in ch_server or "/var/lib/clickhouse" not in ch_server:
+    raise SystemExit("clickhouse server must retain named platform_ch_data at /var/lib/clickhouse")
+
+required_named = (
+    "platform_pg_data",
+    "platform_ch_data",
+    "platform_kafka_data",
+    "platform_valkey_data",
+    "platform_sensor_net_spool",
+    "platform_sensor_infra_spool",
+)
+for vol in required_named:
+    if vol not in text:
+        raise SystemExit(f"rendered compose missing persistent named volume {vol}")
+if "platform_pg_data" not in postgres or "/var/lib/postgresql/data" not in postgres:
+    raise SystemExit("postgres must retain named platform_pg_data mount")
+if "platform_kafka_data" not in kafka:
+    raise SystemExit("kafka must retain named platform_kafka_data volume")
+if "platform_valkey_data" not in valkey:
+    raise SystemExit("valkey must retain named platform_valkey_data volume")
+print("clickhouse-migrate tmpfs and persistent named volumes verified in rendered config")
 PY
 pass "docker compose config renders with bounded logging"
+pass "rendered clickhouse-migrate covers /var/lib/clickhouse via tmpfs; named volumes unchanged"
+
+# Issue #266: foreign-probe source must use bounded PG data tmpfs and exact rm -fv.
+python3 - <<'PY'
+import pathlib, re, sys
+src = pathlib.Path("tests/run-all-tests.sh").read_text(encoding="utf-8")
+# Locate the synthetic isolation probe docker run (not unrelated docker run calls).
+probe_run = None
+for m in re.finditer(r"docker run -d --name \"\$\{FOREIGN_PROBE_NAME\}\"[^\n]*(?:\n[^\n]*){0,6}", src):
+    probe_run = m.group(0)
+    break
+if not probe_run:
+    raise SystemExit("foreign probe docker run not found in run-all-tests.sh")
+if not re.search(r"--tmpfs\s+/var/lib/postgresql/data(?::|\s|$)", probe_run):
+    raise SystemExit("foreign probe docker run missing --tmpfs /var/lib/postgresql/data")
+# Exact-owned cleanup must use docker rm -fv on FOREIGN_PROBE_NAME (function or direct).
+if not re.search(
+    r'docker rm -fv "\$\{FOREIGN_PROBE_NAME\}"',
+    src,
+):
+    raise SystemExit("foreign probe cleanup must use docker rm -fv \"${FOREIGN_PROBE_NAME}\"")
+if "cleanup_foreign_probe" not in src:
+    raise SystemExit("foreign probe missing failure-safe cleanup_foreign_probe")
+# Guardrail: no broad anonymous-volume deletion authorization in this harness.
+forbidden = [
+    r"docker volume prune",
+    r"docker system prune",
+    r"docker volume rm\s+[^\n]*\$\{",  # no variable volume rm sweeps
+]
+for pat in forbidden:
+    for line in src.splitlines():
+        stripped = line.lstrip()
+        if stripped.startswith("#"):
+            continue
+        if re.search(pat, line):
+            raise SystemExit(f"run-all-tests.sh introduces forbidden cleanup: {pat}: {line}")
+# Must not authorize deletion merely from 64-hex name, count delta, or timestamp.
+dangerous = [
+    r"volume\s+rm[^\n]*\[a-f0-9\]\{64\}",
+    r"docker volume rm[^\n]*anonymous",
+    r"volume ls[^\n]*xargs[^\n]*volume rm",
+]
+for pat in dangerous:
+    if re.search(pat, src):
+        raise SystemExit(f"run-all-tests.sh authorizes unsafe volume deletion pattern: {pat}")
+print("foreign probe source supplies tmpfs + rm -fv; no prune/64-hex deletion")
+PY
+pass "foreign probe source has PG data tmpfs, docker rm -fv, and failure-safe exact cleanup"
+
+# Issue #266: integration harness must not grow prune-based volume deletion.
+if awk '
+  /^[[:space:]]*#/ { next }
+  /echo[[:space:]]/ { next }
+  /Forbidden/ { next }
+  /never[[:space:]]/ { next }
+  /docker volume prune/ { bad=1 }
+  /docker system prune/ { bad=1 }
+  END { exit bad ? 1 : 0 }
+' tests/run-all-tests.sh; then
+  pass "run-all-tests.sh does not execute docker volume/system prune"
+else
+  fail "run-all-tests.sh must not introduce docker volume/system prune"
+fi
 
 # PostgresTestSupport must use tmpfs and rm -fv
 grep -q 'tmpfs' core/src/test/java/com/platform/core/support/PostgresTestSupport.java \
