@@ -6,11 +6,29 @@ import (
 	"time"
 )
 
+// CheckStorageUsage reports filesystem utilisation for health/readiness.
+// It is a constant-time inspection of already-known spool state plus capacity:
+// closed, degraded, and unresolved acknowledged-file cleanup fail closed with
+// stable spool error codes. Capacity values remain truthful when available.
+// This path does not scan records, quarantine, reconcile, clear fault latches,
+// or latch a persistent integrity fault merely because a capacity query failed.
 func (s *DiskSpool) CheckStorageUsage() (float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	st, err := s.space(0)
-	return st.usedPct, err
+	st, spaceErr := s.space(0)
+	pct := st.usedPct
+	if s.closed {
+		return pct, newError(CodeClosed, "spool is closed", nil)
+	}
+	if s.degraded {
+		// Degraded covers IO/cleanup/corruption latches; do not assert a precise
+		// corruption cause from health when the latch alone cannot establish it.
+		return pct, newError(CodeIO, "spool storage integrity is degraded", nil)
+	}
+	if s.cleanupUnresolved {
+		return pct, newError(CodeIO, "acknowledged spool cleanup remains unresolved", nil)
+	}
+	return pct, spaceErr
 }
 func NewDiskSpool(dir string, watermarkPercent int, logger *slog.Logger) (*DiskSpool, error) {
 	if watermarkPercent != storageWatermarkPercent {
