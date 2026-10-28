@@ -1,6 +1,7 @@
 package com.platform.core.ingestion.authority;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
@@ -24,7 +25,11 @@ public record SensorScope(
     public SensorScope {
         Objects.requireNonNull(sensorId, "sensorId must not be null");
         Objects.requireNonNull(tenantId, "tenantId must not be null");
-        allowedEntityIds = allowedEntityIds != null ? Collections.unmodifiableSet(allowedEntityIds) : Collections.emptySet();
+        // Defensive snapshot: unmodifiableSet alone still shares the caller's mutable backing set.
+        // HashSet copy preserves historical acceptance of a null element (unlike Set.copyOf).
+        allowedEntityIds = allowedEntityIds != null
+                ? Collections.unmodifiableSet(new HashSet<>(allowedEntityIds))
+                : Collections.emptySet();
     }
 
     public boolean isEntityAllowed(UUID entityId) {
