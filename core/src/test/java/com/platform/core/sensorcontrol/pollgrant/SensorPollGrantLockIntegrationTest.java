@@ -256,7 +256,7 @@ class SensorPollGrantLockIntegrationTest {
             // FOR KEY SHARE would allow this non-key update lock, so it must fail this test.
             assertEquals("55P03", failure.getSQLState(), "FOR SHARE must conflict with FOR NO KEY UPDATE");
         } finally {
-            assertDoesNotThrow(independent::rollback); // clear the failed transaction before reusing it
+            assertDoesNotThrow(() -> { independent.rollback(); }); // clear the failed transaction before reusing it
         }
     }
 
@@ -264,7 +264,7 @@ class SensorPollGrantLockIntegrationTest {
         try {
             assertDoesNotThrow(() -> lockExactRow(independent, id));
         } finally {
-            assertDoesNotThrow(independent::rollback);
+            assertDoesNotThrow(() -> { independent.rollback(); });
         }
     }
 
