@@ -14,18 +14,24 @@ import com.platform.core.sensorcontrol.SensorControlRepository;
 import com.platform.core.sensorcontrol.SensorLifecycleStatus;
 import com.platform.core.sensorcontrol.SensorPrincipal;
 import com.platform.core.sensorcontrol.SensorRole;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Protocol;
 import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Status;
@@ -58,55 +64,175 @@ class SensorPollGrantIssuerTest {
         endpoints = mock(EntityManagementEndpointRepository.class);
         grants = mock(SensorPollGrantRepository.class);
         audit = mock(SecurityAuditEmitter.class);
+        TransactionSynchronizationManager.initSynchronization();
+        TransactionSynchronizationManager.setActualTransactionActive(true);
         issuer = new SensorPollGrantIssuer(
                 sensors, endpoints, grants, audit,
                 Clock.fixed(ISSUED, ZoneOffset.UTC),
                 () -> GRANT);
     }
 
+    @AfterEach
+    void tearDown() {
+        TransactionSynchronizationManager.clear();
+    }
+
     @Test
-    void allowAllIssuesImmutableRowAndAuditsWithoutAddress() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(active(true));
+    void allowAllIssuesPersistedRowAndAuditsOnlyAfterCommitWithoutUnsafeMetadata() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
         when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
                 .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+        SensorPollGrant persisted = samplePersisted("2001:db8::10", SensorPollGrant.AddressType.IPV6);
+        when(grants.insert(any())).thenReturn(persisted);
 
         SensorPollGrant row = issuer.issue(request(Protocol.SNMP, 1L, 0L,
                 "planned-profile", "v1", ISSUED.minusSeconds(1), ISSUED.plusSeconds(60)));
 
-        assertEquals(GRANT, row.grantId());
-        assertEquals(ISSUED, row.issuedAt());
-        assertEquals(ISSUED, row.updatedAt());
+        assertSame(persisted, row);
         assertEquals(Status.ISSUED, row.status());
-        assertEquals(SensorPollGrant.AddressType.IPV6, row.issuedAddressType());
-        assertEquals("2001:db8::10", row.issuedAddress());
-        assertNull(row.revokedAt());
         verify(sensors, never()).listAllowedEntityIds(any(), any());
+        verify(sensors).lockPrincipalForShare(TENANT, SENSOR);
+        verify(sensors, never()).lockPrincipalForUpdate(any(), any());
         verify(grants).requireHeldCallerTransaction("issue");
-        verify(grants).insert(row);
-        assertAuditWithoutAddress(row);
+        verify(grants).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+
+        invokeAfterCommitCallbacks();
+        assertAuditSafeMetadata(persisted);
     }
 
     @Test
     void allowlistIssuesWhenEntityPresent() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(active(false));
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(false));
         when(sensors.listAllowedEntityIds(TENANT, SENSOR)).thenReturn(Set.of(ENTITY));
         when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
                 .thenReturn(Optional.of(activeEndpoint("192.0.2.10")));
+        SensorPollGrant persisted = new SensorPollGrant(
+                GRANT, TENANT, SENSOR, ENTITY, ENDPOINT, 1L, 0L, Protocol.ICMP,
+                SensorPollGrant.AddressType.IPV4, "192.0.2.10",
+                "planned-profile", "v1", ISSUED, ISSUED.minusSeconds(1), ISSUED.plusSeconds(60),
+                "internal-actor", Status.ISSUED, null, null, null, null, ISSUED);
+        when(grants.insert(any())).thenReturn(persisted);
 
         SensorPollGrant row = issuer.issue(request(Protocol.ICMP, 1L, 0L,
                 "planned-profile", "v1", ISSUED.minusSeconds(1), ISSUED.plusSeconds(60)));
 
         assertEquals(Protocol.ICMP, row.protocol());
         assertEquals(SensorPollGrant.AddressType.IPV4, row.issuedAddressType());
-        assertEquals("192.0.2.10", row.issuedAddress());
-        verify(grants).insert(row);
+        verify(grants).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+        invokeAfterCommitCallbacks();
         verify(audit).emitControlEvent(any(), eq(AuditActions.SENSOR_POLL_GRANT_ISSUE),
                 eq(AuditOutcome.SUCCESS), eq(TENANT), eq("SENSOR_POLL_GRANT_ISSUED"), any());
     }
 
     @Test
+    void coreTimeIsSampledOnlyAfterPrincipalAndEndpointLocks() {
+        AtomicBoolean clockSampled = new AtomicBoolean(false);
+        AtomicBoolean locksHeld = new AtomicBoolean(false);
+        Clock gated = new Clock() {
+            @Override
+            public Instant instant() {
+                assertTrue(locksHeld.get(), "Core time must be sampled only after both locks");
+                clockSampled.set(true);
+                return ISSUED;
+            }
+
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+        };
+        issuer = new SensorPollGrantIssuer(sensors, endpoints, grants, audit, gated, () -> GRANT);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenAnswer(invocation -> {
+            assertFalse(clockSampled.get());
+            return active(true);
+        });
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT)).thenAnswer(invocation -> {
+            assertFalse(clockSampled.get());
+            locksHeld.set(true);
+            return Optional.of(activeEndpoint("2001:db8::10"));
+        });
+        when(grants.insert(any())).thenAnswer(invocation -> {
+            assertTrue(clockSampled.get());
+            return samplePersisted("2001:db8::10", SensorPollGrant.AddressType.IPV6);
+        });
+
+        issuer.issue(validRequest());
+        assertTrue(clockSampled.get());
+        verify(grants).requireHeldCallerTransaction("issue");
+    }
+
+    @Test
+    void windowExpiryAfterLockWaitRejectsWithoutInsertOrAudit() {
+        AtomicReference<Instant> now = new AtomicReference<>(ISSUED);
+        Clock mutable = new Clock() {
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+        };
+        issuer = new SensorPollGrantIssuer(sensors, endpoints, grants, audit, mutable, () -> GRANT);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenAnswer(invocation -> {
+            now.set(ISSUED.plusSeconds(120));
+            return active(true);
+        });
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> issuer.issue(request(Protocol.SNMP, 1L, 0L, "planned-profile", "v1",
+                        ISSUED.minusSeconds(1), ISSUED.plusSeconds(60))));
+        assertEquals(SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID, failure.getCode());
+        verify(grants, never()).insert(any());
+        assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void missingSynchronizationFailsClosedBeforeAuthorityOrMutation() {
+        TransactionSynchronizationManager.clear();
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> issuer.issue(validRequest()));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, failure.getCode());
+        assertTrue(failure.getMessage().toLowerCase().contains("synchronization"));
+        verify(sensors, never()).lockPrincipalForShare(any(), any());
+        verify(grants, never()).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void requireHeldCallerTransactionFailureBlocksBeforeLocks() {
+        doThrow(new SensorControlException(
+                SensorControlException.ERR_SENSOR_STATE_INVALID, "Active PostgreSQL transaction required for issue"))
+                .when(grants).requireHeldCallerTransaction("issue");
+
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> issuer.issue(validRequest()));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, failure.getCode());
+        verify(sensors, never()).lockPrincipalForShare(any(), any());
+        verify(grants, never()).insert(any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void missingSensorFailsClosedWithoutInsertOrAudit() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenThrow(new SensorControlException(
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenThrow(new SensorControlException(
                 SensorControlException.ERR_SENSOR_NOT_FOUND, "Sensor not found"));
 
         SensorControlException failure = assertThrows(SensorControlException.class,
@@ -115,6 +241,7 @@ class SensorPollGrantIssuerTest {
         verify(grants, never()).insert(any());
         verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
         verify(endpoints, never()).findByTenantEntityAndIdForShare(any(), any(), any());
+        assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
     }
 
     @Test
@@ -122,7 +249,7 @@ class SensorPollGrantIssuerTest {
         SensorPrincipal disabled = new SensorPrincipal(
                 SENSOR, TENANT, null, SensorRole.NETWORK, SensorLifecycleStatus.DISABLED,
                 true, ISSUED, ISSUED);
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(disabled);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(disabled);
 
         SensorControlException failure = assertThrows(SensorControlException.class,
                 () -> issuer.issue(validRequest()));
@@ -133,7 +260,7 @@ class SensorPollGrantIssuerTest {
 
     @Test
     void entityOutsideAllowlistFailsClosed() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(active(false));
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(false));
         when(sensors.listAllowedEntityIds(TENANT, SENSOR)).thenReturn(Set.of(UUID.randomUUID()));
 
         SensorControlException failure = assertThrows(SensorControlException.class,
@@ -146,7 +273,7 @@ class SensorPollGrantIssuerTest {
 
     @Test
     void missingAndInactiveEndpointShareUnavailableCode() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(active(true));
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
         when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
                 .thenReturn(Optional.empty());
         assertEquals(SensorControlException.ERR_POLL_GRANT_ENDPOINT_UNAVAILABLE,
@@ -182,29 +309,77 @@ class SensorPollGrantIssuerTest {
                 assertThrows(SensorControlException.class, () -> issuer.issue(
                         request(Protocol.SNMP, 1L, 0L, " ", "v1",
                                 ISSUED.minusSeconds(1), ISSUED.plusSeconds(60)))).getCode());
-        SensorPollGrantIssuer outside = new SensorPollGrantIssuer(
-                sensors, endpoints, grants, audit,
-                Clock.fixed(ISSUED.minusSeconds(3600), ZoneOffset.UTC),
-                () -> GRANT);
-        assertEquals(SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
-                assertThrows(SensorControlException.class, () -> outside.issue(validRequest())).getCode());
-        verify(sensors, never()).lockPrincipalForUpdate(any(), any());
+        verify(sensors, never()).lockPrincipalForShare(any(), any());
         verify(grants, never()).requireHeldCallerTransaction(any());
         verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
     }
 
     @Test
+    void typedInvalidActorAndRequiredRequestFields() {
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(null)).getCode());
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                null, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                                1L, 0L, "planned-profile", "v1",
+                                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), "actor"))).getCode());
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                TENANT, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                                1L, 0L, "planned-profile", "v1",
+                                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), null))).getCode());
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                TENANT, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                                1L, 0L, "planned-profile", "v1",
+                                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), ""))).getCode());
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                TENANT, SENSOR, ENTITY, ENDPOINT, null,
+                                1L, 0L, "planned-profile", "v1",
+                                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), "actor"))).getCode());
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                assertThrows(SensorControlException.class, () -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                TENANT, SENSOR, ENTITY, ENDPOINT, Protocol.SNMP,
+                                1L, 0L, "planned-profile", "v1",
+                                null, ISSUED.plusSeconds(60), "actor"))).getCode());
+        verify(sensors, never()).lockPrincipalForShare(any(), any());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void duplicateInsertMapsToConflictWithoutSuccessAudit() {
-        when(sensors.lockPrincipalForUpdate(TENANT, SENSOR)).thenReturn(active(true));
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
         when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
                 .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
-        doThrow(new DuplicateKeyException("fixture")).when(grants).insert(any());
+        when(grants.insert(any())).thenThrow(new DuplicateKeyException("fixture"));
 
         SensorControlException failure = assertThrows(SensorControlException.class,
                 () -> issuer.issue(validRequest()));
         assertEquals(SensorControlException.ERR_POLL_GRANT_CONFLICT, failure.getCode());
         assertFalse(failure.getMessage().toLowerCase().contains("duplicate"));
         assertFalse(failure.getMessage().toLowerCase().contains("sql"));
+        assertTrue(TransactionSynchronizationManager.getSynchronizations().isEmpty());
+        verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
+    void rollbackOnlyPathDoesNotEmitRegisteredAudit() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(active(true));
+        when(endpoints.findByTenantEntityAndIdForShare(TENANT, ENTITY, ENDPOINT))
+                .thenReturn(Optional.of(activeEndpoint("2001:db8::10")));
+        when(grants.insert(any())).thenReturn(samplePersisted("2001:db8::10", SensorPollGrant.AddressType.IPV6));
+
+        issuer.issue(validRequest());
+        assertEquals(1, TransactionSynchronizationManager.getSynchronizations().size());
+        for (TransactionSynchronization sync : TransactionSynchronizationManager.getSynchronizations()) {
+            sync.afterCompletion(TransactionSynchronization.STATUS_ROLLED_BACK);
+        }
         verify(audit, never()).emitControlEvent(any(), any(), any(), any(), any(), any());
     }
 
@@ -212,9 +387,24 @@ class SensorPollGrantIssuerTest {
     void noDefaultOrSeededGrantWithoutExplicitIssueCall() {
         verifyNoInteractions(sensors, endpoints, grants, audit);
         assertEquals("sensor.poll_grant.issue", AuditActions.SENSOR_POLL_GRANT_ISSUE.value());
+        assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
+                org.springframework.stereotype.Service.class));
+        assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
+                org.springframework.web.bind.annotation.RestController.class));
+        assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
+                org.springframework.scheduling.annotation.Scheduled.class));
     }
 
-    private void assertAuditWithoutAddress(SensorPollGrant row) {
+    private void invokeAfterCommitCallbacks() {
+        List<TransactionSynchronization> syncs =
+                List.copyOf(TransactionSynchronizationManager.getSynchronizations());
+        assertEquals(1, syncs.size(), "exactly one afterCommit registration");
+        for (TransactionSynchronization sync : syncs) {
+            sync.afterCommit();
+        }
+    }
+
+    private void assertAuditSafeMetadata(SensorPollGrant row) {
         @SuppressWarnings("unchecked")
         ArgumentCaptor<Map<String, String>> meta = ArgumentCaptor.forClass(Map.class);
         verify(audit).emitControlEvent(
@@ -225,8 +415,14 @@ class SensorPollGrantIssuerTest {
                 eq("SENSOR_POLL_GRANT_ISSUED"),
                 meta.capture());
         Map<String, String> values = meta.getValue();
+        assertEquals(Set.of(
+                "grant_id", "sensor_id", "entity_id", "endpoint_id",
+                "protocol", "grant_generation", "assignment_generation"), values.keySet());
         assertEquals(row.grantId().toString(), values.get("grant_id"));
         assertEquals(SENSOR, values.get("sensor_id"));
+        assertFalse(values.containsKey("issued_by"));
+        assertFalse(values.containsKey("profile_plan_id"));
+        assertFalse(values.containsKey("profile_plan_version"));
         assertFalse(values.containsKey("issued_address"));
         assertFalse(values.containsKey("address"));
         assertFalse(values.values().stream().anyMatch(v -> v.contains("2001:db8")));
@@ -246,6 +442,13 @@ class SensorPollGrantIssuerTest {
         return new EntityManagementEndpoint(
                 ENDPOINT, TENANT, ENTITY, type, address, ManagementEndpointState.ACTIVE,
                 ManagementEndpointSource.MANUAL, true, "fixture", ISSUED, "fixture", ISSUED);
+    }
+
+    private SensorPollGrant samplePersisted(String address, SensorPollGrant.AddressType type) {
+        return new SensorPollGrant(
+                GRANT, TENANT, SENSOR, ENTITY, ENDPOINT, 1L, 0L, Protocol.SNMP, type, address,
+                "planned-profile", "v1", ISSUED, ISSUED.minusSeconds(1), ISSUED.plusSeconds(60),
+                "internal-actor", Status.ISSUED, null, null, null, null, ISSUED);
     }
 
     private SensorPollGrantIssuer.IssueRequest validRequest() {

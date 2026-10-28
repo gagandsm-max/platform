@@ -42,11 +42,13 @@ public final class SensorPollGrantRepository {
     }
 
     /**
-     * Persist one ISSUED grant row. Requires the caller's held transaction; does not
-     * open a replacement or {@code REQUIRES_NEW} transaction. Callers must already
-     * have proven Sensor/endpoint authority under retained locks.
+     * Persist one ISSUED grant row and return the exact PostgreSQL-persisted
+     * representation via {@code INSERT ... RETURNING}. Requires the caller's held
+     * transaction; does not open a replacement or {@code REQUIRES_NEW} transaction.
+     * Callers must already have proven Sensor/endpoint authority under retained locks.
+     * The returned row remains subject to the owning transaction's later commit/rollback.
      */
-    public void insert(SensorPollGrant grant) {
+    public SensorPollGrant insert(SensorPollGrant grant) {
         Objects.requireNonNull(grant, "grant");
         requireActiveCallerTransaction("insert");
         if (grant.status() != Status.ISSUED) {
@@ -72,7 +74,7 @@ public final class SensorPollGrantRepository {
                 .addValue("issuedBy", grant.issuedBy())
                 .addValue("status", Status.ISSUED.name())
                 .addValue("updatedAt", Timestamp.from(grant.updatedAt()));
-        jdbc.update("""
+        return jdbc.query("""
                 INSERT INTO platform.sensor_poll_grant (
                     grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
                     grant_generation, assignment_generation, protocol,
@@ -84,7 +86,14 @@ public final class SensorPollGrantRepository {
                     :addressType, :address, :planId, :planVersion,
                     :issuedAt, :windowStart, :windowEnd, :issuedBy, :status, :updatedAt
                 )
-                """, parameters);
+                RETURNING grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                       grant_generation, assignment_generation, protocol,
+                       issued_address_type, issued_address, profile_plan_id, profile_plan_version,
+                       issued_at, window_start, window_end, issued_by, status,
+                       revoked_at, revoked_by, revocation_class, revocation_reason, updated_at
+                """, parameters, (rs, row) -> map(rs)).stream().findFirst().orElseThrow(() ->
+                new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                        "Poll grant insert did not return a persisted row"));
     }
 
     public Optional<SensorPollGrant> find(UUID tenantId, String sensorId, UUID grantId) {

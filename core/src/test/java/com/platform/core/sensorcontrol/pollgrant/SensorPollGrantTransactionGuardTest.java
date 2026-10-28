@@ -111,6 +111,13 @@ class SensorPollGrantTransactionGuardTest {
         verifyNoInteractions(dataSource, otherDataSource, connection);
     }
 
+    @Test
+    void insertReturningStillRejectsWithoutHeldCallerTransaction() {
+        // INSERT ... RETURNING must not bypass the same participation guard.
+        assertThrows(SensorControlException.class, () -> repo.insert(sampleIssued()));
+        verifyNoInteractions(dataSource, otherDataSource, connection);
+    }
+
     private static SensorPollGrant sampleIssued() {
         UUID id = UUID.randomUUID();
         Instant at = Instant.parse("2026-10-28T12:00:00Z");

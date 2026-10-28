@@ -44,6 +44,11 @@ public class SensorControlException extends DomainException {
     public static final String ERR_POLL_GRANT_GENERATION_INVALID = "ERR_POLL_GRANT_GENERATION_INVALID";
     public static final String ERR_POLL_GRANT_WINDOW_INVALID = "ERR_POLL_GRANT_WINDOW_INVALID";
     public static final String ERR_POLL_GRANT_CONFLICT = "ERR_POLL_GRANT_CONFLICT";
+    /**
+     * Malformed issuance request / actor binding (null/blank/oversized required fields).
+     * Does not disclose SQL details or cross-tenant existence.
+     */
+    public static final String ERR_POLL_GRANT_REQUEST_INVALID = "ERR_POLL_GRANT_REQUEST_INVALID";
 
     public SensorControlException(String code, String message) {
         super(code, message);

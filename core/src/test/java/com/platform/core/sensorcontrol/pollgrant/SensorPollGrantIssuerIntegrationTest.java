@@ -5,6 +5,7 @@ import com.platform.core.security.audit.AuditActions;
 import com.platform.core.security.http.SecurityAuditEmitter;
 import com.platform.core.sensorcontrol.SensorControlException;
 import com.platform.core.sensorcontrol.SensorControlRepository;
+import com.platform.core.sensorcontrol.SensorPrincipal;
 import com.platform.core.support.PostgresTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -17,18 +18,22 @@ import ch.qos.logback.core.read.ListAppender;
 
 import java.sql.Connection;
 import java.sql.PreparedStatement;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Protocol;
@@ -140,9 +145,12 @@ class SensorPollGrantIssuerIntegrationTest {
                 pg.tx().executeWithoutResult(tx -> {
                     pg.jdbc().update("DELETE FROM platform.sensor_poll_grant WHERE tenant_id IN (?, ?)",
                             tenant, otherTenant);
-                    pg.jdbc().update("DELETE FROM platform.sensor_allowed_entity WHERE tenant_id = ?", tenant);
-                    pg.jdbc().update("DELETE FROM platform.entity_management_endpoint WHERE tenant_id = ?", tenant);
-                    pg.jdbc().update("DELETE FROM platform.entity WHERE tenant_id = ?", tenant);
+                    pg.jdbc().update("DELETE FROM platform.sensor_allowed_entity WHERE tenant_id IN (?, ?)",
+                            tenant, otherTenant);
+                    pg.jdbc().update("DELETE FROM platform.entity_management_endpoint WHERE tenant_id IN (?, ?)",
+                            tenant, otherTenant);
+                    pg.jdbc().update("DELETE FROM platform.entity WHERE tenant_id IN (?, ?)",
+                            tenant, otherTenant);
                     pg.jdbc().update("DELETE FROM platform.sensor WHERE tenant_id IN (?, ?)",
                             tenant, otherTenant);
                     for (UUID id : List.of(tenant, otherTenant)) {
@@ -158,18 +166,22 @@ class SensorPollGrantIssuerIntegrationTest {
     }
 
     @Test
-    void allowAllSuccessfulIssuancePersistsExactSnapshot() {
+    void allowAllSuccessfulIssuanceReturnsExactDatabaseReadback() {
         SensorPollGrant row = pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP)));
         assertNotNull(row);
         assertEquals(FIXED_GRANT, row.grantId());
         assertEquals(Status.ISSUED, row.status());
         assertEquals("2001:db8::aa", row.issuedAddress());
         assertEquals(ISSUED, row.issuedAt());
-        assertEquals(row, grants.find(tenant, sensor, FIXED_GRANT).orElseThrow());
+        assertEquals(ISSUED, row.updatedAt());
+        SensorPollGrant reloaded = grants.find(tenant, sensor, FIXED_GRANT).orElseThrow();
+        assertEquals(row, reloaded);
         assertTrue(auditLog.list.stream().anyMatch(event ->
                 event.getFormattedMessage().contains("sensor.poll_grant.issue")
                         && event.getFormattedMessage().contains("SUCCESS")
-                        && !event.getFormattedMessage().contains("2001:db8")));
+                        && !event.getFormattedMessage().contains("2001:db8")
+                        && !event.getFormattedMessage().contains("issued_by")
+                        && !event.getFormattedMessage().contains("profile_plan")));
     }
 
     @Test
@@ -183,6 +195,7 @@ class SensorPollGrantIssuerIntegrationTest {
         assertEquals(allowlistSensor, row.sensorId());
         assertEquals(Protocol.ICMP, row.protocol());
         assertEquals(Status.ISSUED, row.status());
+        assertEquals(row, grants.find(tenant, allowlistSensor, row.grantId()).orElseThrow());
     }
 
     @Test
@@ -243,41 +256,268 @@ class SensorPollGrantIssuerIntegrationTest {
     }
 
     @Test
-    void heldPrincipalLockSerializesConcurrentScopeReplacement() throws Exception {
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        AtomicBoolean replaceFinished = new AtomicBoolean(false);
+    void typedInvalidActorRejectsWithoutMutation() {
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> pg.tx().execute(status -> issuer.issue(
+                        new SensorPollGrantIssuer.IssueRequest(
+                                tenant, sensor, entity, endpoint, Protocol.SNMP,
+                                1L, 0L, "planned-profile", "v1",
+                                ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), null))));
+        assertEquals(SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID, failure.getCode());
+        assertEquals(0, countGrants());
+        assertTrue(auditLog.list.stream().noneMatch(event ->
+                event.getFormattedMessage().contains("sensor.poll_grant.issue")));
+    }
+
+    @Test
+    void windowExpiryWhileWaitingForPrincipalLockRejects() throws Exception {
+        clearGrants();
+        AtomicReference<Instant> now = new AtomicReference<>(ISSUED);
+        Clock mutable = new Clock() {
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+        };
+        CountDownLatch lockAttempted = new CountDownLatch(1);
+        SensorControlRepository gatedSensors = new SensorControlRepository(pg.namedJdbc()) {
+            @Override
+            public SensorPrincipal lockPrincipalForShare(UUID tenantId, String sensorId) {
+                lockAttempted.countDown();
+                return super.lockPrincipalForShare(tenantId, sensorId);
+            }
+        };
+        SensorPollGrantIssuer gatedIssuer = new SensorPollGrantIssuer(
+                gatedSensors, endpoints, grants, audit, mutable, () -> FIXED_GRANT);
+
+        CountDownLatch mutationHeld = new CountDownLatch(1);
+        CountDownLatch releaseMutation = new CountDownLatch(1);
         ExecutorService pool = Executors.newFixedThreadPool(2);
+        AtomicReference<Throwable> issuerFailure = new AtomicReference<>();
         try {
-            Future<?> holder = pool.submit(() -> {
-                pg.tx().executeWithoutResult(status -> {
-                    issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
-                    locked.countDown();
-                    await(release);
-                });
-                return null;
-            });
-            Future<?> replacer = pool.submit(() -> {
-                assertTrue(locked.await(30, TimeUnit.SECONDS));
+            Future<?> mutator = pool.submit(() -> {
                 pg.tx().executeWithoutResult(status -> {
                     sensors.lockPrincipalForUpdate(tenant, sensor);
-                    sensors.replaceAllowedEntities(tenant, sensor, java.util.Set.of(), Instant.now());
-                    replaceFinished.set(true);
+                    mutationHeld.countDown();
+                    await(releaseMutation);
                 });
                 return null;
             });
-            assertTrue(locked.await(30, TimeUnit.SECONDS));
-            Thread.sleep(500);
-            assertFalse(replaceFinished.get(),
-                    "scope replacement must wait while issuance holds principal FOR UPDATE");
-            release.countDown();
-            holder.get(30, TimeUnit.SECONDS);
-            replacer.get(30, TimeUnit.SECONDS);
+            assertTrue(mutationHeld.await(30, TimeUnit.SECONDS));
+
+            Future<?> issuance = pool.submit(() -> {
+                try {
+                    pg.tx().execute(status -> gatedIssuer.issue(
+                            new SensorPollGrantIssuer.IssueRequest(
+                                    tenant, sensor, entity, endpoint, Protocol.SNMP,
+                                    1L, 0L, "planned-profile", "v1",
+                                    ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), "internal-actor")));
+                } catch (Throwable t) {
+                    issuerFailure.set(t);
+                }
+                return null;
+            });
+
+            assertTrue(lockAttempted.await(30, TimeUnit.SECONDS),
+                    "issuer must reach principal FOR SHARE while mutation holds FOR UPDATE");
+            now.set(ISSUED.plusSeconds(120));
+            releaseMutation.countDown();
+            mutator.get(30, TimeUnit.SECONDS);
+            issuance.get(30, TimeUnit.SECONDS);
+        } finally {
+            releaseMutation.countDown();
+            pool.shutdownNow();
+        }
+
+        Throwable failure = issuerFailure.get();
+        assertNotNull(failure);
+        SensorControlException typed = unwrap(failure);
+        assertEquals(SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID, typed.getCode());
+        assertEquals(0, countGrants());
+        assertTrue(auditLog.list.stream().noneMatch(event ->
+                event.getFormattedMessage().contains("sensor.poll_grant.issue")));
+    }
+
+    @Test
+    void principalShareLockRetainedThroughCommitAndRollback() throws Exception {
+        clearGrants();
+        assertPrincipalShareHeldUntilCompletion(true);
+        assertEquals(1, countGrants());
+        pg.tx().executeWithoutResult(tx ->
+                pg.jdbc().update("DELETE FROM platform.sensor_poll_grant WHERE tenant_id = ?", tenant));
+        assertPrincipalShareHeldUntilCompletion(false);
+        assertEquals(0, countGrants());
+    }
+
+    @Test
+    void endpointShareLockRetainedThroughCommitAndRollback() throws Exception {
+        clearGrants();
+        assertEndpointShareHeldUntilCompletion(true);
+        assertEquals(1, countGrants());
+        pg.tx().executeWithoutResult(tx ->
+                pg.jdbc().update("DELETE FROM platform.sensor_poll_grant WHERE tenant_id = ?", tenant));
+        assertEndpointShareHeldUntilCompletion(false);
+        assertEquals(0, countGrants());
+    }
+
+    @Test
+    void mutationFirstBlocksIssuanceUntilReleaseThenIssuanceCompletes() throws Exception {
+        clearGrants();
+        CountDownLatch mutationHeld = new CountDownLatch(1);
+        CountDownLatch releaseMutation = new CountDownLatch(1);
+        CountDownLatch issuanceAttempted = new CountDownLatch(1);
+        AtomicBoolean issuanceCompleted = new AtomicBoolean(false);
+        AtomicReference<SensorPollGrant> issued = new AtomicReference<>();
+        SensorControlRepository gated = new SensorControlRepository(pg.namedJdbc()) {
+            @Override
+            public SensorPrincipal lockPrincipalForShare(UUID tenantId, String sensorId) {
+                issuanceAttempted.countDown();
+                return super.lockPrincipalForShare(tenantId, sensorId);
+            }
+        };
+        SensorPollGrantIssuer gatedIssuer = new SensorPollGrantIssuer(
+                gated, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> FIXED_GRANT);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<?> mutator = pool.submit(() -> {
+                pg.tx().executeWithoutResult(status -> {
+                    sensors.lockPrincipalForUpdate(tenant, sensor);
+                    mutationHeld.countDown();
+                    await(releaseMutation);
+                });
+                return null;
+            });
+            assertTrue(mutationHeld.await(30, TimeUnit.SECONDS));
+
+            Future<?> issuance = pool.submit(() -> {
+                SensorPollGrant row = pg.tx().execute(status ->
+                        gatedIssuer.issue(request(sensor, entity, endpoint, Protocol.SNMP)));
+                issued.set(row);
+                issuanceCompleted.set(true);
+                return null;
+            });
+
+            assertTrue(issuanceAttempted.await(30, TimeUnit.SECONDS),
+                    "issuance must attempt principal FOR SHARE behind mutation");
+            assertFalse(issuanceCompleted.get(),
+                    "issuance must not complete before mutation releases FOR UPDATE");
+            releaseMutation.countDown();
+            mutator.get(30, TimeUnit.SECONDS);
+            issuance.get(30, TimeUnit.SECONDS);
+        } finally {
+            releaseMutation.countDown();
+            pool.shutdownNow();
+        }
+        assertTrue(issuanceCompleted.get());
+        assertEquals(FIXED_GRANT, issued.get().grantId());
+        assertEquals(1, countGrants());
+    }
+
+    @Test
+    void issuanceFirstBlocksPrincipalMutationWithNowaitOracleUntilRelease() throws Exception {
+        clearGrants();
+        assertIssuanceBlocksPrincipalMutationUntilCompletion(true);
+        pg.tx().executeWithoutResult(tx ->
+                pg.jdbc().update("DELETE FROM platform.sensor_poll_grant WHERE tenant_id = ?", tenant));
+        assertIssuanceBlocksPrincipalMutationUntilCompletion(false);
+    }
+
+    @Test
+    void simultaneousValidIssuancesAreNotSerializedByShareLocks() throws Exception {
+        clearGrants();
+        CyclicBarrier bothHoldingShare = new CyclicBarrier(2);
+        AtomicInteger shareHolders = new AtomicInteger();
+        SensorControlRepository shareAware = new SensorControlRepository(pg.namedJdbc()) {
+            @Override
+            public SensorPrincipal lockPrincipalForShare(UUID tenantId, String sensorId) {
+                SensorPrincipal principal = super.lockPrincipalForShare(tenantId, sensorId);
+                shareHolders.incrementAndGet();
+                try {
+                    bothHoldingShare.await(30, TimeUnit.SECONDS);
+                } catch (Exception e) {
+                    throw new IllegalStateException(e);
+                }
+                return principal;
+            }
+        };
+        UUID grantA = UUID.fromString("018f0e0a-0000-7000-8000-000000000501");
+        UUID grantB = UUID.fromString("018f0e0a-0000-7000-8000-000000000502");
+        AtomicInteger next = new AtomicInteger();
+        UUID[] ids = {grantA, grantB};
+        SensorPollGrantIssuer parallelIssuer = new SensorPollGrantIssuer(
+                shareAware, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> ids[next.getAndIncrement()]);
+
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<SensorPollGrant> first = pool.submit(() -> pg.tx().execute(status ->
+                    parallelIssuer.issue(request(sensor, entity, endpoint, Protocol.SNMP))));
+            Future<SensorPollGrant> second = pool.submit(() -> pg.tx().execute(status ->
+                    parallelIssuer.issue(new SensorPollGrantIssuer.IssueRequest(
+                            tenant, sensor, entity, endpoint, Protocol.ICMP,
+                            2L, 0L, "planned-profile", "v1",
+                            ISSUED.minusSeconds(1), ISSUED.plusSeconds(60), "internal-actor"))));
+            SensorPollGrant a = first.get(30, TimeUnit.SECONDS);
+            SensorPollGrant b = second.get(30, TimeUnit.SECONDS);
+            assertNotEquals(a.grantId(), b.grantId());
+            assertEquals(2, shareHolders.get());
+            assertEquals(2, countGrants());
         } finally {
             pool.shutdownNow();
         }
-        assertTrue(replaceFinished.get());
-        assertEquals(1, countGrants());
+    }
+
+    @Test
+    void generatedUuidCollisionIncludingForeignTenantMapsToNondisclosingConflict() {
+        clearGrants();
+        UUID foreignGrant = FIXED_GRANT;
+        pg.tx().executeWithoutResult(tx -> {
+            UUID foreignEntity = UUID.randomUUID();
+            UUID foreignEndpoint = UUID.randomUUID();
+            pg.jdbc().update("""
+                    INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                        lifecycle_state, first_seen_at, last_seen_at, created_by, created_at, updated_at)
+                    VALUES (?, ?, 'NETWORK_DEVICE', 'foreign-fixture', 'ACTIVE', NOW(), NOW(), 'fixture', NOW(), NOW())
+                    """, foreignEntity, otherTenant);
+            pg.jdbc().update("""
+                    INSERT INTO platform.entity_management_endpoint (endpoint_id, tenant_id, entity_id,
+                        address_type, address, state, source, is_primary, created_by, created_at, updated_by, updated_at)
+                    VALUES (?, ?, ?, 'IPV4', '192.0.2.50', 'ACTIVE', 'MANUAL', TRUE, 'fixture', NOW(), 'fixture', NOW())
+                    """, foreignEndpoint, otherTenant, foreignEntity);
+            pg.jdbc().update("""
+                    INSERT INTO platform.sensor_poll_grant (grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                        grant_generation, assignment_generation, protocol, issued_address_type, issued_address,
+                        profile_plan_id, profile_plan_version, issued_at, window_start, window_end, issued_by,
+                        status, updated_at)
+                    VALUES (?, ?, ?, ?, ?, 1, 0, 'SNMP', 'IPV4', '192.0.2.50',
+                        'foreign-plan', 'v1', ?, ?, ?, 'foreign-actor', 'ISSUED', ?)
+                    """, foreignGrant, otherTenant, otherTenantSensor, foreignEntity, foreignEndpoint,
+                    Timestamp.from(ISSUED), Timestamp.from(ISSUED.minusSeconds(1)),
+                    Timestamp.from(ISSUED.plusSeconds(60)), Timestamp.from(ISSUED));
+        });
+
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP))));
+        assertEquals(SensorControlException.ERR_POLL_GRANT_CONFLICT, failure.getCode());
+        assertFalse(failure.getMessage().toLowerCase().contains("duplicate"));
+        assertFalse(failure.getMessage().toLowerCase().contains("sql"));
+        assertFalse(failure.getMessage().toLowerCase().contains(otherTenant.toString()));
+        assertEquals(0, countGrants());
+        assertTrue(auditLog.list.stream().noneMatch(event ->
+                event.getFormattedMessage().contains("sensor.poll_grant.issue")));
     }
 
     @Test
@@ -313,95 +553,16 @@ class SensorPollGrantIssuerIntegrationTest {
     }
 
     @Test
-    void heldPrincipalLockBlocksConcurrentDisable() throws Exception {
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        AtomicBoolean disableFinished = new AtomicBoolean(false);
-        AtomicReference<Throwable> disableFailure = new AtomicReference<>();
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        try {
-            Future<?> holder = pool.submit(() -> {
-                pg.tx().executeWithoutResult(status -> {
-                    issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
-                    locked.countDown();
-                    await(release);
-                });
-                return null;
-            });
-            Future<?> disabler = pool.submit(() -> {
-                assertTrue(locked.await(30, TimeUnit.SECONDS));
-                try {
-                    pg.tx().executeWithoutResult(status ->
-                            sensors.lockPrincipalForUpdate(tenant, sensor));
-                    disableFinished.set(true);
-                } catch (Throwable t) {
-                    disableFailure.set(t);
-                }
-                return null;
-            });
-            assertTrue(locked.await(30, TimeUnit.SECONDS));
-            Thread.sleep(500);
-            assertFalse(disableFinished.get(), "disable/lock must wait while issuance holds principal FOR UPDATE");
-            release.countDown();
-            holder.get(30, TimeUnit.SECONDS);
-            disabler.get(30, TimeUnit.SECONDS);
-        } finally {
-            pool.shutdownNow();
-        }
-        assertNull(disableFailure.get());
-        assertTrue(disableFinished.get());
-        assertEquals(1, countGrants());
-    }
-
-    @Test
-    void heldEndpointShareBlocksConcurrentEndpointMutation() throws Exception {
-        CountDownLatch locked = new CountDownLatch(1);
-        CountDownLatch release = new CountDownLatch(1);
-        AtomicBoolean mutationFinished = new AtomicBoolean(false);
-        ExecutorService pool = Executors.newFixedThreadPool(2);
-        try {
-            Future<?> holder = pool.submit(() -> {
-                pg.tx().executeWithoutResult(status -> {
-                    issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
-                    locked.countDown();
-                    await(release);
-                });
-                return null;
-            });
-            Future<?> mutator = pool.submit(() -> {
-                assertTrue(locked.await(30, TimeUnit.SECONDS));
-                try (Connection independent = pg.dataSource().getConnection()) {
-                    independent.setAutoCommit(false);
-                    try (PreparedStatement statement = independent.prepareStatement("""
-                            UPDATE platform.entity_management_endpoint
-                               SET address = '2001:db8::mutated'
-                             WHERE endpoint_id = ?
-                            """)) {
-                        statement.setQueryTimeout(2);
-                        statement.setObject(1, endpoint);
-                        try {
-                            statement.executeUpdate();
-                            mutationFinished.set(true);
-                            independent.commit();
-                        } catch (SQLException expected) {
-                            independent.rollback();
-                        }
-                    }
-                }
-                return null;
-            });
-            assertTrue(locked.await(30, TimeUnit.SECONDS));
-            Thread.sleep(500);
-            assertFalse(mutationFinished.get(),
-                    "endpoint mutation must not complete while issuance holds FOR SHARE");
-            release.countDown();
-            holder.get(30, TimeUnit.SECONDS);
-            mutator.get(30, TimeUnit.SECONDS);
-        } finally {
-            pool.shutdownNow();
-        }
-        SensorPollGrant row = grants.find(tenant, sensor, FIXED_GRANT).orElseThrow();
-        assertEquals("2001:db8::aa", row.issuedAddress());
+    void ordinaryRollbackAfterInsertEmitsNoAudit() {
+        auditLog.list.clear();
+        pg.tx().execute(status -> {
+            issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
+            status.setRollbackOnly();
+            return null;
+        });
+        assertEquals(0, countGrants());
+        assertTrue(auditLog.list.stream().noneMatch(event ->
+                event.getFormattedMessage().contains("sensor.poll_grant.issue")));
     }
 
     @Test
@@ -409,11 +570,240 @@ class SensorPollGrantIssuerIntegrationTest {
         assertEquals(0, countGrants());
         assertTrue(grants.find(tenant, sensor, FIXED_GRANT).isEmpty());
         assertEquals("sensor.poll_grant.issue", AuditActions.SENSOR_POLL_GRANT_ISSUE.value());
-        // Source-only proof: issuer is constructed in-test; no Spring controller/route is invoked.
         assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
                 org.springframework.stereotype.Service.class));
         assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
                 org.springframework.web.bind.annotation.RestController.class));
+        assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
+                org.springframework.scheduling.annotation.Scheduled.class));
+        assertFalse(SensorPollGrantIssuer.class.isAnnotationPresent(
+                org.springframework.context.annotation.Bean.class));
+    }
+
+    private void assertPrincipalShareHeldUntilCompletion(boolean commitHolder) throws Exception {
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Throwable> holderFailure = new AtomicReference<>();
+        AtomicReference<Integer> holderPid = new AtomicReference<>();
+        UUID grantId = commitHolder
+                ? UUID.fromString("018f0e0a-0000-7000-8000-000000000601")
+                : UUID.fromString("018f0e0a-0000-7000-8000-000000000602");
+        SensorPollGrantIssuer localIssuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> grantId);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> holder = null;
+        try {
+            holder = pool.submit(() -> {
+                try {
+                    pg.tx().executeWithoutResult(status -> {
+                        localIssuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
+                        holderPid.set(pg.jdbc().queryForObject("SELECT pg_backend_pid()", Integer.class));
+                        held.countDown();
+                        await(release);
+                        if (!commitHolder) {
+                            status.setRollbackOnly();
+                        }
+                    });
+                } catch (Throwable t) {
+                    holderFailure.set(t);
+                    held.countDown();
+                    throw t instanceof RuntimeException re ? re : new IllegalStateException(t);
+                }
+                return null;
+            });
+            assertTrue(held.await(30, TimeUnit.SECONDS));
+            assertNull(holderFailure.get());
+            assertNotNull(holderPid.get());
+            try (Connection contender = openContender()) {
+                contender.setAutoCommit(false);
+                assertDifferentBackend(contender, holderPid.get());
+                assertForUpdateNowaitConflict(contender, """
+                        SELECT sensor_id FROM platform.sensor
+                         WHERE tenant_id = ? AND sensor_id = ?
+                         FOR UPDATE NOWAIT
+                        """, ps -> {
+                    ps.setObject(1, tenant);
+                    ps.setString(2, sensor);
+                }, "principal must remain SHARE-locked (55P03) while issuance holds");
+                contender.rollback();
+            }
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            holder = null;
+            try (Connection after = openContender()) {
+                after.setAutoCommit(false);
+                assertForUpdateNowaitAcquired(after, """
+                        SELECT sensor_id FROM platform.sensor
+                         WHERE tenant_id = ? AND sensor_id = ?
+                         FOR UPDATE NOWAIT
+                        """, ps -> {
+                    ps.setObject(1, tenant);
+                    ps.setString(2, sensor);
+                }, "principal FOR UPDATE NOWAIT must succeed after holder "
+                        + (commitHolder ? "commit" : "rollback"));
+                after.rollback();
+            }
+        } finally {
+            release.countDown();
+            if (holder != null) {
+                try {
+                    holder.get(5, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                    holder.cancel(true);
+                }
+            }
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    private void assertEndpointShareHeldUntilCompletion(boolean commitHolder) throws Exception {
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        AtomicReference<Integer> holderPid = new AtomicReference<>();
+        UUID grantId = commitHolder
+                ? UUID.fromString("018f0e0a-0000-7000-8000-000000000701")
+                : UUID.fromString("018f0e0a-0000-7000-8000-000000000702");
+        SensorPollGrantIssuer localIssuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> grantId);
+        ExecutorService pool = Executors.newSingleThreadExecutor();
+        Future<?> holder = null;
+        try {
+            holder = pool.submit(() -> {
+                pg.tx().executeWithoutResult(status -> {
+                    localIssuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
+                    holderPid.set(pg.jdbc().queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    held.countDown();
+                    await(release);
+                    if (!commitHolder) {
+                        status.setRollbackOnly();
+                    }
+                });
+                return null;
+            });
+            assertTrue(held.await(30, TimeUnit.SECONDS));
+            assertNotNull(holderPid.get());
+            try (Connection contender = openContender()) {
+                contender.setAutoCommit(false);
+                assertDifferentBackend(contender, holderPid.get());
+                assertForUpdateNowaitConflict(contender, """
+                        SELECT endpoint_id FROM platform.entity_management_endpoint
+                         WHERE tenant_id = ? AND entity_id = ? AND endpoint_id = ?
+                         FOR NO KEY UPDATE NOWAIT
+                        """, ps -> {
+                    ps.setObject(1, tenant);
+                    ps.setObject(2, entity);
+                    ps.setObject(3, endpoint);
+                }, "endpoint must remain SHARE-locked (55P03) while issuance holds");
+                contender.rollback();
+            }
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            holder = null;
+            try (Connection after = openContender()) {
+                after.setAutoCommit(false);
+                assertForUpdateNowaitAcquired(after, """
+                        SELECT endpoint_id FROM platform.entity_management_endpoint
+                         WHERE tenant_id = ? AND entity_id = ? AND endpoint_id = ?
+                         FOR NO KEY UPDATE NOWAIT
+                        """, ps -> {
+                    ps.setObject(1, tenant);
+                    ps.setObject(2, entity);
+                    ps.setObject(3, endpoint);
+                }, "endpoint FOR NO KEY UPDATE NOWAIT must succeed after holder "
+                        + (commitHolder ? "commit" : "rollback"));
+                after.rollback();
+            }
+        } finally {
+            release.countDown();
+            if (holder != null) {
+                try {
+                    holder.get(5, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                    holder.cancel(true);
+                }
+            }
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        }
+    }
+
+    private void assertIssuanceBlocksPrincipalMutationUntilCompletion(boolean commitHolder) throws Exception {
+        CountDownLatch held = new CountDownLatch(1);
+        CountDownLatch release = new CountDownLatch(1);
+        CountDownLatch mutationAttempted = new CountDownLatch(1);
+        AtomicBoolean mutationCompleted = new AtomicBoolean(false);
+        AtomicReference<Integer> holderPid = new AtomicReference<>();
+        UUID grantId = commitHolder
+                ? UUID.fromString("018f0e0a-0000-7000-8000-000000000801")
+                : UUID.fromString("018f0e0a-0000-7000-8000-000000000802");
+        SensorPollGrantIssuer localIssuer = new SensorPollGrantIssuer(
+                sensors, endpoints, grants, audit,
+                Clock.fixed(ISSUED, ZoneOffset.UTC),
+                () -> grantId);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        Future<?> holder = null;
+        try {
+            holder = pool.submit(() -> {
+                pg.tx().executeWithoutResult(status -> {
+                    localIssuer.issue(request(sensor, entity, endpoint, Protocol.SNMP));
+                    holderPid.set(pg.jdbc().queryForObject("SELECT pg_backend_pid()", Integer.class));
+                    held.countDown();
+                    await(release);
+                    if (!commitHolder) {
+                        status.setRollbackOnly();
+                    }
+                });
+                return null;
+            });
+            assertTrue(held.await(30, TimeUnit.SECONDS));
+            assertNotNull(holderPid.get());
+
+            Future<?> mutator = pool.submit(() -> {
+                mutationAttempted.countDown();
+                pg.tx().executeWithoutResult(status ->
+                        sensors.lockPrincipalForUpdate(tenant, sensor));
+                mutationCompleted.set(true);
+                return null;
+            });
+
+            assertTrue(mutationAttempted.await(30, TimeUnit.SECONDS));
+            try (Connection probe = openContender()) {
+                probe.setAutoCommit(false);
+                assertDifferentBackend(probe, holderPid.get());
+                assertForUpdateNowaitConflict(probe, """
+                        SELECT sensor_id FROM platform.sensor
+                         WHERE tenant_id = ? AND sensor_id = ?
+                         FOR UPDATE NOWAIT
+                        """, ps -> {
+                    ps.setObject(1, tenant);
+                    ps.setString(2, sensor);
+                }, "mutation must observe principal still SHARE-locked before release");
+                probe.rollback();
+            }
+            assertFalse(mutationCompleted.get(),
+                    "principal FOR UPDATE must not complete before issuance releases SHARE");
+            release.countDown();
+            holder.get(30, TimeUnit.SECONDS);
+            holder = null;
+            mutator.get(30, TimeUnit.SECONDS);
+            assertTrue(mutationCompleted.get());
+        } finally {
+            release.countDown();
+            if (holder != null) {
+                try {
+                    holder.get(5, TimeUnit.SECONDS);
+                } catch (Exception ignored) {
+                    holder.cancel(true);
+                }
+            }
+            pool.shutdownNow();
+            assertTrue(pool.awaitTermination(10, TimeUnit.SECONDS));
+        }
     }
 
     private SensorPollGrantIssuer.IssueRequest request(
@@ -429,6 +819,106 @@ class SensorPollGrantIssuerIntegrationTest {
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE tenant_id = ?",
                 Integer.class, tenant);
         return count == null ? 0 : count;
+    }
+
+    private void clearGrants() {
+        pg.tx().executeWithoutResult(tx ->
+                pg.jdbc().update("DELETE FROM platform.sensor_poll_grant WHERE tenant_id IN (?, ?)",
+                        tenant, otherTenant));
+    }
+
+    private Connection openContender() throws SQLException {
+        Connection connection = pg.dataSource().getConnection();
+        try {
+            connection.setNetworkTimeout(Runnable::run, 5_000);
+        } catch (SQLException | AbstractMethodError | UnsupportedOperationException ignored) {
+            // statement queryTimeout remains mandatory below
+        }
+        return connection;
+    }
+
+    private static void assertDifferentBackend(Connection independent, int holderPid) {
+        assertDoesNotThrow(() -> {
+            try (PreparedStatement statement = independent.prepareStatement("SELECT pg_backend_pid()")) {
+                statement.setQueryTimeout(5);
+                try (ResultSet result = statement.executeQuery()) {
+                    assertTrue(result.next());
+                    assertNotEquals(holderPid, result.getInt(1),
+                            "contender must be a different PostgreSQL backend/session");
+                }
+            }
+        });
+    }
+
+    @FunctionalInterface
+    private interface SqlBinder {
+        void bind(PreparedStatement ps) throws SQLException;
+    }
+
+    private static void assertForUpdateNowaitConflict(
+            Connection conn, String sql, SqlBinder binder, String message) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(5);
+            binder.bind(ps);
+            try {
+                ps.executeQuery().close();
+                fail(message + "; contender unexpectedly acquired lock");
+            } catch (SQLException e) {
+                assertTrue(sqlStateInChain(e, "55P03"),
+                        message + "; expected SQLSTATE 55P03, got " + describeSqlStates(e));
+            }
+        }
+    }
+
+    private static void assertForUpdateNowaitAcquired(
+            Connection conn, String sql, SqlBinder binder, String message) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setQueryTimeout(5);
+            binder.bind(ps);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), message + "; exact row missing");
+            } catch (SQLException e) {
+                fail(message + "; got " + describeSqlStates(e));
+            }
+        }
+    }
+
+    private static boolean sqlStateInChain(Throwable t, String sqlState) {
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof SQLException sqlEx) {
+                for (SQLException walk = sqlEx; walk != null; walk = walk.getNextException()) {
+                    if (sqlState.equals(walk.getSQLState())) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
+    }
+
+    private static String describeSqlStates(Throwable t) {
+        StringBuilder out = new StringBuilder();
+        for (Throwable cur = t; cur != null; cur = cur.getCause()) {
+            if (cur instanceof SQLException sqlEx) {
+                for (SQLException walk = sqlEx; walk != null; walk = walk.getNextException()) {
+                    if (!out.isEmpty()) {
+                        out.append(',');
+                    }
+                    out.append(walk.getSQLState());
+                }
+            }
+        }
+        return out.isEmpty() ? t.toString() : out.toString();
+    }
+
+    private static SensorControlException unwrap(Throwable failure) {
+        for (Throwable cur = failure; cur != null; cur = cur.getCause()) {
+            if (cur instanceof SensorControlException typed) {
+                return typed;
+            }
+        }
+        fail("expected SensorControlException, got " + failure);
+        throw new IllegalStateException(failure);
     }
 
     private static void await(CountDownLatch latch) {

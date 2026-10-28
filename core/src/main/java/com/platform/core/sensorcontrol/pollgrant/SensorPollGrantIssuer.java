@@ -42,14 +42,22 @@ import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Status;
  *
  * <p><b>Deterministic lock order</b> (caller-held Spring JDBC / PostgreSQL transaction):
  * <ol>
- *   <li>{@code platform.sensor} principal {@code FOR UPDATE} (tenant_id, sensor_id)</li>
+ *   <li>{@code platform.sensor} principal {@code FOR SHARE} (tenant_id, sensor_id)</li>
  *   <li>{@code platform.entity_management_endpoint} {@code FOR SHARE}
  *       (tenant_id, entity_id, endpoint_id)</li>
  *   <li>{@code INSERT} into {@code platform.sensor_poll_grant}</li>
  * </ol>
- * Principal lock first serializes concurrent disable/revoke/scope replacement. Endpoint
- * share lock retains the exact address snapshot until commit/rollback. This issuer never
- * opens a replacement or {@code REQUIRES_NEW} transaction.
+ * Principal {@code FOR SHARE} blocks disable/revoke/scope replacement while permitting
+ * independent valid issuances. Endpoint share lock retains the exact address snapshot
+ * until commit/rollback. Core time is sampled only after both locks are held so a window
+ * that expires while waiting is rejected. This issuer never opens a replacement or
+ * {@code REQUIRES_NEW} transaction.
+ *
+ * <p><b>Post-commit audit</b> is best-effort logging only: crash after commit can still
+ * lose the audit; audit failure cannot roll back an already committed grant; this slice
+ * does not implement durable transactional audit. Issuance success is never emitted
+ * before owning-transaction commit. Active Spring transaction synchronization is required
+ * before insert or audit registration; missing synchronization fails closed.
  *
  * <p>Remaining caller responsibility: plan existence/authority, generation allocation and
  * uniqueness across grants, delivery, renewal and typed admission (G1b/G2).
@@ -94,21 +102,21 @@ public final class SensorPollGrantIssuer {
 
     /**
      * Issue exactly one {@code ISSUED} grant inside the caller's open transaction.
-     * Rolls back with the caller on any failure; emits success audit only after insert.
+     * Returns the exact PostgreSQL-persisted row from {@code INSERT ... RETURNING}.
+     * Rolls back with the caller on any failure; registers success audit only for
+     * after-commit emission.
      */
     public SensorPollGrant issue(IssueRequest request) {
-        Objects.requireNonNull(request, "request");
-        ValidatedIssue validated = validate(request);
-        Instant issuedAt = clock.instant();
-        if (issuedAt.isBefore(validated.windowStart()) || issuedAt.isAfter(validated.windowEnd())) {
+        if (request == null) {
             throw new SensorControlException(
-                    SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
-                    "Issued time must fall within the grant window");
+                    SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    "Poll grant request is invalid");
         }
+        ValidatedIssue validated = validate(request);
 
-        grants.requireHeldCallerTransaction("issue");
+        requireHeldTransactionAndSynchronization();
 
-        SensorPrincipal principal = sensors.lockPrincipalForUpdate(
+        SensorPrincipal principal = sensors.lockPrincipalForShare(
                 validated.tenantId(), validated.sensorId());
         if (principal.status() != SensorLifecycleStatus.ACTIVE) {
             throw new SensorControlException(
@@ -129,8 +137,15 @@ public final class SensorPollGrantIssuer {
                     "Management endpoint unavailable for issuance");
         }
 
+        Instant issuedAt = clock.instant();
+        if (issuedAt.isBefore(validated.windowStart()) || issuedAt.isAfter(validated.windowEnd())) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
+                    "Issued time must fall within the grant window");
+        }
+
         UUID grantId = Objects.requireNonNull(grantIds.get(), "grantId");
-        SensorPollGrant row = new SensorPollGrant(
+        SensorPollGrant candidate = new SensorPollGrant(
                 grantId,
                 validated.tenantId(),
                 validated.sensorId(),
@@ -155,16 +170,27 @@ public final class SensorPollGrantIssuer {
                 issuedAt
         );
 
+        final SensorPollGrant persisted;
         try {
-            grants.insert(row);
+            persisted = grants.insert(candidate);
         } catch (DuplicateKeyException ex) {
             throw conflict();
         } catch (DataIntegrityViolationException ex) {
             throw conflict();
         }
 
-        emitIssuedAudit(row);
-        return row;
+        registerIssuedAuditAfterCommit(persisted);
+        return persisted;
+    }
+
+    private void requireHeldTransactionAndSynchronization() {
+        grants.requireHeldCallerTransaction("issue");
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Active Spring transaction synchronization required for issue; "
+                            + "issuance success must not emit before owning commit");
+        }
     }
 
     private void requireEntityAuthorized(SensorPrincipal principal, UUID entityId) {
@@ -179,7 +205,8 @@ public final class SensorPollGrantIssuer {
         }
     }
 
-    private void emitIssuedAudit(SensorPollGrant row) {
+    private void registerIssuedAuditAfterCommit(SensorPollGrant row) {
+        // Synchronization already proven before insert; register exactly one afterCommit.
         Map<String, String> metadata = new LinkedHashMap<>();
         metadata.put("grant_id", row.grantId().toString());
         metadata.put("sensor_id", row.sensorId());
@@ -188,31 +215,21 @@ public final class SensorPollGrantIssuer {
         metadata.put("protocol", row.protocol().name());
         metadata.put("grant_generation", Long.toString(row.grantGeneration()));
         metadata.put("assignment_generation", Long.toString(row.assignmentGeneration()));
-        metadata.put("profile_plan_id", row.profilePlanId());
-        metadata.put("profile_plan_version", row.profilePlanVersion());
-        metadata.put("window_start", row.windowStart().toString());
-        metadata.put("window_end", row.windowEnd().toString());
-        metadata.put("issued_by", row.issuedBy());
-        Runnable emit = () -> audit.emitControlEvent(
-                AuditCategory.SECURITY_ADMINISTRATION,
-                AuditActions.SENSOR_POLL_GRANT_ISSUE,
-                AuditOutcome.SUCCESS,
-                row.tenantId(),
-                "SENSOR_POLL_GRANT_ISSUED",
-                metadata
-        );
-        // Success audit only after commit. Rejected/rolled-back issuance must not audit success.
-        // Unit tests without a Spring synchronization manager emit immediately.
-        if (TransactionSynchronizationManager.isSynchronizationActive()) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    emit.run();
-                }
-            });
-        } else {
-            emit.run();
-        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                // Best-effort only: crash after commit can lose this; failure cannot roll
+                // back the committed grant; durable transactional audit is out of scope.
+                audit.emitControlEvent(
+                        AuditCategory.SECURITY_ADMINISTRATION,
+                        AuditActions.SENSOR_POLL_GRANT_ISSUE,
+                        AuditOutcome.SUCCESS,
+                        row.tenantId(),
+                        "SENSOR_POLL_GRANT_ISSUED",
+                        metadata
+                );
+            }
+        });
     }
 
     private static SensorControlException conflict() {
@@ -222,13 +239,13 @@ public final class SensorPollGrantIssuer {
     }
 
     private static ValidatedIssue validate(IssueRequest request) {
-        UUID tenantId = Objects.requireNonNull(request.tenantId(), "tenantId");
+        UUID tenantId = requireUuid(request.tenantId(), "tenantId");
         String sensorId = requireSensorId(request.sensorId());
-        UUID entityId = Objects.requireNonNull(request.entityId(), "entityId");
-        UUID endpointId = Objects.requireNonNull(request.endpointId(), "endpointId");
-        Protocol protocol = Objects.requireNonNull(request.protocol(), "protocol");
-        Instant windowStart = Objects.requireNonNull(request.windowStart(), "windowStart");
-        Instant windowEnd = Objects.requireNonNull(request.windowEnd(), "windowEnd");
+        UUID entityId = requireUuid(request.entityId(), "entityId");
+        UUID endpointId = requireUuid(request.endpointId(), "endpointId");
+        Protocol protocol = requireProtocol(request.protocol());
+        Instant windowStart = requireInstant(request.windowStart(), "windowStart");
+        Instant windowEnd = requireInstant(request.windowEnd(), "windowEnd");
         String issuedBy = requireIssuedBy(request.issuedBy());
         String planId = requirePlanField(request.profilePlanId(), "profilePlanId");
         String planVersion = requirePlanField(request.profilePlanVersion(), "profilePlanVersion");
@@ -251,6 +268,33 @@ public final class SensorPollGrantIssuer {
                 planId, planVersion, windowStart, windowEnd, issuedBy);
     }
 
+    private static UUID requireUuid(UUID value, String field) {
+        if (value == null) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    "Poll grant request is invalid");
+        }
+        return value;
+    }
+
+    private static Instant requireInstant(Instant value, String field) {
+        if (value == null) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    "Poll grant request is invalid");
+        }
+        return value;
+    }
+
+    private static Protocol requireProtocol(Protocol protocol) {
+        if (protocol == null) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    "Poll grant request is invalid");
+        }
+        return protocol;
+    }
+
     private static String requireSensorId(String sensorId) {
         if (sensorId == null || sensorId.isBlank() || sensorId.length() > 128) {
             throw new SensorControlException(
@@ -261,9 +305,10 @@ public final class SensorPollGrantIssuer {
     }
 
     private static String requireIssuedBy(String issuedBy) {
-        Objects.requireNonNull(issuedBy, "issuedBy");
-        if (issuedBy.isEmpty() || issuedBy.length() > 256) {
-            throw new IllegalArgumentException("issuedBy must be 1..256 characters");
+        if (issuedBy == null || issuedBy.isEmpty() || issuedBy.length() > 256) {
+            throw new SensorControlException(
+                    SensorControlException.ERR_POLL_GRANT_REQUEST_INVALID,
+                    "Poll grant request is invalid");
         }
         return issuedBy;
     }
