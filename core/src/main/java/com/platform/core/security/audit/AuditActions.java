@@ -61,5 +61,12 @@ public final class AuditActions {
     public static final AuditAction SENSOR_CONTROL_DESIRED_SET =
             new AuditAction("sensor.control.desired.set");
 
+    /**
+     * Core poll-grant issuance (Issue #229 G1a). Metadata must never include
+     * endpoint addresses, credentials or secrets.
+     */
+    public static final AuditAction SENSOR_POLL_GRANT_ISSUE =
+            new AuditAction("sensor.poll_grant.issue");
+
     private AuditActions() {}
 }

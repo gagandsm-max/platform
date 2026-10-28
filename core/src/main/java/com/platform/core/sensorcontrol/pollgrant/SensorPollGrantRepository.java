@@ -19,17 +19,72 @@ import java.util.UUID;
 import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.*;
 
 /**
- * Unwired persistence adapter over V015; no issuance or admission authority.
+ * Unwired persistence adapter over V015; no admission or scheduler activation.
  * Callers must supply trusted, already-authorized tenant/Sensor identifiers.
  * Uses the caller's Spring JDBC transaction when present (no independent commit).
  * The conditional UPDATE protects transitions through this adapter; V015 does
  * not prevent every possible direct SQL rewrite of terminal metadata.
+ * Insert is reserved for the internal Core issuer under a held caller transaction.
  */
 public final class SensorPollGrantRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     public SensorPollGrantRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+    }
+
+    /**
+     * Fail closed unless this repository's DataSource connection participates in the
+     * caller's active PostgreSQL transaction. Used by issuance before acquiring locks.
+     */
+    public void requireHeldCallerTransaction(String operation) {
+        requireActiveCallerTransaction(operation);
+    }
+
+    /**
+     * Persist one ISSUED grant row. Requires the caller's held transaction; does not
+     * open a replacement or {@code REQUIRES_NEW} transaction. Callers must already
+     * have proven Sensor/endpoint authority under retained locks.
+     */
+    public void insert(SensorPollGrant grant) {
+        Objects.requireNonNull(grant, "grant");
+        requireActiveCallerTransaction("insert");
+        if (grant.status() != Status.ISSUED) {
+            throw new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Only ISSUED grants may be inserted through this adapter");
+        }
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("grantId", grant.grantId())
+                .addValue("tenant", grant.tenantId())
+                .addValue("sensor", grant.sensorId())
+                .addValue("entity", grant.entityId())
+                .addValue("endpoint", grant.endpointId())
+                .addValue("grantGeneration", grant.grantGeneration())
+                .addValue("assignmentGeneration", grant.assignmentGeneration())
+                .addValue("protocol", grant.protocol().name())
+                .addValue("addressType", grant.issuedAddressType().name())
+                .addValue("address", grant.issuedAddress())
+                .addValue("planId", grant.profilePlanId())
+                .addValue("planVersion", grant.profilePlanVersion())
+                .addValue("issuedAt", Timestamp.from(grant.issuedAt()))
+                .addValue("windowStart", Timestamp.from(grant.windowStart()))
+                .addValue("windowEnd", Timestamp.from(grant.windowEnd()))
+                .addValue("issuedBy", grant.issuedBy())
+                .addValue("status", Status.ISSUED.name())
+                .addValue("updatedAt", Timestamp.from(grant.updatedAt()));
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address, profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by, status, updated_at
+                ) VALUES (
+                    :grantId, :tenant, :sensor, :entity, :endpoint,
+                    :grantGeneration, :assignmentGeneration, :protocol,
+                    :addressType, :address, :planId, :planVersion,
+                    :issuedAt, :windowStart, :windowEnd, :issuedBy, :status, :updatedAt
+                )
+                """, parameters);
     }
 
     public Optional<SensorPollGrant> find(UUID tenantId, String sensorId, UUID grantId) {
