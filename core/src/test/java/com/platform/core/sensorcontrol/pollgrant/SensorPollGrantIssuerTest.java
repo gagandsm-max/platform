@@ -382,11 +382,17 @@ class SensorPollGrantIssuerTest {
         Instant justBelowMin = SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN.minusNanos(1);
         Instant exclusiveUpper = SensorPollGrantIssuer.PG_TIMESTAMPTZ_EXCLUSIVE_END;
         Instant pastExclusive = exclusiveUpper.plusNanos(1);
+        // PostgreSQL internal Julian-day-zero bound; earlier than pgJDBC finite OffsetDateTime min.
+        Instant postgresqlInternalJulianDayZero = Instant.ofEpochSecond(-210866803200L);
+        assertTrue(postgresqlInternalJulianDayZero.isBefore(SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN));
 
         assertWindowRejectedBeforeAuthority(Instant.MIN, Instant.MIN.plusSeconds(60));
         assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), Instant.MAX);
         assertWindowRejectedBeforeAuthority(justBelowMin, SensorPollGrantIssuer.PG_TIMESTAMPTZ_MIN.plusSeconds(60));
         assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), justBelowMin);
+        assertWindowRejectedBeforeAuthority(
+                postgresqlInternalJulianDayZero, postgresqlInternalJulianDayZero.plusSeconds(60));
+        assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), postgresqlInternalJulianDayZero);
         assertWindowRejectedBeforeAuthority(exclusiveUpper, exclusiveUpper.plusSeconds(1));
         assertWindowRejectedBeforeAuthority(ISSUED.minusSeconds(1), exclusiveUpper);
         assertWindowRejectedBeforeAuthority(pastExclusive, pastExclusive.plusSeconds(1));

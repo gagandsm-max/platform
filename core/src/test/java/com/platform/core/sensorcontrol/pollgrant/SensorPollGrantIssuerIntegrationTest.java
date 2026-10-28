@@ -16,6 +16,7 @@ import ch.qos.logback.classic.Logger;
 import ch.qos.logback.classic.spi.ILoggingEvent;
 import ch.qos.logback.core.read.ListAppender;
 
+import java.math.BigDecimal;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -542,9 +543,10 @@ class SensorPollGrantIssuerIntegrationTest {
     }
 
     /**
-     * Real PostgreSQL 16 + JDBC evidence that the declared timestamptz envelope
-     * bounds survive SensorPollGrantIssuer INSERT ... RETURNING and repository reload.
-     * A runtime failure at an exact constant remains production-correction evidence.
+     * Real PostgreSQL 16 + JDBC evidence that the declared finite pgJDBC/PostgreSQL
+     * timestamptz envelope bounds survive SensorPollGrantIssuer INSERT ... RETURNING
+     * and repository reload. Server-side {@code extract(epoch ...)} is the independent
+     * oracle — not Timestamp, OffsetDateTime formatting, or the row mapper under test.
      */
     @Test
     void exactPostgresqlTimestamptzBoundariesPersistThroughIssuerAndRepository() {
@@ -582,10 +584,11 @@ class SensorPollGrantIssuerIntegrationTest {
         assertExactBoundaryPersisted(
                 upperReturned, upperGrant, upperWindowStart, upperIssuedAt, maxAccepted);
 
+        assertNotEquals(lowerGrant, upperGrant);
         int deleted = pg.tx().execute(status -> pg.jdbc().update(
-                "DELETE FROM platform.sensor_poll_grant WHERE grant_id IN (?, ?)",
-                lowerGrant, upperGrant));
-        assertEquals(2, deleted, "cleanup must delete exactly the two boundary grants");
+                "DELETE FROM platform.sensor_poll_grant WHERE grant_id IN (?, ?) AND tenant_id = ?",
+                lowerGrant, upperGrant, tenant));
+        assertEquals(2, deleted, "cleanup must delete exactly the two fixture-owned boundary grants");
         assertEquals(0, countGrantRows(lowerGrant));
         assertEquals(0, countGrantRows(upperGrant));
         assertEquals(0, countGrants());
@@ -600,24 +603,32 @@ class SensorPollGrantIssuerIntegrationTest {
         assertNotNull(returned);
         assertEquals(grantId, returned.grantId());
         assertEquals(Status.ISSUED, returned.status());
+        assertNull(returned.revokedAt(), "ISSUED row revoked_at must map as null via OffsetDateTime");
         SensorPollGrant reloaded = grants.find(tenant, sensor, grantId).orElseThrow();
         assertEquals(returned, reloaded,
                 "INSERT ... RETURNING row must reload exactly through the repository");
         assertEquals(expectedWindowStart, returned.windowStart());
         assertEquals(expectedWindowEnd, returned.windowEnd());
         assertEquals(expectedIssuedAt, returned.issuedAt());
+        assertEquals(expectedIssuedAt, returned.updatedAt());
         assertEquals(returned.windowStart(), reloaded.windowStart());
         assertEquals(returned.windowEnd(), reloaded.windowEnd());
         assertEquals(returned.issuedAt(), reloaded.issuedAt());
+        assertEquals(returned.updatedAt(), reloaded.updatedAt());
+        assertNull(reloaded.revokedAt());
         assertEquals(0, returned.windowStart().getNano() % 1_000,
                 "window_start precision must be at most microseconds");
         assertEquals(0, returned.windowEnd().getNano() % 1_000,
                 "window_end precision must be at most microseconds");
         assertEquals(0, returned.issuedAt().getNano() % 1_000,
                 "issued_at precision must be at most microseconds");
+        assertEquals(0, returned.updatedAt().getNano() % 1_000,
+                "updated_at precision must be at most microseconds");
         assertEquals(1, countGrantRows(grantId),
                 "exactly one row must exist for boundary grant " + grantId);
         assertNoPostgresqlInfinity(grantId);
+        assertIndependentServerEpoch(
+                grantId, expectedWindowStart, expectedIssuedAt, expectedWindowEnd, expectedIssuedAt);
     }
 
     private int countGrantRows(UUID grantId) {
@@ -625,6 +636,48 @@ class SensorPollGrantIssuerIntegrationTest {
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE grant_id = ?",
                 Integer.class, grantId);
         return count == null ? 0 : count;
+    }
+
+    /**
+     * Independent PostgreSQL numeric epoch oracle. Expected values are constructed from
+     * Instant epochSecond + nano / 1e9 only — never through Timestamp, OffsetDateTime
+     * formatting, the grant row mapper, or the JDBC TIMESTAMPTZ conversion under test.
+     */
+    private void assertIndependentServerEpoch(
+            UUID grantId,
+            Instant expectedWindowStart,
+            Instant expectedIssuedAt,
+            Instant expectedWindowEnd,
+            Instant expectedUpdatedAt) {
+        pg.jdbc().query("""
+                SELECT extract(epoch FROM window_start)::numeric AS window_start_epoch,
+                       extract(epoch FROM issued_at)::numeric AS issued_at_epoch,
+                       extract(epoch FROM window_end)::numeric AS window_end_epoch,
+                       extract(epoch FROM updated_at)::numeric AS updated_at_epoch
+                  FROM platform.sensor_poll_grant
+                 WHERE grant_id = ?
+                """, rs -> {
+            assertTrue(rs.next(), "boundary grant must exist for epoch oracle " + grantId);
+            assertEpochEquals("window_start", expectedWindowStart, rs.getBigDecimal("window_start_epoch"));
+            assertEpochEquals("issued_at", expectedIssuedAt, rs.getBigDecimal("issued_at_epoch"));
+            assertEpochEquals("window_end", expectedWindowEnd, rs.getBigDecimal("window_end_epoch"));
+            assertEpochEquals("updated_at", expectedUpdatedAt, rs.getBigDecimal("updated_at_epoch"));
+            assertFalse(rs.next(), "epoch oracle must see exactly one row for " + grantId);
+            return null;
+        }, grantId);
+    }
+
+    private static void assertEpochEquals(String column, Instant expected, BigDecimal observed) {
+        assertNotNull(observed, column + " extract(epoch) must not be null");
+        BigDecimal expectedEpoch = independentEpochSeconds(expected);
+        assertEquals(0, expectedEpoch.compareTo(observed),
+                column + " server epoch must equal independent Instant epoch; expected="
+                        + expectedEpoch + " observed=" + observed);
+    }
+
+    private static BigDecimal independentEpochSeconds(Instant instant) {
+        return BigDecimal.valueOf(instant.getEpochSecond())
+                .add(BigDecimal.valueOf(instant.getNano(), 9));
     }
 
     private void assertNoPostgresqlInfinity(UUID grantId) {
@@ -635,9 +688,12 @@ class SensorPollGrantIssuerIntegrationTest {
                     OR window_end = 'infinity'::timestamptz
                     OR issued_at = '-infinity'::timestamptz
                     OR issued_at = 'infinity'::timestamptz
+                    OR updated_at = '-infinity'::timestamptz
+                    OR updated_at = 'infinity'::timestamptz
                     OR window_start::text ILIKE '%infinity%'
                     OR window_end::text ILIKE '%infinity%'
                     OR issued_at::text ILIKE '%infinity%'
+                    OR updated_at::text ILIKE '%infinity%'
                   FROM platform.sensor_poll_grant
                  WHERE grant_id = ?
                 """, Boolean.class, grantId);

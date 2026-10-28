@@ -18,9 +18,12 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 
-import java.sql.Timestamp;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneOffset;
+import java.time.chrono.IsoEra;
+import java.time.temporal.ChronoField;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Objects;
@@ -66,11 +69,17 @@ import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.Status;
 public final class SensorPollGrantIssuer {
 
     /**
-     * PostgreSQL 16 integer {@code timestamptz} inclusive minimum as Java Instant
-     * epoch seconds. Matches the JDBC/PostgreSQL storage contract — not an
-     * invented product TTL or epoch-policy bound.
+     * Inclusive finite lower bound for accepted application Instants: the intersection
+     * of PostgreSQL 16 {@code timestamptz} range and pgJDBC 42.7.4's finite
+     * {@link java.time.OffsetDateTime} mapping ({@code 4713-01-01 BCE} 00:00:00 UTC).
+     * Earlier values (including PostgreSQL's internal Julian-day-zero bound) are
+     * rejected because pgJDBC maps them to {@code -infinity}. Not an invented
+     * product TTL or epoch-year policy.
      */
-    static final Instant PG_TIMESTAMPTZ_MIN = Instant.ofEpochSecond(-210866803200L);
+    static final Instant PG_TIMESTAMPTZ_MIN = LocalDate.of(4713, 1, 1)
+            .with(ChronoField.ERA, IsoEra.BCE.getValue())
+            .atStartOfDay()
+            .toInstant(ZoneOffset.UTC);
     /**
      * PostgreSQL 16 integer {@code timestamptz} exclusive upper bound as Java
      * Instant epoch seconds.
@@ -334,9 +343,10 @@ public final class SensorPollGrantIssuer {
     }
 
     /**
-     * Reject Instant values outside the PostgreSQL 16/JDBC {@code timestamptz}
-     * envelope. Exercises {@link Timestamp#from(Instant)} so conversion failures
-     * surface as the same typed window error without exposing JDBC details.
+     * Reject Instant values outside the finite pgJDBC/PostgreSQL {@code timestamptz}
+     * envelope. Validates non-null range membership and UTC
+     * {@link java.time.OffsetDateTime} conversion (JDBC 4.2 TIMESTAMPTZ mapping)
+     * without using legacy {@code java.sql.Timestamp}.
      */
     private static void requirePersistableWindowInstant(Instant value) {
         try {
@@ -349,13 +359,15 @@ public final class SensorPollGrantIssuer {
     }
 
     private static void requirePersistableInstant(Instant value) {
-        if (value.isBefore(PG_TIMESTAMPTZ_MIN) || value.isAfter(PG_TIMESTAMPTZ_MAX_ACCEPTED)) {
+        if (value == null
+                || value.isBefore(PG_TIMESTAMPTZ_MIN)
+                || value.isAfter(PG_TIMESTAMPTZ_MAX_ACCEPTED)) {
             throw new SensorControlException(
                     SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,
                     "Grant window is outside the supported persistence range");
         }
         try {
-            Timestamp.from(value);
+            value.atOffset(ZoneOffset.UTC);
         } catch (RuntimeException ex) {
             throw new SensorControlException(
                     SensorControlException.ERR_POLL_GRANT_WINDOW_INVALID,

@@ -10,8 +10,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -68,12 +70,12 @@ public final class SensorPollGrantRepository {
                 .addValue("address", grant.issuedAddress())
                 .addValue("planId", grant.profilePlanId())
                 .addValue("planVersion", grant.profilePlanVersion())
-                .addValue("issuedAt", Timestamp.from(grant.issuedAt()))
-                .addValue("windowStart", Timestamp.from(grant.windowStart()))
-                .addValue("windowEnd", Timestamp.from(grant.windowEnd()))
+                .addValue("issuedAt", toUtcOffsetDateTime(grant.issuedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+                .addValue("windowStart", toUtcOffsetDateTime(grant.windowStart()), Types.TIMESTAMP_WITH_TIMEZONE)
+                .addValue("windowEnd", toUtcOffsetDateTime(grant.windowEnd()), Types.TIMESTAMP_WITH_TIMEZONE)
                 .addValue("issuedBy", grant.issuedBy())
                 .addValue("status", Status.ISSUED.name())
-                .addValue("updatedAt", Timestamp.from(grant.updatedAt()));
+                .addValue("updatedAt", toUtcOffsetDateTime(grant.updatedAt()), Types.TIMESTAMP_WITH_TIMEZONE);
         return jdbc.query("""
                 INSERT INTO platform.sensor_poll_grant (
                     grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
@@ -174,7 +176,7 @@ public final class SensorPollGrantRepository {
         Objects.requireNonNull(terminal, "terminal");
         MapSqlParameterSource parameters = scope(tenantId, sensorId, grantId)
                 .addValue("status", terminal.status().name())
-                .addValue("at", Timestamp.from(terminal.revokedAt()))
+                .addValue("at", toUtcOffsetDateTime(terminal.revokedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
                 .addValue("by", terminal.revokedBy())
                 .addValue("class", terminal.revocationClass().name())
                 .addValue("reason", terminal.revocationReason());
@@ -214,7 +216,6 @@ public final class SensorPollGrantRepository {
 
     private static SensorPollGrant map(ResultSet rs) throws SQLException {
         String revocation = rs.getString("revocation_class");
-        Timestamp revoked = rs.getTimestamp("revoked_at");
         return new SensorPollGrant(
                 rs.getObject("grant_id", UUID.class), rs.getObject("tenant_id", UUID.class),
                 rs.getString("sensor_id"), rs.getObject("entity_id", UUID.class),
@@ -222,10 +223,32 @@ public final class SensorPollGrantRepository {
                 rs.getLong("assignment_generation"), Protocol.valueOf(rs.getString("protocol")),
                 AddressType.valueOf(rs.getString("issued_address_type")), rs.getString("issued_address"),
                 rs.getString("profile_plan_id"), rs.getString("profile_plan_version"),
-                rs.getTimestamp("issued_at").toInstant(), rs.getTimestamp("window_start").toInstant(),
-                rs.getTimestamp("window_end").toInstant(), rs.getString("issued_by"),
-                Status.valueOf(rs.getString("status")), revoked == null ? null : revoked.toInstant(),
+                requireTimestamptzInstant(rs, "issued_at"),
+                requireTimestamptzInstant(rs, "window_start"),
+                requireTimestamptzInstant(rs, "window_end"),
+                rs.getString("issued_by"),
+                Status.valueOf(rs.getString("status")),
+                nullableTimestamptzInstant(rs, "revoked_at"),
                 rs.getString("revoked_by"), revocation == null ? null : RevocationClass.valueOf(revocation),
-                rs.getString("revocation_reason"), rs.getTimestamp("updated_at").toInstant());
+                rs.getString("revocation_reason"),
+                requireTimestamptzInstant(rs, "updated_at"));
+    }
+
+    /** JDBC 4.2 TIMESTAMPTZ bind: OffsetDateTime at UTC — not legacy {@code Timestamp}. */
+    private static OffsetDateTime toUtcOffsetDateTime(Instant instant) {
+        return Objects.requireNonNull(instant, "instant").atOffset(ZoneOffset.UTC);
+    }
+
+    private static Instant requireTimestamptzInstant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        if (value == null) {
+            throw new SQLException("Required timestamptz column " + column + " was null");
+        }
+        return value.toInstant();
+    }
+
+    private static Instant nullableTimestamptzInstant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
     }
 }
