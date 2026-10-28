@@ -71,10 +71,13 @@ class SensorPollGrantTransactionGuardTest {
     @Test
     void synchronizedHolderWithoutConnectionIsRejectedBeforeQuery() {
         TransactionSynchronizationManager.setActualTransactionActive(true);
-        ConnectionHolder holder = new ConnectionHolder((Connection) null);
-        holder.setSynchronizedWithTransaction(true);
+        ConnectionHolder holder = mock(ConnectionHolder.class);
+        when(holder.isSynchronizedWithTransaction()).thenReturn(true);
+        when(holder.getConnection()).thenThrow(
+                new IllegalStateException("fixture has no bound connection"));
         TransactionSynchronizationManager.bindResource(dataSource, holder);
         assertRejected("not bound");
+        verify(holder).getConnection();
         verifyNoInteractions(connection);
     }
 
