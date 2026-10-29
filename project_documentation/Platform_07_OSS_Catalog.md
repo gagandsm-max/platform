@@ -268,3 +268,14 @@ Podman compatibility is **not** a v1 engineering requirement. Adding a second lo
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
 Issue #269 selects **no new OSS dependency**. Phase-2 breadth shall preferentially use already-approved protocol/SDK foundations and Capability/Integration Pack adapters. Any future database driver, middleware client, backup SDK, OCI SDK, APM/NPM/DPI SDK, browser/APM agent, packet engine or other runtime dependency requires normal exact-version OSS admission before implementation. Full native APM/DPI work is Phase 2.5+ and receives no dependency pre-approval from this roadmap.
+
+---
+
+## Issue #272 OSS decision
+
+Issue #272 selects **no new OSS dependency**.
+
+Future Phase-2.5 implementation may require instrumentation, trace, profiling, packet-capture/decoding or storage components, but each candidate MUST pass the normal OSS admission process for licence/redistribution, security/CVE posture, maintenance health, resource cost, architecture fit, air-gap/offline packaging, tenant/privacy implications, upgrade/rollback and vendor-lock-in/exit risk.
+
+Roadmap inclusion is not dependency approval.
+
