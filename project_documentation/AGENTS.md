@@ -279,3 +279,18 @@ Non-negotiable execution rules:
 - Phase 2 MAY integrate with external APM/NPM/DPI/SIEM/CMDB/ITSM tools and ingest their evidence through governed Integration Packs; external-tool evidence never bypasses tenant identity, provenance, confidence, RBAC, audit, rate/cardinality controls or Platform RCA safety.
 - Capability/vendor/product/version claims remain dimensional certification claims. A named technology in a Mother Reference is never proof of implementation/certification.
 - Do not create customer-specific Core forks. Use Capability Packs, Integration Packs, policies and canonical contracts.
+
+---
+
+## Issue #272 — enterprise partial-closure and Phase 2.5 Deep Observability governance
+
+Issue #272 is the follow-up authority to Issue #269. It does not change Phase-1 first-GA scope and does not create implementation/certification claims.
+
+Engineering agents MUST apply these rules:
+1. No accepted enterprise requirement may remain an unowned generic "later/partial/TBD" at roadmap level. It must identify phase, native/integrated/customer-profile route, owning capability/pack, certification method and explicit non-goal/fallback.
+2. Phase 2 remains Enterprise ITOM/AIOps RFP Readiness. Full native APM/RUM/profiling and full native DPI/continuous packet analytics remain outside Phase 2.
+3. Phase 2.5 is **Native Deep Observability** and owns full native APM plus full native DPI/Network Performance Intelligence.
+4. Phase 2.5 planning MUST NOT select new OSS/dependencies, create a new mandatory service/database, repurpose existing BUILD IDs, create customer-specific Core forks, or weaken security/privacy boundaries without separate change control.
+5. Phase-2 exit requires every accepted enterprise requirement class to resolve to one of: **Native — Certified**, **Integrated — Certified**, **Customer Profile — Certifiable**, or **Explicit Phase-2.5 deferment**.
+6. SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED remains mandatory.
+
