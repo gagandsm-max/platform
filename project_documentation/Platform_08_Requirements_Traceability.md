@@ -1258,3 +1258,17 @@ Platform_23 now owns the formal Phase-2 enterprise-readiness supplement `PRD-ECR
 | REQ-ECR-011 | Full native APM deferred; Phase-2 integration/bounded OTel boundary | Phase 2 / 2.5+ |
 | REQ-ECR-012 | Full native DPI deferred; Phase-2 Flow/path/triggered-packet/integration boundary | Phase 2 / 2.5+ |
 | REQ-ECR-013 | ECRP-P2-v1 certification profile | Phase 2 exit |
+
+---
+
+## Issue #272 global requirement traceability supplement
+
+The global RTM SHALL include:
+- `PRD-ECR-014 / REQ-ECR-014` — Procurement Requirement Closure Contract;
+- Phase-2.5 Native Deep Observability requirements `PRD-DOR-001..013 / REQ-DOR-001..013`;
+- `DORP-P2.5-v1` certification linkage in Platform_14.
+
+Traceability SHALL distinguish roadmap disposition from maturity. A requirement may be fully planned while remaining NOT_IMPLEMENTED / NOT_CERTIFIED.
+
+Phase-2 exit traceability SHALL show each accepted enterprise requirement class as Native—Certified, Integrated—Certified, Customer Profile—Certifiable, or Explicit Phase-2.5 deferment.
+
