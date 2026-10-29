@@ -370,3 +370,20 @@ Before selecting/shipping a browser runtime, benchmark memory/browser, CPU/brows
 ### v3.3 formal CMDB scale requirement anchor
 
 - `REQ-CMDB-007` — CMDB reconciliation is incremental, idempotent, rate-bounded and audited; certification benchmarks representative 100K, 500K and 1M+ bindings/CIs plus multi-million relationships where applicable without converting those test points into universal capacity claims.
+
+## Phase 1.5 Serverless cardinality/cost overlay — Issue #268
+
+Governing requirement: `REQ-SLS-007` / `PRD-SLS-007`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Mother version remains 3.3.0.
+
+Serverless estates can generate extreme cardinality and event volume. Capacity contracts MUST include:
+
+- bounded dimensions/tags (drop/aggregate excess with explicit quality accounting);
+- bounded log/event ingestion rates and retention interaction with 80% storage protection;
+- API request budgets per connector/tenant/provider with throttling/backoff on 429;
+- paginated/incremental discovery rather than full-estate stampede;
+- function/version/trigger reconciliation including deletion/ephemeral lifecycle;
+- query limits for Function detail and estate list views;
+- ingestion/storage budgets for aggregate metrics/events;
+- customer-visible API/quota/telemetry cost-impact signals where relevant.
+
+**Prohibited pattern:** polling once per invocation. Prefer provider aggregate telemetry and events. Serverless enrichment MUST shed/sample before harming protected Core/Sensor workloads. Exact numeric budgets remain benchmark outputs of BUILD-036 Phase 1.5 / BUILD-130 evidence — this section does not invent certified rates.

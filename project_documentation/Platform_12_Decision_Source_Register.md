@@ -487,3 +487,17 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 | BUILD-011 evidence boundary | SOURCE_FACT / not Phase-1 GA | BUILD-011 is technically POST-MERGE CERTIFIED at main `179a72837d050f4c757858452d3719c2e8978b95` (CI `38120861672`). That evidence does not certify Phase-1 GA, capacity, Core HA, or eBPF physical transport. |
 | Platform_07 Tranche A posture | ARCH-DELEGATED process | Mandatory in-scope review; default VERIFY_ONLY. Modify only on physically proven current OSS source contradiction. Certificate-envelope distinction alone does not authorize new OSS decisions. |
 | No BUILD/REQ renumbering | USER-FIXED | Existing BUILD IDs and requirement identifiers remain stable. No new REQ/PRD/BUILD IDs in Tranche A. |
+
+## 25. Phase 1.5 Serverless / FaaS monitoring — Issue #268
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| First-class Serverless/FaaS monitoring phase | USER-FIXED (Issue #268) | Serverless / FaaS monitoring is **Phase 1.5**, not Phase 1. SPECIFIED only; not implementation or certification. |
+| Required Phase 1.5 providers | USER-FIXED (Issue #268) | AWS Lambda; Azure Functions; Google Cloud Functions; Google Cloud Run. |
+| OCI Functions / other FaaS | USER-FIXED (Issue #268) | Remain future / evidence-dependent unless separately promoted. |
+| Architecture reuse | USER-FIXED (Issue #268) | Extends Cloud Sensor + Capability Pack + canonical entity graph + existing PostgreSQL/ClickHouse/Kafka/Valkey. No new mandatory microservice, serverless control plane, database, second entity model or mandatory in-function Agent. |
+| Collection default | USER-FIXED (Issue #268) | Provider-native APIs/monitoring/logs/events/change APIs plus governed OTel where available. Baseline MUST NOT require customer function instrumentation. |
+| False-alert invariant | USER-FIXED (Issue #268) | Provider/API/auth/collector/quota/stale/no-data ≠ Function DOWN. `No Data ≠ Function Down` is normative. |
+| Formal IDs | ARCH-DELEGATED allocation under Founder scope | `PRD-SLS-001..009` / `REQ-SLS-001..009`. No `Platform_24`. Mother version remains **3.3.0**; v3.4.0 reserved for Tranche D. |
+| Build mapping | ARCH-DELEGATED | Reuse BUILD-036 (Kubernetes/Cloud/OTLP Phase 1.5 scope) and BUILD-026 (Capability Pack) plus existing graph/alert/RCA/UI builds. Do not invent a new BUILD solely for the feature name. |
+| OSS posture | ARCH-DELEGATED | Reuse Platform_07 AWS/Azure/GCP SDK approvals (OSS-047/048/049). No new dependency admitted by this documentation task. |

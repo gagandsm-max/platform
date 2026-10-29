@@ -1449,3 +1449,27 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1.5** | Exactly two full Core nodes Active/Standby; positive fencing; split-brain prevented | MSP/shared multi-tenancy + noisy-neighbor adversarial certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push HA continuity; PG/Kafka/ClickHouse recovery | Privileged NCM automation defaults (maker-checker, canary, blast-radius, rollback where eligible) |
 
 Multi-Sensor assignment generation, lease ownership, stale privileged-work rejection and replay/idempotency remain **Phase 1 mandatory** even with standalone Core. Physical HA mechanisms remain unselected. Issue #218 records that Core numeric-only ingestion does not yet accept Sensor ICMP typed evidence end-to-end; architecture still requires typed ICMP observation acceptance without collapsing missing/partial evidence into DEVICE_DOWN.
+
+## 50. Phase 1.5 Serverless / FaaS monitoring HLD — Issue #268
+
+**Status:** SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Mother version remains 3.3.0.
+
+### 50.1 Subsystem ownership
+
+| Concern | Owner | Notes |
+|---|---|---|
+| Provider inventory/metrics/logs/events/change APIs | Cloud Sensor / `CloudProviderAdapter` (BUILD-036 Phase 1.5) | AWS Lambda, Azure Functions, Google Cloud Functions, Google Cloud Run |
+| Pack declarations / dimensional certification | Capability Pack runtime (BUILD-026) | Technology Monitoring Pack classification; listing ≠ CERTIFIED |
+| Canonical entities/relationships | Core entity + temporal graph services | Provider IDs are attributes/provenance only (`REQ-SLS-003`) |
+| Telemetry history | ClickHouse via existing Kafka ingestion | Aggregate provider telemetry; no per-invocation poll (`REQ-SLS-007`) |
+| Control/policy/credentials metadata | PostgreSQL + Credential Profiles | Least-privilege temporary/managed/workload identity (`REQ-SLS-006`) |
+| Cache/ephemeral | Valkey | No authority |
+| Alert/RCA/Investigation UI | Existing alert qualification, RCA, Investigation Workbench, cloud UX | No new top-level product (`REQ-SLS-008`) |
+
+### 50.2 Explicit non-goals
+
+No new mandatory microservice, serverless control plane, dedicated database, second entity model or mandatory in-function Agent (`REQ-SLS-002`). No baseline request/response payload capture or source-code retrieval. No arbitrary function invocation for health testing. OCI Functions remain future unless separately promoted.
+
+### 50.3 Failure-domain behavior
+
+Provider API outage, auth failure, 429/throttling, quota exhaustion, collector failure, stale or missing data degrade connector/telemetry quality and MUST NOT assert Function DOWN (`REQ-SLS-005`).

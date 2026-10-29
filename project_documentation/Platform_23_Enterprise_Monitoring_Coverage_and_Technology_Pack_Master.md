@@ -306,6 +306,8 @@ This does **not** reopen full bytecode APM. Integrate with APM products via Inte
 
 AWS; Azure; GCP; OCI using normalized Platform-owned cloud entity/state contracts. Vendor identifiers never override tenant/entity authority.
 
+**Phase 1.5 Serverless / FaaS (Issue #268; `REQ-SLS-001..009`):** first-class certification **targets** (not current claims) for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run under Capability Pack / Cloud Sensor architecture. OCI Functions and other FaaS platforms remain future / evidence-dependent unless separately promoted. SPECIFIED ≠ IMPLEMENTED ≠ CERTIFIED. No mandatory in-function Agent; no new pack framework.
+
 ### 8.9 SaaS / security SaaS
 
 Generic pack contract should support: REST; OAuth; API keys; pagination; JSON extraction; provider health; synthetics; webhooks; canonical state normalization; rate-limit handling; dashboards; alerts.
@@ -703,3 +705,7 @@ Evidence-dependent targets include GCP; Aruba/HPE, Dell networking, Extreme, Che
 ### 29.5 Integration Pack certification
 
 ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mechanics. Connector certification records exact deployment variant/edition/API/auth plus supported Incident/Problem/Change/Approval/activity/reverse-event/CMDB/relationship/business-service capabilities and limitations. Phase-1 connector priorities are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP; six Phase-1.5 certification-priority connectors are defined by `REQ-INT-013`.
+
+## 30. Phase 1.5 Serverless / FaaS coverage note — Issue #268
+
+Serverless/FaaS monitoring is delivered through the existing Capability Pack + Cloud Sensor architecture (`REQ-EMC-002`, `REQ-EMC-007`) with formal product requirements `PRD-SLS-001..009` / `REQ-SLS-001..009`. Dimensional certification (Discovery/L1/L2/L3/Topology/Diagnostics/Security/version) applies; naming a provider is not certification. Mother Reference version remains 3.3.0; no `Platform_24`.

@@ -836,7 +836,7 @@ Device Packs are versioned and signed; import/update supports compatibility chec
 ---
 
 
-Flow/NTA strengthens Network/Flow contracts under existing `REQ-NET-004` authority. Log/SIEM strengthens syslog/OTLP/application/OS/container/cloud/custom governed log contracts under existing network/integration/data owners; Platform is not a full SIEM replacement and does not mandate Elasticsearch/OpenSearch/Loki. Cloud/full-stack strengthens `REQ-INF-008..010` (AWS/Azure/GCP/OCI roots). Extensibility/API Studio/Webhook strengthens `REQ-EXT-001..007` under the single Capability Pack architecture. ITSM/Automation strengthens `REQ-INT-001..005`. **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for these domains; `Platform_23` remains the highest specialized master.
+Flow/NTA strengthens Network/Flow contracts under existing `REQ-NET-004` authority. Log/SIEM strengthens syslog/OTLP/application/OS/container/cloud/custom governed log contracts under existing network/integration/data owners; Platform is not a full SIEM replacement and does not mandate Elasticsearch/OpenSearch/Loki. Cloud/full-stack strengthens `REQ-INF-008..010` (AWS/Azure/GCP/OCI roots) and Phase 1.5 Serverless/FaaS monitoring under `REQ-SLS-001..009` (AWS Lambda, Azure Functions, Google Cloud Functions, Google Cloud Run; OCI Functions future). Extensibility/API Studio/Webhook strengthens `REQ-EXT-001..007` under the single Capability Pack architecture. ITSM/Automation strengthens `REQ-INT-001..005`. **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for these domains; `Platform_23` remains the highest specialized master.
 
 
 ## 19. NCM and remediation architecture
@@ -1563,6 +1563,19 @@ Active path probing is executed by Network Sensors toward monitored infrastructu
 ### 44.6 Cloud network depth closure
 
 Cloud monitoring under `REQ-INF-008` is clarified to include first-class Phase-1 cloud network entities and relationships where provider APIs permit: account/subscription/project, region, VPC/VNet/network, subnet, route table, route, NIC, security policy, NAT, load balancer, transit/interconnect/private endpoint where applicable, workload, Kubernetes relation, and material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
+
+
+### 44.8 Phase 1.5 Serverless / FaaS monitoring architecture — Issue #268
+
+Serverless / FaaS monitoring is a Phase 1.5 extension of existing Cloud Sensor + Capability Pack architecture (`REQ-SLS-001`..`REQ-SLS-009`). Architecture decisions:
+
+1. **Reuse, do not fork:** Collection, normalization and connector health run in Cloud Sensor / CloudProviderAdapter paths governed by Capability Packs (BUILD-036 Phase 1.5 scope; BUILD-026 pack runtime). Core remains authoritative for tenant identity, policy, canonical entity graph, alert qualification, incident correlation, RCA, reporting and audit.
+2. **No new plane:** Do not introduce a mandatory serverless microservice, separate control plane, dedicated serverless database, second entity model or mandatory in-function Agent (`REQ-SLS-002`).
+3. **Collection default:** Provider-native inventory/monitoring/log/event/change APIs plus governed OpenTelemetry where available. Customer OTel instrumentation is optional enrichment, not a baseline prerequisite.
+4. **Entity graph:** Account/Subscription/Project → Region → Serverless Service → Function/Service → Version/Revision/Alias → Trigger/Event Source → Downstream Dependency (`REQ-SLS-003`). Edges carry temporal provenance/confidence. Provider IDs never override Platform tenant/entity authority.
+5. **False-alert invariant:** Monitoring-path/connector failures produce MONITORING_DEGRADED / STALE / UNKNOWN / connector-health evidence; they MUST NOT assert Function DOWN (`REQ-SLS-005`). `No Data ≠ Function Down` is normative.
+6. **Investigation:** Serverless entities participate in Investigation Workbench / canonical graph RCA; provider status is supporting evidence; `INCONCLUSIVE` remains valid (`REQ-SLS-008`).
+7. **Maturity:** SPECIFIED only. Listing AWS Lambda / Azure Functions / Google Cloud Functions / Google Cloud Run is not implementation or certification. OCI Functions remain future unless promoted.
 
 ### 44.7 Sizing overlay OBS-P1 over SNWP-2500-v1
 

@@ -3571,7 +3571,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** Cloud ops  
-**Purpose:** AWS/Azure/GCP accounts, regions, compute, storage, DB, network, K8s/LB, health and capacity.
+**Purpose:** AWS/Azure/GCP accounts, regions, compute, storage, DB, network, K8s/LB, Serverless/FaaS (Phase 1.5), health and capacity.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -3584,6 +3584,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Storage
 - Databases
 - Kubernetes
+- Serverless
 
 **Default filters:**
 - Time range
@@ -3632,7 +3633,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
-**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
+**Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion. For Serverless (`REQ-SLS-005` / `REQ-SLS-008`), connector/API/auth/quota/stale/no-data MUST NOT become Function DOWN.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
@@ -3644,7 +3645,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** AWS ops  
-**Purpose:** EC2/RDS/network/LB/storage/CloudWatch/regions/alerts.
+**Purpose:** EC2/RDS/network/LB/storage/CloudWatch/regions/Lambda/Serverless (Phase 1.5)/alerts.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -3655,6 +3656,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Load Balancers
 - Storage
 - Regions
+- Lambda/Serverless
 - Alerts
 
 **Default filters:**
@@ -3716,7 +3718,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** Azure ops  
-**Purpose:** VMs, Azure Monitor, VNet, SQL, storage, LB and AKS.
+**Purpose:** VMs, Azure Monitor, VNet, SQL, storage, LB, AKS and Functions/Serverless (Phase 1.5).
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -3727,6 +3729,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Storage
 - Load Balancers
 - AKS
+- Functions/Serverless
 - Alerts
 
 **Default filters:**
@@ -3788,7 +3791,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Cloud/Containers  
 **Primary roles:** GCP ops  
-**Purpose:** Compute, networking, storage, GKE, DB and monitoring.
+**Purpose:** Compute, networking, storage, GKE, DB, Cloud Functions/Cloud Run/Serverless (Phase 1.5) and monitoring.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -3798,6 +3801,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Storage
 - GKE
 - Databases
+- Functions/Cloud Run/Serverless
 - Alerts
 
 **Default filters:**
@@ -7482,3 +7486,32 @@ Synchronization/conflict UI keeps **Monitoring State** separate from **External 
 ### 15.6 Phase-1.5 specialist UX
 
 Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/port/VLAN attachment history and provenance. Browser Journey Synthetics adds step/assertion/timing/failure-evidence views only after browser runtime admission. Database Performance Intelligence adds bounded fingerprint/wait/blocking/deadlock/regression/plan evidence. Virtualization Optimization shows evidence-backed recommendations requiring governed human action. None of these Phase-1.5 screens are first-GA implementation claims.
+
+## Phase 1.5 Serverless UI extension — Issue #268
+
+**Status:** SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Governing requirements: `REQ-SLS-008`, `PRD-SLS-008`. Does **not** add a new UI-099 or top-level navigation product; extends UI-044..UI-047 and contextual entity-detail patterns within the frozen UI-001..UI-098 catalogue.
+
+### Contextual Function / Serverless Service Detail
+
+Accessible from Multi-Cloud/AWS/Azure/GCP Serverless lists and from alert/incident/graph drill-downs. Role/tenant/resource scope enforced server-side. Where applicable, default tabs/views include:
+
+- Overview
+- Invocations
+- Errors
+- Latency
+- Concurrency
+- Cold Starts
+- Triggers
+- Dependencies
+- Versions/Revisions
+- Logs/Events
+- Changes
+- Quotas
+- Cost/Usage
+- Alerts/Incidents
+- RCA
+- Telemetry Quality
+
+**Data-quality behavior (`REQ-SLS-005`):** Distinguish `No Data`, `Stale`, `Monitoring Degraded`, connector-health, deleted/retired, disabled, zero-invocation and scale-to-zero from operational Function/service failure. Never convert missing or connector-failed telemetry into Function DOWN.
+
+**RCA/Investigation:** Serverless entities participate in Investigation Workbench / canonical graph; provider status is supporting evidence; `INCONCLUSIVE` remains valid.

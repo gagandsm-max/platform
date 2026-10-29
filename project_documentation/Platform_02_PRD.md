@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-11 — Issue #200/#202/#206 Tranche A Sensor RAM ratio correction (≥4 GB/vCPU; retains v3.3.0); prior Phase 1/1.5 certification-envelope reconciliation retained
+**Last reconciliation:** 2026-10-29 — Issue #268 Phase 1.5 Serverless/FaaS monitoring Mother Reference reconciliation (SPECIFIED only; retains v3.3.0). Prior Issue #200/#202/#206 Tranche A retained
 
 ---
 
@@ -805,6 +805,40 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
 
 AWS, Azure and GCP integrations shall use supported provider APIs/SDKs and normalize accounts/subscriptions/projects, regions, networks (VPCs/VNets, subnets, route tables, routes, NICs, security policies, NAT gateways, transit/interconnect/private endpoints where applicable, and cloud load balancers), compute workloads, storage, database entities, and Kubernetes relations (`REQ-INF-008`), along with material control-plane change evidence. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED (subject to provider capability, customer policy, privacy, cost, API/rate limits, cardinality, storage, and certification) and are not a mandatory universal Phase-1 dependency.
+
+
+### 14.1A Serverless / FaaS monitoring — Phase 1.5 (Issue #268)
+
+First-class Serverless / FaaS monitoring is a **Phase 1.5** product-scope addition. It is SPECIFIED only; this section does not assert implementation, certification, runtime availability, GA support or provider/version certification.
+
+**Required Phase 1.5 providers (`PRD-SLS-001` / `REQ-SLS-001`):**
+- AWS Lambda
+- Azure Functions
+- Google Cloud Functions
+- Google Cloud Run
+
+OCI Functions and additional FaaS/serverless platforms remain future / evidence-dependent unless separately promoted by Founder change control.
+
+**Architecture boundary (`PRD-SLS-002` / `REQ-SLS-002`):** Serverless monitoring extends the existing Cloud Sensor + Capability Pack + canonical entity graph + PostgreSQL/ClickHouse/Kafka/Valkey architecture. It MUST NOT create a new mandatory microservice, separate serverless control plane, new database, second entity model or mandatory in-function Agent. Default collection is provider-native APIs, monitoring APIs, logs, events and change/configuration APIs, plus governed OpenTelemetry where available. Customers MAY instrument functions through supported OTel mechanisms, but AmrudAi MUST NOT require customer code instrumentation merely to provide baseline serverless monitoring.
+
+**Canonical entity model (`PRD-SLS-003` / `REQ-SLS-003`):**
+Cloud Account / Subscription / Project → Region → Serverless Service → Function / Service → Version / Revision / Alias → Trigger / Event Source → Downstream Dependency.
+
+Provider-native identities are attributes/provenance only; they never replace Platform tenant-scoped canonical entity identity. Where provider evidence exists, dependency examples include API Gateway / Azure API Management / cloud ingress; EventBridge / Event Grid / Pub/Sub; SNS / SQS / Service Bus / queues/topics; object-storage triggers; database/change-stream triggers; scheduler/timer triggers; HTTP endpoints; downstream functions; databases; caches; storage; Kubernetes/cloud services; and external APIs. Relationships are temporal and provenance-bearing.
+
+**Normalized monitoring dimensions (`PRD-SLS-004` / `REQ-SLS-004`):** Where the provider exposes evidence, Platform SHALL normalize at least: (1) invocation/request count and rate; (2) success and error count/rate; (3) duration / execution latency and available percentiles; (4) throttles; (5) concurrency / saturation; (6) provisioned/reserved concurrency where supported; (7) timeout evidence; (8) retry evidence; (9) async event age/backlog where exposed; (10) dead-letter / destination delivery failures where exposed; (11) cold-start / initialization latency where provider evidence permits; (12) memory/configured resource limits and resource-use evidence where provider telemetry safely exposes it; (13) runtime/language/version metadata; (14) function versions, aliases or service revisions; (15) triggers/event sources; (16) deployment/configuration/change facts; (17) provider logs/events; (18) provider service-health evidence; (19) quota/headroom; (20) cost/usage signals where provider APIs expose them and customer policy permits; (21) connector/API health, API throttling, lag and freshness. Platform MUST NOT invent a metric a provider does not expose.
+
+**State / false-alert contract (`PRD-SLS-005` / `REQ-SLS-005`):** Cloud provider API failure ≠ Function DOWN. Authentication failure ≠ Function DOWN. Collector failure ≠ Function DOWN. API quota/throttling ≠ Function DOWN. Stale data ≠ Function DOWN. No Data ≠ Function Down. These produce Monitoring Degraded / Stale / Unknown / connector-health evidence as appropriate. A function/service operational failure requires provider/resource or corroborated workload evidence, not merely loss of monitoring. Function deletion/retirement, disabled state, zero invocations, scaling to zero and monitoring-data absence are different states.
+
+**Security (`PRD-SLS-006` / `REQ-SLS-006`):** Least-privilege cloud identity; AWS role/STS-style temporary identity preferred over long-lived root keys where supported; Azure managed identity/service principal as appropriate; GCP workload/service identity as appropriate; tenant/resource scope on all reads and actions; provider credentials never returned to browser; secrets and environment-variable values must not be logged or captured; function request/response payload capture is NOT part of baseline serverless monitoring; no source-code retrieval is required for baseline monitoring; no arbitrary function invocation for health testing; bounded APIs, dimensions and tags; connector endpoints/identities cannot create SSRF or tenant escape; audit onboarding/configuration/credential actions; provider IDs cannot override Platform authority.
+
+**Cardinality / cost / rate (`PRD-SLS-007` / `REQ-SLS-007`):** Bound dimensions/tags, log/event ingestion, API request budgets, provider throttling/backoff, paginated/incremental discovery, function/version/trigger reconciliation, deletion/ephemeral lifecycle handling, query limits and ingestion/storage budgets; expose customer-visible API/quota/telemetry cost impact where relevant. Do not poll once per invocation; use provider aggregate telemetry and events.
+
+**UI / RCA (`PRD-SLS-008` / `REQ-SLS-008`):** Extend existing cloud UX (Multi-Cloud / AWS / Azure / GCP Overviews) rather than creating another top-level product. Contextual Function / Serverless Service Detail covers Overview, Invocations, Errors, Latency, Concurrency, Cold Starts, Triggers, Dependencies, Versions/Revisions, Logs/Events, Changes, Quotas, Cost/Usage, Alerts/Incidents, RCA and Telemetry Quality where applicable. Serverless entities participate in the canonical graph and Investigation Workbench with provenance/confidence. Provider status is supporting evidence, not causal proof; `INCONCLUSIVE` remains valid.
+
+**Certification (`PRD-SLS-009` / `REQ-SLS-009`):** Phase 1.5 certification MUST include wrong/expired credentials; permission denied; provider API outage; API throttling / 429; quota exhaustion; pagination; large function estates; high-cardinality tags; function creation/deletion/recreation; alias/version/revision changes; trigger changes; zero-invocation function; scale-to-zero behavior; stale/no-data distinction; provider monitoring lag; missing metrics; log/event burst; dead-letter/destination failure where provider supports it; concurrency saturation; retry storms; cold-start evidence where available; connector restart/recovery; tenant isolation; overlapping/provider IDs across tenants; no false Function DOWN caused by connector failure; performance/resource/API-cost regression; and audit/redaction. A listed provider or metric is NOT certification.
+
+Maturity: **SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED**. Build ownership reuses BUILD-036 (Kubernetes/Cloud/OTLP Phase 1.5 scope) and BUILD-026 (Capability Pack), with existing downstream graph/alert/RCA/UI builds; no new BUILD ID is invented by this reconciliation.
 
 ### 14.2 Kubernetes
 
@@ -2496,3 +2530,45 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 | `REQ-OTEL-003` | Phase-1 OTLP enforces request/decompression bounds, cardinality governance, sensitive-field policy, explicit reject/drop accounting and bounded backpressure; no-data is not service failure. |
 | `REQ-OTEL-005` | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges and sampling after benchmark gates. |
 | `REQ-OTEL-006` | Java/.NET/Node.js/Python instrumentation onboarding is a Phase-1.5 certification target; full developer APM/profiling/RUM/session replay remains excluded. |
+
+---
+
+## 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268
+
+Founder-approved product-scope decision. Mother Reference set version remains **3.3.0**. No `Platform_24`. No v3.4.0 promotion. Specification only — IMPLEMENTATION_STATUS=NOT_STARTED; CERTIFICATION_STATUS=NOT_CERTIFIED.
+
+### 59.1 Formal product requirements
+
+| ID | Normative product requirement |
+|---|---|
+| `PRD-SLS-001` | Platform SHALL provide first-class Phase 1.5 Serverless / FaaS monitoring for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run. OCI Functions and other FaaS platforms remain future / evidence-dependent unless separately promoted. |
+| `PRD-SLS-002` | Serverless monitoring SHALL extend Cloud Sensor + Capability Pack + canonical entity graph + existing PostgreSQL/ClickHouse/Kafka/Valkey architecture without a new mandatory microservice, serverless control plane, database, second entity model or mandatory in-function Agent. Baseline monitoring MUST NOT require customer function instrumentation; governed OTel MAY enrich when available. |
+| `PRD-SLS-003` | Platform SHALL model Cloud Account/Subscription/Project → Region → Serverless Service → Function/Service → Version/Revision/Alias → Trigger/Event Source → Downstream Dependency, with provider IDs as provenance attributes only and temporal provenance-bearing dependency relationships where evidence exists. |
+| `PRD-SLS-004` | Platform SHALL normalize the serverless monitoring dimensions listed in §14.1A where providers expose them and MUST NOT invent unsupported metrics. |
+| `PRD-SLS-005` | Platform SHALL enforce the serverless false-alert contract in §14.1A: provider/API/auth/collector/quota/stale/no-data failures are monitoring/connector quality states, not Function DOWN. |
+| `PRD-SLS-006` | Platform SHALL enforce least-privilege cloud identity, temporary/managed/workload identity patterns where supported, tenant/resource scope, credential non-exposure, secret/env redaction, no baseline payload/source capture, no arbitrary health invoke, bounded APIs/tags, SSRF/tenant-escape prevention, audited onboarding and provider-ID non-authority. |
+| `PRD-SLS-007` | Platform SHALL protect cardinality, API budgets, log/event volume, discovery pagination, lifecycle reconciliation, query/ingestion/storage budgets and customer-visible cost impact; MUST NOT poll once per invocation. |
+| `PRD-SLS-008` | Platform SHALL extend existing Multi-Cloud/AWS/Azure/GCP UX with Serverless surfaces and contextual Function/Serverless Service Detail, and SHALL include serverless entities in canonical-graph Investigation/RCA with provenance/confidence and valid `INCONCLUSIVE`. |
+| `PRD-SLS-009` | Phase 1.5 serverless certification SHALL cover the negative/edge matrix in §14.1A; listing a provider or metric is not certification. |
+
+### 59.2 Formal requirement ownership and downstream mapping
+
+| Requirement family | Normative product scope | Required downstream owners |
+|---|---|---|
+| `REQ-SLS-001..009` | Phase 1.5 Serverless / FaaS monitoring (Issue #268) | Platform_03/04/05/06 architecture–dataflow; Platform_08 RTM; Platform_09 UI; Platform_10/18 security; Platform_11 capacity; Platform_12 Decision Register; Platform_14 quality; Platform_17 contracts; Platform_23 Capability Pack/coverage; Master Build Sequence (BUILD-036 / BUILD-026 reuse) |
+
+No row above implies implementation, benchmark, certification or deployment.
+
+### 59.3 Formal requirement anchors
+
+| Requirement | Normative owner statement |
+|---|---|
+| `REQ-SLS-001` | Phase 1.5 required providers are AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run; OCI Functions remain future unless promoted. |
+| `REQ-SLS-002` | Collection runs through Cloud Sensor + Capability Pack on existing datastores; no mandatory new microservice/database/control plane/in-function Agent; baseline needs no customer instrumentation. |
+| `REQ-SLS-003` | Canonical serverless entity hierarchy and trigger/dependency graph use tenant-scoped Platform identity with provider IDs as attributes/provenance. |
+| `REQ-SLS-004` | Normalized serverless telemetry/metadata dimensions from §14.1A are collected only when provider-exposed. |
+| `REQ-SLS-005` | Provider/API/auth/collector/quota/stale/no-data conditions MUST NOT assert Function DOWN; semantic states distinguish deleted, disabled, zero-invocation, scale-to-zero and missing monitoring data. |
+| `REQ-SLS-006` | Least-privilege temporary/managed/workload identities, tenant scope, secret/payload/source non-capture, no arbitrary invoke, SSRF controls and audited credential actions are mandatory. |
+| `REQ-SLS-007` | Cardinality/API/log/storage budgets, throttling/backoff, paginated discovery and aggregate (not per-invocation) collection are mandatory. |
+| `REQ-SLS-008` | Existing cloud overviews gain Serverless tabs/views; Function detail and Investigation/RCA participation are mandatory without a new top-level product. |
+| `REQ-SLS-009` | Phase 1.5 certification matrix in §14.1A is mandatory before support claims; SPECIFIED ≠ CERTIFIED. |

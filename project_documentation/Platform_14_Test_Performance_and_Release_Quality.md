@@ -463,3 +463,39 @@ Per certified connector/edition/API test authentication/permissions, standard/cu
 ### 12.7 Phase-1.5 browser/DB/virtualization/endpoint
 
 Browser journeys require credential isolation, sandbox/runtime admission, deterministic steps/assertions/timing, screenshot/artifact access/TTL/redaction, crash/timeout/cancellation and capacity isolation. DB intelligence requires safe fingerprint/wait/blocking/deadlock/regression/plan evidence without dangerous query execution/autotuning. Virtualization recommendations require evidence/false-positive testing and no autonomous apply. Endpoint/switch-port history requires identity/provenance/movement/tenant/privacy tests and no duplicate endpoint store.
+
+## Phase 1.5 Serverless certification gates — Issue #268
+
+Governing requirement: `REQ-SLS-009` / `PRD-SLS-009`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Listing a provider or metric is NOT certification.
+
+Phase 1.5 serverless certification for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run MUST include at minimum:
+
+1. wrong/expired credentials;
+2. permission denied;
+3. provider API outage;
+4. API throttling / 429;
+5. quota exhaustion;
+6. pagination;
+7. large function estates;
+8. high-cardinality tags;
+9. function creation/deletion/recreation;
+10. alias/version/revision changes;
+11. trigger changes;
+12. zero-invocation function;
+13. scale-to-zero behavior;
+14. stale/no-data distinction;
+15. provider monitoring lag;
+16. missing metrics;
+17. log/event burst;
+18. dead-letter/destination failure where provider supports it;
+19. concurrency saturation;
+20. retry storms;
+21. cold-start evidence where available;
+22. connector restart/recovery;
+23. tenant isolation;
+24. overlapping/provider IDs across tenants;
+25. no false Function DOWN caused by connector failure (`REQ-SLS-005`);
+26. performance/resource/API-cost regression (`REQ-SLS-007`);
+27. audit/redaction (`REQ-SLS-006`).
+
+Owning evidence lane: BUILD-036 Phase 1.5 with BUILD-026 pack dimensional evidence and downstream alert/RCA/UI gates as applicable.
