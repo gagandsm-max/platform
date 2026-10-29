@@ -181,3 +181,11 @@ Before browser runtime release, operations must define browser worker crash clea
 Phase-2 operational readiness adds runbooks for: Capability Pack incompatibility/degradation, Integration Pack auth/rate-limit/backlog/schema failure, CMDB reconciliation conflict, external APM/NPM/DPI evidence staleness, cloud-provider throttling, storage/SAN/database/middleware/backup connector failure, regulated data-egress violation, archive/WORM failure and enterprise retention pressure.
 
 Install/upgrade must preserve pack/connector compatibility and provide preflight before activating a new pack version. Unsupported versions fail visibly rather than silently degrading coverage.
+
+---
+
+## Issue #272 operational planning
+
+Phase-2.5 operations SHALL include explicit install/upgrade/rollback/runbook coverage for application instrumentation agents/SDKs, browser/mobile instrumentation where used, profile collectors, packet capture sources/sensors, decoder/content compatibility, trace/profile/packet storage, privacy/redaction policies and TLS-decryption/key-custody configuration where explicitly enabled.
+
+Failure of deep-observability components MUST degrade visibility, not silently change authoritative device/service state or bypass safe RCA evidence rules.

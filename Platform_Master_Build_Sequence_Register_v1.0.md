@@ -424,3 +424,41 @@ Each named technology must be tied to an exact product/version compatibility rec
 Issue #269 does **not** authorize Phase-1 enhancement diversion. Complete the current Phase-1 commercial certification critical path first. Phase-1.5 foundation work follows dependency readiness and may proceed in isolated lanes where it does not destabilize Phase 1. Phase-2 work is then driven by the ECRP gap matrix and Capability/Integration Pack certification priority.
 
 No separate Phase-2 codebase, schema fork, Core fork, customer-specific source branch, duplicate graph authority or generic telemetry datastore is allowed.
+
+---
+
+## Issue #272 — enterprise partial closure and Phase 2.5 Deep Observability roadmap
+
+**Authority:** Founder-authorized follow-up to Issue #269.
+**Maturity:** SPECIFIED/ROADMAP only.
+**Mother Reference version:** remains v3.3.0.
+
+### Phase-2 closure rule
+
+The Phase-2 program SHALL not leave accepted enterprise requirement classes as unowned architecture-level partials. By Phase-2 exit each must resolve to:
+- Native — Certified;
+- Integrated — Certified;
+- Customer Profile — Certifiable;
+- Explicit Phase-2.5 deferment.
+
+`PRD-ECR-014 / REQ-ECR-014` in Platform_23 owns the closure contract and matrix.
+
+### Phase 2.5 — Native Deep Observability
+
+Phase 2.5 is now the planned full-native deep-observability phase:
+- full native APM, RUM and continuous profiling;
+- full native DPI / continuous packet-derived Network Performance Intelligence.
+
+`PRD-DOR-001..013 / REQ-DOR-001..013` and `DORP-P2.5-v1` govern the roadmap/certification boundary.
+
+This reconciliation deliberately allocates **no new BUILD IDs** and does not silently repurpose existing BUILD IDs. Existing Phase-1/1.5/2 components may be reused where appropriate (identity, graph, OTel, synthetics, Integration/Capability Packs, evidence/RCA, UI, security, packaging, operations), but implementation BUILD ownership for new Phase-2.5 native APM/DPI components SHALL be assigned only when Phase-2.5 activation change control begins.
+
+### Sequencing
+
+1. Do not divert the current Phase-1 commercial-certification critical path.
+2. Complete Phase-1.5 enterprise foundations.
+3. Complete Phase-2 ECRP-P2-v1 and close all accepted enterprise requirement dispositions.
+4. Activate Phase 2.5 under separate implementation/dependency/capacity/security change control.
+5. Require DORP-P2.5-v1 before any Phase-2.5 completion claim.
+
+No separate Phase-2.5 codebase, customer-specific Core fork, duplicate graph/RCA authority or ungoverned packet/trace datastore is authorized.

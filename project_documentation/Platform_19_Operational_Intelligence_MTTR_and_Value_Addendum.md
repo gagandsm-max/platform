@@ -442,3 +442,13 @@ Similar Incident Memory may recommend creation/linkage of an external Problem an
 Phase 2 is the maturity target for OIV capabilities needed in large-enterprise ITOM/AIOps procurements: cross-domain Change Intelligence, Flight Recorder, Similar Incident Memory, service-impact context, evidence-led RCA, controlled remediation, MTTR/value measurement and external operational evidence integration shall be production-certifiable where included in ECRP-P2-v1.
 
 OIV may consume external APM/NPM/DPI evidence in Phase 2, but must preserve source provenance/quality and must not imply native full APM/DPI implementation. Full native APM/DPI remains Phase 2.5+.
+
+---
+
+## Issue #272 operational-intelligence roadmap
+
+Phase 2 SHALL use the closure contract to ensure enterprise evidence sources are intentionally native, integrated or customer-profile scoped.
+
+Phase 2.5 native trace/profile/packet evidence SHALL enrich the existing Incident Flight Recorder, Investigation and deterministic RCA rather than create a second RCA authority.
+
+Deep evidence may improve causal confidence, but missing deep-observability evidence SHALL NOT automatically imply application/network failure, and AI/LLM output remains non-authoritative without supporting evidence.

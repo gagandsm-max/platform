@@ -3322,3 +3322,11 @@ Phase-2 implementation shall reuse canonical identity, evidence, relationship, t
 Capability Packs shall declare exact product/version support, collection mode, required privilege, discovery, monitoring dimensions, topology/dependency output, diagnostics, security behavior, rate/cardinality limits, upgrade compatibility and certification state.
 
 No physical schema in Phase 2 may assume full native APM span retention or full packet-payload warehousing. Phase 2.5+ change control owns those physical storage contracts.
+
+---
+
+## Issue #272 LLD constraints for planned deep observability
+
+Phase-2.5 implementation design SHALL explicitly bound per-tenant trace/profile/packet cardinality and ingest rate, sampling/capture policies and backpressure, durable storage classes and retention, PII/secret/payload redaction, raw-packet access and chain-of-custody, TLS-key handling where decryption is enabled, collector/agent failure semantics, service identity reconciliation, replay/idempotency and upgrade compatibility of instrumentation/capture components.
+
+No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unrestricted payload visibility, or mandatory TLS decryption.
