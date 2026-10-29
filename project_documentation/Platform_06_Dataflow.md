@@ -2499,3 +2499,16 @@ Failure or staleness of an external connector produces monitoring/integration-de
 ### DF-ECR-003 — Regulated enterprise
 
 All required telemetry/analytics remain inside the customer-approved deployment boundary unless an explicitly authorized connector/data-egress policy permits otherwise. Offline upgrades, backup/restore, archive/legal hold and support access follow governed audit and data-boundary controls.
+
+---
+
+## Issue #272 dataflow additions
+
+Planned Phase-2.5 dataflows SHALL preserve source identity and evidence provenance:
+
+- application instrumentation/RUM/profile source → governed ingest → normalization/redaction → deep-observability storage → service graph/evidence window → incident/RCA;
+- SPAN/TAP/vTAP/packet-broker source → capture policy → decoding/redaction → packet metadata/raw-evidence tier → service/network evidence → incident/RCA;
+- external Phase-2 APM/NPM-DPI remains source-labelled integration evidence and does not silently become native authority.
+
+Backpressure, sampling/capture reduction and explicit degraded states SHALL be preferred over uncontrolled memory/disk growth.
+
