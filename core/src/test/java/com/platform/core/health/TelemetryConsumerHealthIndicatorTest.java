@@ -49,4 +49,25 @@ class TelemetryConsumerHealthIndicatorTest {
         assertFalse(health.getDetails().toString().contains("secret-topic"));
         assertFalse(metrics.getConsumerDegradedReason().contains("Bearer"));
     }
+    @Test
+    void administrativeStopIsDistinctFromDisablement() {
+        var metrics = new IngestionMetrics();
+        var registry = org.mockito.Mockito.mock(org.springframework.kafka.config.KafkaListenerEndpointRegistry.class);
+        var listener = org.mockito.Mockito.mock(org.springframework.kafka.listener.MessageListenerContainer.class);
+        org.mockito.Mockito.when(registry.getListenerContainer("telemetryNumericListener")).thenReturn(listener);
+        org.springframework.beans.factory.ObjectProvider<org.springframework.kafka.config.KafkaListenerEndpointRegistry> provider =
+                org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class);
+        org.mockito.Mockito.when(provider.getIfAvailable()).thenReturn(registry);
+        org.mockito.Mockito.when(listener.isInExpectedState()).thenReturn(true);
+        var indicator = new TelemetryConsumerHealthIndicator(metrics, provider);
+        org.mockito.Mockito.when(listener.isAutoStartup()).thenReturn(false);
+        assertEquals("DISABLED", indicator.health().getDetails().get("status"));
+        assertEquals("ERR_KAFKA_CONSUMER_DISABLED", indicator.health().getDetails().get("reasonCode"));
+        assertEquals(Status.UNKNOWN, indicator.health().getStatus());
+        org.mockito.Mockito.when(listener.isAutoStartup()).thenReturn(true);
+        assertEquals("STOPPED", indicator.health().getDetails().get("status"));
+        assertEquals("ERR_KAFKA_CONSUMER_SHUTDOWN", indicator.health().getDetails().get("reasonCode"));
+        assertEquals(Status.DOWN, indicator.health().getStatus());
+    }
+
 }
