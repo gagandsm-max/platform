@@ -487,3 +487,17 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 | BUILD-011 evidence boundary | SOURCE_FACT / not Phase-1 GA | BUILD-011 is technically POST-MERGE CERTIFIED at main `179a72837d050f4c757858452d3719c2e8978b95` (CI `38120861672`). That evidence does not certify Phase-1 GA, capacity, Core HA, or eBPF physical transport. |
 | Platform_07 Tranche A posture | ARCH-DELEGATED process | Mandatory in-scope review; default VERIFY_ONLY. Modify only on physically proven current OSS source contradiction. Certificate-envelope distinction alone does not authorize new OSS decisions. |
 | No BUILD/REQ renumbering | USER-FIXED | Existing BUILD IDs and requirement identifiers remain stable. No new REQ/PRD/BUILD IDs in Tranche A. |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+| Decision | Classification | Governing statement |
+|---|---|---|
+| Phase-2 enterprise readiness | **USER-FIXED — Founder 2026-10-29 / Issue #269** | By end of Phase 2, AmrudAi shall be ready to address large-enterprise monitoring/ITOM/AIOps RFPs across heterogeneous infrastructure, DB, storage, middleware, backup, multi-cloud, regulated deployment, integrations, service mapping, AIOps and controlled automation, subject to exact certification evidence. |
+| Phase 1 preservation | USER-FIXED | Issue #269 does not expand or destabilize the frozen Phase-1 first-GA envelope. |
+| Phase 1.5 expansion | USER-FIXED + ARCH-DELEGATED implementation | Enterprise Foundation includes existing two-Core HA/MSP plus Integration Fabric, CMDB reconciliation, bounded operational OTel spans/service edges, NCM Change Assurance, selected broader packs and first-class serverless. |
+| Full native APM | **USER-FIXED** | Explicitly outside Phase 2. Native bytecode/auto-instrumentation, method/line-level tracing, continuous profiling, full RUM/session replay and full APM backend belong Phase 2.5+ change control. Phase 2 may integrate external APM and ingest bounded OTel/application evidence. |
+| Full native DPI | **USER-FIXED** | Explicitly outside Phase 2. Continuous full-packet capture, TLS decryption, deep L7 reconstruction/packet warehouse/NDR-style DPI belong Phase 2.5+ change control. Phase 2 retains Flow, active path, eBPF process-network evidence, bounded triggered packet evidence and external NPM/DPI integration. |
+| ECRP-P2-v1 | ARCH-DELEGATED | Phase-2 exit requires an Enterprise Customer RFP Readiness certification profile; feature presence or vendor naming is insufficient. |
+| Customer requirement provenance | USER-FIXED | Real customer procurement requirements are strategic product evidence, but confidential customer names/inventories/commercial clauses remain outside generic Mother Reference requirements. Normalize recurring needs into reusable product/certification contracts. |
