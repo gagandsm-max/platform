@@ -295,3 +295,117 @@ BUILD-011 Slice 3 certification trail: Issue #168; PR #178; audited head `395b43
 BUILD-011 Slice 4 certification trail: Issue #168; PR #180; audited head `bdf317d642996af95788a1c3570add9871c21c5f`; merge/main `fe657eda4553ccb2c8c3906de61085e39fcaf481`; exact-head Platform CI #757 / run `37467279924` SUCCESS; post-merge Platform CI #758 / run `37474552157` SUCCESS; Master certification Issue #168 comment `6018969899`; Slice 4 POST-MERGE CERTIFIED (Linux installed-software source collection / typed structured-evidence boundary only); BUILD-011 remains IMPLEMENTING / not whole-build certified.
 BUILD-011 Slice 5 status (NOT CERTIFIED): branch `build/build-011-slice5-process-network-aggregator`; open PR #181; live head at Register update `7bfdeb3155e8194fec5933f58efa7c388020331e` (includes bounded-accounting review corrections after earlier rebased head `9fd235ae2e99322a5356b5f550e663f4b88e7ac2`); Master source-review / governance notes on Issue #168 include comments `6031673286`, `6031736746` and Codex-gate void correction `6031900689`. Slice 5 remains IMPLEMENTING / NOT CERTIFIED; no merge/post-merge certification is claimed.
 Capability Pack v1.3 status (IN PROGRESS / NOT CERTIFIED): Issue #92 commercial-depth Tranche 1 on branch `governance/capability-pack-v1.3-commercial-depth`; writer authorization / architecture comments include `6019016128`, `6017932424`, `6031900236`; corrected immutable Master source-review PASS is comment `6032403457`; Founder tool-authority amendment reactivating Codex as an isolated bounded writer while preserving Antigravity validation and Master Chat + GitHub certification authority is comment `6032406454`. Active pack inventory target is 34 Agents + 63 Skills with resource projection and deterministic evals; not certified.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Program — Issue #269
+
+**Authority:** Founder-approved roadmap decision, 2026-10-29.  
+**Mother Reference version:** remains v3.3.0.  
+**Maturity:** ROADMAP/SPECIFIED only. No implementation, test, benchmark, certification or deployment claim is created by this section.
+
+### Phase outcome
+
+| Phase | Certified outcome |
+|---|---|
+| **Phase 1** | Existing frozen production Network & Infrastructure Observability core. Issue #269 does not add Phase-2 breadth to the current first-GA critical path. |
+| **Phase 1.5 — Enterprise Foundation** | Exactly-two-Core HA/MSP + Integration Fabric/CMDB reconciliation + bounded operational OTel span/service-edge evidence + NCM Change Assurance + first-class serverless + selected broader Capability/Integration Packs. |
+| **Phase 2 — Enterprise ITOM/AIOps RFP Readiness** | Large-enterprise heterogeneous monitoring/ITOM/AIOps breadth can be answered as **Native — Certified** or **Integrated — Certified**, and the representative `ECRP-P2-v1` profile passes. |
+| **Phase 2.5+** | Full native APM and full native always-on DPI/deep packet analytics, only after separate architecture/dependency/security/capacity change control. |
+
+### Phase 1.5 implementation mapping — no new BUILD IDs
+
+| Capability | Existing BUILD ownership / gates | Required Phase-1.5 outcome |
+|---|---|---|
+| Exactly-two-Core HA + MSP | BUILD-060, 075, 120–124, 128, 130–132 | fencing/split-brain, PG/Kafka/CH continuity, Sensor reconnect/replay, noisy-neighbour/tenant isolation |
+| Integration Fabric / ITSM | BUILD-086 + integration contracts in 060/069/073/128 | transactional outbox/inbox, webhook/poll, mapping, sandbox, retry/idempotency, connector health |
+| CMDB reconciliation | BUILD-066/068/072/086 | ExternalBinding, CI/relationship reconciliation, field authority/conflicts, provenance/history |
+| Bounded operational OTel spans/service edges | BUILD-036/062–064/072/084/085 | bounded sampled span/edge evidence; no full APM backend |
+| NCM Change Assurance | BUILD-090/091 + 069/073/085 | immutable plan/approval binding, canary/batch, pre/post validation, stop/rollback where certified |
+| Serverless/FaaS | BUILD-026/036 + cloud/API Sensor paths | AWS Lambda, Azure Functions, Google Cloud Functions, Cloud Run per Issue #268 |
+| Broader enabling packs | BUILD-026/030–037/049 | only exact product/version dimensional certification counts |
+
+### Phase 2 implementation mapping — Enterprise RFP completeness
+
+| Workstream | Existing BUILD ownership / certification path | Phase-2 target |
+|---|---|---|
+| Enterprise OS/server monitoring | BUILD-010–019, 030/031, 037 | Windows/Linux plus demand-backed Unix (including AIX/Solaris where certified), agent/agentless matrices |
+| Hardware/OOB | BUILD-032 + 026/037 | Redfish/iDRAC/iLO/CIMC/IPMI health/lifecycle evidence |
+| Virtualisation/HCI | BUILD-033 + 026/037 | VMware, Hyper-V, Nutanix and demand-backed KVM/Proxmox; topology/performance/cross-vantage evidence |
+| Storage/SAN | BUILD-034 + 026/037/072 | arrays/pools/LUNs/controllers/replication + FC fabrics/ports/zones/WWNs + dependency graph |
+| Database performance monitoring | BUILD-035 + 026/037/072/084 | Oracle/RAC/Exadata where interfaces permit; PostgreSQL, SQL Server, MySQL/MariaDB, SAP HANA, MongoDB and approved data packs; waits/locks/deadlocks/replication/performance/change evidence |
+| Middleware/application-platform/batch | BUILD-026/035/036/047 + Integration/Pack framework | WebLogic/WebSphere/JBoss/Tomcat/IIS/Apache/Nginx/Kafka/MQ/RabbitMQ/API gateways and demand-backed batch/schedulers; no bytecode APM |
+| Backup/Data Protection | BUILD-026 + 086/097/095 | Veeam/Commvault/NetBackup and demand-backed products; job, coverage, SLA/RPO exposure, repository/media, restore evidence |
+| Multi-cloud | BUILD-036 + 026/049/072 | AWS/Azure/GCP/OCI operational depth; cloud-network + Kubernetes + serverless |
+| Network/Flow/log depth | BUILD-040–054, 093/094 | enterprise network/path/Flow/log analytics and correlation; no full native DPI |
+| Enterprise integrations | BUILD-086 + 060/069/073/128 | monitoring/APM/NPM-DPI/SIEM/CMDB/ITSM/change/deployment Integration Packs with governed health/mapping/provenance |
+| Service mapping / CMDB | BUILD-066/068/072/084/085 | service/dependency graph, reconciliation and impact analysis |
+| AIOps / RCA / operational intelligence | BUILD-080–085, 095, 100/101, 103 where enabled, Platform_19/22 | qualification/noise reduction, baselines/anomalies, change intelligence, Flight Recorder, Similar Incident, revisioned deterministic RCA, calibrated prediction, controlled remediation |
+| Regulated-enterprise deployment | BUILD-060/069/073/125–132 | on-prem/air-gap, no mandatory external AI, data-egress controls, PKI/KMS/HSM integration where certified, tamper-evident audit, WORM/archive integration, legal hold, offline update, privileged-support audit |
+| Scale / UX / operability | BUILD-067, 110–118, 130–132 | large-estate query/UI/report/RCA concurrency, connector cardinality/rate pressure, NOC workflows, supportability |
+
+### APM boundary through Phase 2
+
+Phase 2 **MUST support**:
+- OTel metrics/logs;
+- bounded sampled operational spans and service/dependency edges where certified;
+- trace/span correlation references/exemplars;
+- API/HTTP/synthetic monitoring;
+- service/application dependency and SLO context;
+- deployment/change correlation;
+- external APM Integration Packs and ingestion of transaction/trace/topology/error/user-experience evidence where the external product exposes it.
+
+Phase 2 **MUST NOT claim native full APM**:
+- bytecode/auto-instrumentation agents;
+- method/line-of-code diagnostics;
+- continuous profiling/flame graphs;
+- full RUM/mobile RUM/session replay;
+- unlimited/full-fidelity distributed trace backend.
+
+Those are Phase 2.5+.
+
+### DPI boundary through Phase 2
+
+Phase 2 **MUST support**:
+- NetFlow/IPFIX/sFlow/J-Flow;
+- active path and multi-vantage network diagnostics;
+- eBPF bounded process-to-network evidence;
+- bounded privileged incident-triggered packet evidence;
+- external NPM/DPI/NDR Integration Packs and source-labelled packet/flow metadata evidence.
+
+Phase 2 **MUST NOT claim native full DPI**:
+- continuous full-packet payload capture;
+- TLS decryption;
+- deep always-on L7 payload reconstruction;
+- packet warehouse/replay product;
+- native NDR-style detection engine.
+
+Those are Phase 2.5+.
+
+### ECRP-P2-v1 — mandatory Phase-2 exit gate (NOT a BUILD ID)
+
+`ECRP-P2-v1` is a certification profile under Platform_14/Platform_23. It does not renumber BUILDs.
+
+A Phase-2 complete/GA-ready claim is prohibited until the profile proves a representative multi-DC/DR/branch/hybrid-cloud enterprise estate across:
+1. discovery/onboarding/identity and CMDB reconciliation;
+2. network + host + virtualisation/HCI + OOB + storage/SAN;
+3. enterprise database + middleware + backup/data protection;
+4. Kubernetes + AWS/Azure/GCP/OCI + serverless;
+5. Flow/log/OTel + external APM/NPM-DPI/SIEM evidence;
+6. service/dependency mapping and service-impact analysis;
+7. No Data/connector/credential/path/collector failure classification;
+8. alert qualification, storm reduction, incident correlation and RCA with contradictions/INCONCLUSIVE;
+9. ITSM/notification/integration delivery, failure and replay;
+10. regulated data-boundary, retention/archive/legal hold and audited support;
+11. HA/DR, backup/restore, replay, upgrade/rollback and pack/connector compatibility;
+12. enterprise scale, cardinality/noisy sources, concurrent NOC users and end-to-end operator workflows.
+
+Each named technology must be tied to an exact product/version compatibility record and dimensional certification. Vendor/family presence in this register is never a certification claim.
+
+### Sequencing rule
+
+Issue #269 does **not** authorize Phase-1 enhancement diversion. Complete the current Phase-1 commercial certification critical path first. Phase-1.5 foundation work follows dependency readiness and may proceed in isolated lanes where it does not destabilize Phase 1. Phase-2 work is then driven by the ECRP gap matrix and Capability/Integration Pack certification priority.
+
+No separate Phase-2 codebase, schema fork, Core fork, customer-specific source branch, duplicate graph authority or generic telemetry datastore is allowed.
+
+
