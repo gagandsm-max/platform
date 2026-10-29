@@ -122,3 +122,14 @@ Selecting a browser-runtime package for Phase-1.5 synthetics requires separate P
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
 Phase-2 Enterprise/Regulated profiles shall be distributable through the existing signed reproducible native package and offline/air-gap model. New Capability/Integration Packs must carry version/provenance/compatibility metadata and be admitted into release evidence. No Phase-2 customer deployment may require a public SaaS control plane for core monitoring. Full native APM/DPI agent/packet-engine packaging is not part of Phase 2.
+
+---
+
+## Issue #272 packaging/release roadmap
+
+Phase-2.5 native instrumentation, RUM/mobile components and packet-capture/decoder components SHALL be independently versioned, signed, SBOM-covered and compatibility-tested where they become distributable artifacts.
+
+Offline/air-gap distribution SHALL remain supported for certified regulated profiles.
+
+A Phase-2.5 component SHALL NOT silently auto-update outside the governed package/update/rollback model.
+
