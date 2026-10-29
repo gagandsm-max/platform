@@ -1661,3 +1661,18 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1.5** | Exactly two full Core nodes Active/Standby; positive fencing; split-brain prevented | MSP/shared multi-tenancy + noisy-neighbor adversarial certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push HA continuity | Privileged NCM automation defaults; firmware Phase 1.5 |
 
 BUILD-011 technical post-merge at `179a72837d050f4c757858452d3719c2e8978b95` does not certify Phase-1 GA, Core HA, capacity or eBPF physical transport. Physical HA mechanisms remain unselected (BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE`).
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+The Phase-2 enterprise expansion MUST extend the existing Core/Sensor/Agent/Capability-Pack/Integration-Service architecture. It does not authorize a second monitoring platform, a vendor-specific Core fork, a new graph authority, a new generic telemetry database or microservice proliferation.
+
+Architecture placement:
+- technology breadth → Capability Packs executed by existing Sensor/Agent/Cloud/API surfaces;
+- external APM/NPM/DPI/SIEM/CMDB/ITSM/change evidence → Integration Service / Integration Packs → canonical identity/evidence contracts;
+- regulated-enterprise deployment → existing on-prem/air-gap/PKI/security/backup/DR architecture strengthened by certification;
+- Phase-2 AIOps → existing telemetry-quality, graph, incident, RCA, OIV and controlled-remediation modules;
+- Phase-2.5+ native full APM/DPI requires separate architecture/change control.
+
+External-tool evidence is supporting evidence with provenance/confidence. It never becomes independent tenant/entity/incident/RCA authority merely because a vendor declares a condition.
