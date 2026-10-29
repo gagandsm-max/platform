@@ -173,3 +173,11 @@ Runbooks cover image repository/provenance/integrity failure, entitlement/compat
 ### 13.6 Browser journeys — Phase 1.5
 
 Before browser runtime release, operations must define browser worker crash cleanup, stale process cleanup, credential/token expiry, screenshot/artifact TTL/access/redaction, site/Sensor capacity exhaustion and degraded-mode behavior that cannot starve base monitoring.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 operational readiness adds runbooks for: Capability Pack incompatibility/degradation, Integration Pack auth/rate-limit/backlog/schema failure, CMDB reconciliation conflict, external APM/NPM/DPI evidence staleness, cloud-provider throttling, storage/SAN/database/middleware/backup connector failure, regulated data-egress violation, archive/WORM failure and enterprise retention pressure.
+
+Install/upgrade must preserve pack/connector compatibility and provide preflight before activating a new pack version. Unsupported versions fail visibly rather than silently degrading coverage.
