@@ -929,3 +929,14 @@ Phase-2 external-observability evidence contracts shall preserve:
 External APM trace summaries, external NPM/DPI packet/flow metadata, SIEM/security facts, CMDB CIs/relationships and third-party monitoring events are evidence classes, not independent Platform identity or RCA authority. Raw external payload retention is bounded and policy-controlled.
 
 No Phase-2 contract requires unlimited span storage or packet-payload warehousing; those physical models are Phase 2.5+ change-control items.
+
+---
+
+## Issue #272 data-contract planning
+
+Phase-2 closure records SHALL carry source/product/version/collection-mode/provenance for certified enterprise integrations.
+
+Phase 2.5 SHALL define canonical contracts for trace/span/transaction identity, service/resource/process/runtime identity, profile sample/stack/symbol references, RUM/mobile/session evidence with privacy classification, packet/capture-source/conversation/decoded-transaction identity, packet-to-flow/service/trace correlation references, redaction/privacy classification and retention/evidence-custody metadata.
+
+Raw packet payload and session-replay data SHALL remain separately protected evidence classes rather than generic telemetry attributes.
+
