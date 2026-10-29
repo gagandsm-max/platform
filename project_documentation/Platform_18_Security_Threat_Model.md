@@ -165,6 +165,24 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1** | Standalone Core; mTLS Sensor/Agent identity; tenant-aware RBAC/resource scope/audit; Credential Profile separation; assignment/fencing stale-work rejection; Inform local ACK != Core durable ACK; `No Data != Device Down` semantic integrity; backup/restore + site-loss DR security hooks | No Core-HA availability claim; no MSP/shared-tenant isolation certification claim; Issue #218 Core ICMP typed-acceptance gap is an integrity/availability risk until closed—not an authorization to invent false DOWN; NCM automation not Phase 1 default |
 | **Phase 1.5** | Exactly-two-Core HA peer fencing/split-brain prevention; PG/Kafka/ClickHouse continuity trust; HA deletion-ACK RPO=0 matrix; MSP/shared-tenant adversarial isolation across identity/API/RBAC/credentials/NCM/AI/audit; privileged automation guardrails | Physical fencing/replication mechanisms remain unselected; no third Core/witness/journal preselected; HA does not replace DR |
 
+## Phase 1.5 Serverless / FaaS threat extension — Issue #268
+
+Governing requirement: `REQ-SLS-006`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED.
+
+| Threat | Abuse | Mandatory control |
+|---|---|---|
+| Long-lived over-privileged cloud keys | Stolen root/access keys enable estate-wide read or invoke | Prefer STS/role, managed identity, workload identity; least privilege; rotation; audit |
+| Credential exfiltration to browser | UI/API returns provider secrets | Server-side credential brokering only; never return secrets to browser |
+| Secret/env capture | Connector logs function env secrets | Redaction; baseline excludes env secret values |
+| Payload/source abuse | Capture request/response bodies or pull source as “monitoring” | Baseline monitoring forbids payload capture and does not require source retrieval |
+| Arbitrary invoke | Health checks invoke customer functions | Prohibit arbitrary invocation for health testing |
+| SSRF / tenant escape via connector endpoints | Malicious endpoint/identity pivots | Allowlists, DNS/IP/redirect validation, timeouts, tenant binding |
+| Provider ID authority override | Same ARN/name across tenants merges inventory | Platform tenant-scoped `entity_id` authority; provider IDs attributes only |
+| Cardinality/DoS | High-cardinality tags/log floods exhaust Platform | Budgets, shedding, pagination (`REQ-SLS-007`) |
+| False Function DOWN | Connector outage stamped as outage | Monitoring/connector quality ≠ Function DOWN (`REQ-SLS-005`) |
+
+OCI Functions remain out of Phase 1.5 required scope unless later promoted.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

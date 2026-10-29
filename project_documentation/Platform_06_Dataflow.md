@@ -2482,6 +2482,50 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1** | DF-001 standalone Core; multi-Sensor enrollment/assignment/fencing; SNMP typed ingestion; DF-025 NCM backup subset; DF-047/048 backup/DR | Standalone deletion-ACK for certified recoverable failures; Sensors continue collect/buffer during Core unavailability within storage protection | No Core-HA claim from DF-001; no MSP isolation cert; Issue #218 ICMP Core acceptance gap open; DF-ACP-005 mass/canary privileged NCM automation not Phase 1 certified |
 | **Phase 1.5** | DF-002 HA pairing; DF-037/038 failover/rejoin; PG/Kafka/ClickHouse continuity; DF-ACP-005 NCM Change Assurance privileged automation; DF-026 single approved push | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push continuity | Physical fencing/replication unselected; HA does not replace DR; no third Core/witness/journal preselected |
 
+## 116. Flow DF-SLS-001 — Phase 1.5 Serverless discovery and aggregate telemetry — Issue #268
+
+**Status:** SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Requirements: `REQ-SLS-001`..`REQ-SLS-009`.
+
+```text
+Authorized cloud credential / temporary identity (tenant-scoped)
+  → Cloud Sensor CloudProviderAdapter (BUILD-036 Phase 1.5)
+  → paginated/incremental serverless inventory (functions/services/versions/aliases/triggers)
+  → provider aggregate metrics / logs / events / change APIs (+ optional governed OTel)
+  → Sensor durable spool
+  → Core ingestion (tenant/authority validation)
+  → Kafka
+  → PostgreSQL current entity/relationship authority
+  → ClickHouse historical metrics/events/logs
+  → Alert Qualification / Temporal Graph / Investigation Workbench / cloud UX
+```
+
+**Invariants:**
+- No mandatory in-function Agent; no per-invocation poll (`REQ-SLS-002`, `REQ-SLS-007`).
+- Provider IDs are attributes; Platform `entity_id` + `tenant_id` remain authority (`REQ-SLS-003`).
+- Provider/API/auth/collector/quota/stale/no-data failures update connector/telemetry quality only — never Function DOWN (`REQ-SLS-005`).
+- Secrets/env values/request-response payloads/source code are out of baseline capture (`REQ-SLS-006`).
+- Capability Pack declarations (BUILD-026) define supported dimensions; listing ≠ CERTIFIED (`REQ-SLS-009`).
+
+### DF-SLS-002 — False-alert separation
+
+```text
+Connector/API failure OR auth failure OR 429/quota OR collector failure OR stale OR no-data
+  → emit connector-health / MONITORING_DEGRADED / STALE / UNKNOWN evidence
+  → MUST NOT open Function DOWN solely from that path
+Provider/resource or corroborated workload failure evidence
+  → qualify operational alert/incident under class-specific Alert Evidence Contract
+```
+
+### DF-SLS-003 — Dependency/RCA participation
+
+```text
+Observed/inferred trigger & dependency edges (provenance/confidence)
+  → temporal graph
+  → Investigation Workbench / RCA (provider status supporting only; INCONCLUSIVE valid)
+```
+
+Example chains: API Gateway → Lambda → SQS → Lambda → DynamoDB; HTTP → Cloud Run → Pub/Sub → Cloud Function → database.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

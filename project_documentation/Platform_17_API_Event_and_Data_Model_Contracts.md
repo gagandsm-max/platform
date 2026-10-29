@@ -919,6 +919,28 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1** | Tenant-scoped APIs/events; Sensor/Agent mTLS identity; assignment/fencing generations; SNMP typed + ICMP typed observation contracts; `No Data != Device Down` | Standalone deletion-ACK durability matrix; tenant-aware contracts without MSP isolation cert claim | Issue #218 Core ICMP acceptance open; no Core-HA continuity claim; NCM automation not Phase 1 default |
 | **Phase 1.5** | Same contracts under two-Core HA continuity and MSP adversarial isolation certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | Physical HA mechanisms unselected; no new journal/witness/database invented by this contract note |
 
+## Phase 1.5 Serverless API/event/data contracts — Issue #268
+
+Governing requirements: `REQ-SLS-003`, `REQ-SLS-004`, `REQ-SLS-005`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED.
+
+### Logical entity contract
+
+Tenant-scoped canonical entities for serverless hierarchy:
+
+`cloud_account|subscription|project` → `cloud_region` → `serverless_service` → `serverless_function|serverless_run_service` → `serverless_version|revision|alias` → `serverless_trigger|event_source` → dependency targets.
+
+Required common fields (logical): `tenant_id`, `entity_id`, provider identity attributes, lifecycle state, provenance/source, first_seen/last_seen, connector quality/freshness, Capability Pack/version references. Provider ARNs/IDs/names are attributes only.
+
+### Observation / event classes
+
+Normalize provider-exposed aggregate metrics, logs, events, change facts and connector-health observations into existing metric/state/event/log envelopes where possible. Do not invent metrics the provider does not expose. Do not force high-cardinality per-invocation labels. Optional governed OTel enrichment reuses `REQ-INF-010` / `REQ-OTEL-*` boundaries; OTel resource attributes never select tenant authority.
+
+### Alert Evidence Contract note
+
+Class-specific serverless operational assertions require provider/resource or corroborated workload evidence. Connector/API/auth/quota/stale/no-data produce monitoring/connector quality states only (`REQ-SLS-005`).
+
+No new database or event bus is authorized; PostgreSQL/ClickHouse/Kafka/Valkey roles remain unchanged.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

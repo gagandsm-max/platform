@@ -4,7 +4,7 @@
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-10-29 — Issue #269 Phase-2 Enterprise RFP roadmap: indexed 13 new REQ-ECR and 13 PRD-ECR formal IDs under the existing primary registries (425 REQ / 218 PRD). Previous 2026-10-11 Issue #200/#202/#206 Tranche-A Sensor RAM ratio correction remains historical provenance. Mother Reference version remains v3.3.0; no implementation/certification claim.
+**Last reconciliation:** 2026-10-29 — Issues #269 and #268 Phase-2 Enterprise RFP readiness and Phase-1.5 Serverless/FaaS monitoring: indexed 13 new REQ-ECR + 13 PRD-ECR and 9 new REQ-SLS + 9 PRD-SLS primary IDs (434 REQ / 227 PRD). Earlier Issue #200/#202/#206 Tranche-A Sensor RAM correction remains historical provenance. Mother Reference set remains v3.3.0; roadmap SPECIFIED only, not implemented or certified.
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose
@@ -454,11 +454,20 @@ The following marker-delimited table is the **only** canonical primary REQ regis
 | REQ-OTEL-005 | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges, head/tail sampling after benchmark, incident/error/slow-trace prioritization and Flight Recorder pinning | `Platform_02_PRD.md` | 58.3 OpenTelemetry Phase 1 and 1.5 | BASE_RTM_INDEXED | SPECIFIED | ACP-005; P0 trace economics pending |
 | REQ-OTEL-006 | Java/.NET/Node.js/Python instrumentation onboarding is a Phase-1.5 certification target with runtime-specific compatibility/security/resource evidence; full developer APM/profiling/RUM/session replay remains excluded | `Platform_02_PRD.md` | 58.3 OpenTelemetry Phase 1 and 1.5 | BASE_RTM_INDEXED | SPECIFIED | ACP-005; runtime certification pending |
 
+| REQ-SLS-001 | Phase 1.5 Serverless/FaaS providers: AWS Lambda, Azure Functions, Google Cloud Functions, Google Cloud Run; OCI Functions future unless promoted | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | BASE_RTM_INDEXED | SPECIFIED | Issue #268; SPECIFIED only — not implemented/certified |
+| REQ-SLS-002 | Extends Cloud Sensor + Capability Pack + existing PG/CH/Kafka/Valkey; no new mandatory microservice/DB/control plane/in-function Agent; baseline needs no customer instrumentation | `Platform_03_Architecture.md` | 44.8 Phase 1.5 Serverless / FaaS monitoring architecture | BASE_RTM_INDEXED | SPECIFIED | Issue #268; BUILD-036/026 reuse |
+| REQ-SLS-003 | Canonical serverless entity hierarchy and trigger/dependency graph; provider IDs are attributes/provenance only | `Platform_05_LLD.md` | 96. Phase 1.5 Serverless / FaaS monitoring LLD contracts | BASE_RTM_INDEXED | SPECIFIED | Issue #268 |
+| REQ-SLS-004 | Normalized serverless monitoring dimensions only where provider-exposed; no invented metrics | `Platform_02_PRD.md` | 14.1A Serverless / FaaS monitoring — Phase 1.5 | BASE_RTM_INDEXED | SPECIFIED | Issue #268 |
+| REQ-SLS-005 | Provider/API/auth/collector/quota/stale/no-data ≠ Function DOWN; distinct deleted/disabled/zero-invocation/scale-to-zero/no-data states | `Platform_02_PRD.md` | 14.1A Serverless / FaaS monitoring — Phase 1.5 | BASE_RTM_INDEXED | SPECIFIED | Issue #268; No Data ≠ Function Down |
+| REQ-SLS-006 | Least-privilege temporary/managed/workload identity; tenant scope; no credential/payload/source capture; no arbitrary invoke; SSRF/audit controls; provider IDs non-authority | `Platform_10_Protocol_Security_Connector_Master.md` | Phase 1.5 Serverless connector security — Issue #268 | BASE_RTM_INDEXED | SPECIFIED | Issue #268 |
+| REQ-SLS-007 | Cardinality/API/log/storage budgets; throttling/backoff; paginated discovery; aggregate not per-invocation collection; cost visibility | `Platform_11_Sizing_Capacity_Storage_Master.md` | Phase 1.5 Serverless cardinality/cost overlay — Issue #268 | BASE_RTM_INDEXED | SPECIFIED | Issue #268 |
+| REQ-SLS-008 | Extend Multi-Cloud/AWS/Azure/GCP UX with Serverless + Function detail; Investigation/RCA graph participation; INCONCLUSIVE valid | `Platform_09_UI_UX_Master.md` | Phase 1.5 Serverless UI extension — Issue #268 | BASE_RTM_INDEXED | SPECIFIED | Issue #268; no new top-level product |
+| REQ-SLS-009 | Phase 1.5 serverless certification matrix; listing provider/metric ≠ CERTIFIED | `Platform_14_Test_Performance_and_Release_Quality.md` | Phase 1.5 Serverless certification gates — Issue #268 | BASE_RTM_INDEXED | SPECIFIED | Issue #268 |
 <!-- END GLOBAL PRIMARY REQ REGISTRY -->
 
-**Registry totals:** 425 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanically reconciled 2026-10-29). Former formal ID `OSS-008` is historical/migrated only.
+**Registry totals:** 434 unique formal requirement IDs (all `REQ-*`, including `REQ-OSS-008`; marker-bounded GLOBAL PRIMARY REQ REGISTRY mechanically reconciled 2026-10-29; includes `REQ-SLS-001..009` (Issue #268)). Former formal ID `OSS-008` is historical/migrated only.
 
-Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`, `REQ-ECR-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
+Specialized-family rows (`REQ-OIV-*`, `REQ-ONB-*`, `REQ-EGC-*`, `REQ-MIA-*`, `REQ-EMC-*`, `REQ-ECR-*`, `REQ-SLS-*`) are indexed here for global completeness. Their cross-layer BRD/PRD/Architecture/HLD/LLD/Dataflow normalization may still be incomplete; A1 records that accurately and does not fabricate checkmarks.
 
 ## 3. Global primary product-requirement registry
 
@@ -689,9 +698,18 @@ The following marker-delimited table is the **only** canonical primary PRD regis
 | PRD-EMC-025 | Capability support claims shall remain dimensional and product/version specific and derive from one machine-readable compatibility/certification source of truth. | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | v3.3 certification matrix | REQ-EMC | SPECIFIED |
 | PRD-EMC-026 | Phase-1.5 second-wave technology coverage is a roadmap/certification target only and requires evidence before support claims. | `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md` | v3.3 second-wave coverage | REQ-EMC | SPECIFIED |
 
+| PRD-SLS-001 | Phase 1.5 Serverless/FaaS monitoring for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run; OCI Functions future unless promoted | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-002 | Extend Cloud Sensor + Capability Pack + existing datastores; no new mandatory microservice/DB/control plane/in-function Agent; baseline needs no customer instrumentation | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-003 | Canonical serverless entity hierarchy and provenance-bearing trigger/dependency relationships; provider IDs are attributes only | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-004 | Normalize provider-exposed serverless monitoring dimensions; do not invent unsupported metrics | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-005 | Enforce serverless false-alert contract: connector/API/auth/quota/stale/no-data ≠ Function DOWN | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-006 | Least-privilege cloud identity, secret/payload/source non-capture, no arbitrary invoke, SSRF/tenant controls and audited credential actions | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-007 | Cardinality/API/log/storage budgets and aggregate (not per-invocation) collection with cost visibility | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-008 | Extend existing cloud UX with Serverless surfaces and Function detail; Investigation/RCA participation with valid INCONCLUSIVE | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
+| PRD-SLS-009 | Phase 1.5 serverless certification matrix mandatory before support claims; listing ≠ CERTIFIED | `Platform_02_PRD.md` | 59. Phase 1.5 Serverless / FaaS monitoring — Issue #268 | REQ-SLS | SPECIFIED |
 <!-- END GLOBAL PRIMARY PRD REGISTRY -->
 
-**Registry totals:** 218 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanically reconciled 2026-10-29; prior 205 count belongs to the historical 2026-10-04 baseline).
+**Registry totals:** 227 unique formal PRD IDs (marker-bounded GLOBAL PRIMARY PRD REGISTRY mechanically reconciled 2026-10-29; includes `PRD-SLS-001..009` (Issue #268); prior 205 count belongs to the historical 2026-10-04 baseline).
 
 Related REQ family is recorded only where the family relationship is explicitly supported by naming/owner structure. A2 does not invent REQ↔PRD mappings beyond that.
 
@@ -1236,6 +1254,29 @@ This is an interpretation/certification supplement to existing indexed IDs, NOT 
 Physical acceptance matrix: (a) LLDP/CDP cross-vendor and identity negatives; (b) core-link failure with correlated downstream UNREACHABLE and one parent incident; (c) redundant LAG/ECMP or alternate Sensor/path continuing healthy with NO false parent/outage or child mute; (d) Sensor or SNMP-auth failure producing MONITORING_DEGRADED/UNKNOWN; (e) independent downstream child outage not suppressed; (f) late/stale/flapping/conflicting graph edges and as-of RCA revision; (g) authenticated vs spoofed Trap/Syslog; (h) codebook no-match/unknown/contradiction returns INCONCLUSIVE; (i) governed diagnostic sequence, cost/rate and tenant denial; (j) source→accepted→graph→alert→incident→RCA accounting, fail/restart/replay and declared estate workload. Numeric time windows or thresholds are customer policy, not globally selected values.
 
 This supplement does NOT re-certify the earlier historical base RTM checkmarks. Production certification requires actual source, tests and security/load/failure evidence, not this document change.
+
+
+## 20. Phase 1.5 Serverless / FaaS monitoring traceability — Issue #268
+
+Mother Reference set version remains **3.3.0**. No `Platform_24`. SPECIFIED only.
+
+### 20.1 Bidirectional primary mapping
+
+| Requirement | PRD | Architecture | HLD | LLD | Dataflow | UI | Protocol/Security | Capacity | Quality | Contracts | Threat | Coverage/Pack | Build |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| REQ-SLS-001 | PRD-SLS-001 / §14.1A / §59 | §44.8 | §50 | §96 | DF-SLS-001 | UI-044..047 ext. | §SLS | — | §SLS | §SLS | §SLS | §8.8 / cloud packs | BUILD-036 |
+| REQ-SLS-002 | PRD-SLS-002 | §44.8 | §50.1–50.2 | §96 | DF-SLS-001 | — | — | — | — | — | — | Cap Pack | BUILD-036/026 |
+| REQ-SLS-003 | PRD-SLS-003 | §44.8 | §50.1 | §96.1–96.2 | DF-SLS-001/003 | Function detail | — | — | — | entity contracts | — | graph | BUILD-036 + graph/RCA |
+| REQ-SLS-004 | PRD-SLS-004 | §44.8 | §50 | §96.3 | DF-SLS-001 | Invocations/Errors/… | — | budgets | — | observation classes | — | pack dimensions | BUILD-036/026 |
+| REQ-SLS-005 | PRD-SLS-005 | §44.8 | §50.3 | §96.4 | DF-SLS-002 | data-quality UX | — | — | false-alert gates | — | threat notes | — | alert/RCA builds |
+| REQ-SLS-006 | PRD-SLS-006 | §44.8 | §50 | §96 | DF-SLS-001 | no browser secrets | serverless credential matrix | — | audit/redaction | — | threat extension | — | connector/IAM |
+| REQ-SLS-007 | PRD-SLS-007 | §44.8 | §50 | §96.5 | DF-SLS-001 | query bounds | rate limits | serverless overlay | perf regression | cardinality | — | — | BUILD-036/011 capacity |
+| REQ-SLS-008 | PRD-SLS-008 | §44.8 | §50.1 | §96 | DF-SLS-003 | UI-044..047 + Function detail | — | — | — | — | — | — | UI + RCA builds |
+| REQ-SLS-009 | PRD-SLS-009 | §44.8 | §50 | §96 | DF-SLS-* | — | negatives | cost/API | certification matrix | — | — | dimensional | BUILD-036 Phase 1.5 |
+
+### 20.2 Formal-ID allocation note
+
+Issue #268 adds only the collision-free IDs `PRD-SLS-001..009` and `REQ-SLS-001..009`. No duplicate subsystem family, no BUILD renumbering, no IMPLEMENTED/CERTIFIED claim. Build mapping reuses BUILD-036 and BUILD-026 plus existing downstream graph/alert/RCA/UI builds.
 
 ---
 

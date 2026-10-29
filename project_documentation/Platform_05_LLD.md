@@ -3274,6 +3274,45 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1** | Standalone Core; multi-Sensor leases/assignment fencing; SNMP/ICMP typed observations; backup/restore + site-loss DR hooks | Standalone deletion-ACK for certified recoverable failures; ClickHouse not Sensor ACK gate; replay/idempotency retained | Tenant-aware schemas/APIs/events/mTLS/RBAC/audit mandatory; no MSP isolation cert claim | No Core-HA continuity claim; catastrophic single-Core loss is DR/backup, not HA RPO=0; Issue #218 Core ICMP acceptance gap remains open |
 | **Phase 1.5** | Exactly-two-Core HA Manager/PG/Kafka/ClickHouse continuity; Sensor reconnect/re-anchor; privileged NCM automation defaults | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | MSP/shared-tenant adversarial isolation + noisy-neighbor certification | Physical fencing/replication mechanisms remain P0 unselected; no third Core/witness/journal preselected |
 
+## 96. Phase 1.5 Serverless / FaaS monitoring LLD contracts — Issue #268
+
+**Status:** SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED.
+
+### 96.1 Canonical serverless entity types (`REQ-SLS-003`)
+
+Logical entity classes (names illustrative; physical schema owned by BUILD-036/061 when implemented):
+
+- `cloud_account` / `cloud_subscription` / `cloud_project`
+- `cloud_region`
+- `serverless_service` (provider service plane, e.g. Lambda service, Functions app/plan, Cloud Functions, Cloud Run)
+- `serverless_function` / `serverless_run_service`
+- `serverless_version` / `serverless_revision` / `serverless_alias`
+- `serverless_trigger` / `serverless_event_source`
+- `serverless_dependency` (normalized downstream/upstream dependency edge target)
+
+Every entity carries `tenant_id`, Platform `entity_id`, provider identity attributes, provenance, first/last observed, lifecycle state and connector quality. Provider resource ARNs/IDs/names NEVER replace Platform identity.
+
+### 96.2 Relationship types
+
+Temporal provenance-bearing edges SHALL support at least: `CONTAINS`, `LOCATED_IN`, `PUBLISHES_VERSION`, `ALIASES`, `TRIGGERED_BY`, `INVOKES`, `WRITES_TO`, `READS_FROM`, `DEPENDS_ON` where evidence exists (API Gateway/APIM/ingress, EventBridge/Event Grid/Pub/Sub, queues/topics, object storage, databases, caches, schedulers, HTTP endpoints, downstream functions, Kubernetes/cloud services, external APIs).
+
+### 96.3 Normalized observation classes (`REQ-SLS-004`)
+
+Observation classes map only provider-exposed signals into: invocation/request counts & rates; success/error counts & rates; duration/latency percentiles; throttles; concurrency/saturation; provisioned/reserved concurrency; timeouts; retries; async event age/backlog; dead-letter/destination failures; cold-start/init latency; memory/resource limits & use; runtime/language/version metadata; versions/aliases/revisions; triggers; change facts; provider logs/events; provider service health; quota/headroom; cost/usage (policy-gated); connector/API health/throttle/lag/freshness.
+
+### 96.4 Semantic state machine notes (`REQ-SLS-005`)
+
+Distinct states include at least: `ACTIVE`, `DISABLED`, `DELETED`/`RETIRED`, `ZERO_INVOCATION`, `SCALED_TO_ZERO`, `MONITORING_DEGRADED`, `STALE`, `UNKNOWN`/`NO_DATA`, and operational failure states backed by provider/resource or corroborated workload evidence. Mapping rules:
+
+- provider API / auth / collector / quota / throttle failure → connector-health + `MONITORING_DEGRADED`/`UNKNOWN` (not Function DOWN)
+- stale telemetry → `STALE` (not Function DOWN)
+- no data → `NO_DATA`/`UNKNOWN` (not Function DOWN)
+- Function DOWN / service operational failure requires positive failure evidence, not monitoring loss alone
+
+### 96.5 Collection algorithm constraints (`REQ-SLS-007`)
+
+Use paginated/incremental discovery; reconcile create/delete/recreate and version/alias/trigger changes; apply API budgets with backoff on 429; bound tag/dimension cardinality; bound log/event ingestion; never schedule one poll per invocation; prefer provider aggregate metrics/statistics APIs and event streams.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

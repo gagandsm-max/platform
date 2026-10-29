@@ -617,6 +617,18 @@ Governed changes are distributed to: Platform_02 product behavior (neighbors, sa
 
 **Maturity truth:** presence of LLDP/CDP, topology, codebook and suppression text is SPECIFIED, not proof of implemented Core/Sensor adapters or tests. Production source/physical negative/capacity/tenant/security evidence is required for BUILD-041/043/046/066/072/080–084/100 certification. Device-down remains evidence qualified; LLDP/CDP adjacency does not imply a directed upstream parent or automatic child-device-down claim. Issue #211 tracks implementation-to-reference reconciliation and release gates.
 
+## A.17 Phase 1.5 Serverless / FaaS monitoring — Issue #268
+
+**Authority:** Founder-approved product-scope decision recorded in Issue [#268](https://github.com/gagandsm-max/platform/issues/268). Documentation-only Mother Reference reconciliation.
+
+**Versioning:** Mother Reference set version remains **3.3.0**. No `Platform_24`. No premature v3.4.0 claim (reserved for gated Tranche D).
+
+**Scope summary:** Phase 1.5 first-class Serverless/FaaS monitoring for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run via existing Cloud Sensor + Capability Pack + canonical graph + PostgreSQL/ClickHouse/Kafka/Valkey. OCI Functions remain future unless promoted. Formal IDs: `PRD-SLS-001..009` / `REQ-SLS-001..009`. Build mapping reuses BUILD-036 / BUILD-026.
+
+**Non-claims:** SPECIFIED only — not IMPLEMENTED, not CERTIFIED, not GA, not runtime-available. No mandatory in-function Agent. `No Data ≠ Function Down`.
+
+Governed changes are distributed to Platform_02/03/04/05/06/08/09/10/11/12/14/17/18/23 and the Master Build Sequence Register. Platform_07 is unchanged (reuse existing AWS/Azure/GCP SDK approvals).
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
