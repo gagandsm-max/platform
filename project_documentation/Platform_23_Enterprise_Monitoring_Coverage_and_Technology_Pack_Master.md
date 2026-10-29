@@ -708,7 +708,7 @@ ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mecha
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
-### 26. Founder-approved phase outcome
+### Founder-approved phase outcome
 
 This section is the authoritative specialized-master contract for Issue #269.
 
@@ -720,7 +720,7 @@ This section is the authoritative specialized-master contract for Issue #269.
 
 **Phase 2.5+** owns full native APM and full native always-on DPI/deep packet analytics.
 
-### 26.1 Formal Phase-2 Enterprise Customer Requirements
+### Formal Phase-2 Enterprise Customer Requirements
 
 | PRD ID | Phase | Requirement |
 |---|---|---|
@@ -738,7 +738,7 @@ This section is the authoritative specialized-master contract for Issue #269.
 | `PRD-ECR-012` | P2 / P2.5+ | Phase 2 shall support Flow, active-path intelligence, eBPF process-network evidence, bounded incident-triggered packet evidence and external NPM/DPI integration. Full native always-on DPI — continuous payload capture, TLS decryption, deep L7 reconstruction/packet warehouse/NDR-style DPI — is Phase 2.5+. |
 | `PRD-ECR-013` | P2 exit | `ECRP-P2-v1` shall certify representative end-to-end enterprise operation, technology/version coverage, native/integrated evidence, security/tenant isolation, regulated data boundaries, HA/DR, scale/cardinality, retention/archive, failure/recovery, upgrade compatibility and NOC workflows. |
 
-### 26.2 Phase-2 target families
+### Phase-2 target families
 
 Minimum target families for certification planning include:
 - enterprise Windows/Linux plus demand-backed Unix such as AIX and Solaris;
@@ -753,7 +753,7 @@ Minimum target families for certification planning include:
 
 These are certification targets, not implementation claims. Exact versions and capability dimensions live in the machine-readable compatibility/certification source.
 
-### 26.3 ECRP-P2-v1
+### ECRP-P2-v1
 
 The certification profile must exercise a representative multi-DC/DR/branch/hybrid-cloud estate and prove:
 1. discovery/onboarding/identity/CMDB reconciliation;
@@ -769,7 +769,7 @@ The certification profile must exercise a representative multi-DC/DR/branch/hybr
 11. enterprise-scale query/dashboard/report/RCA concurrency and noisy/cardinality cases;
 12. end-to-end operator workflows and auditable evidence.
 
-### 26.4 Formal traceability supplement
+### Formal traceability supplement
 
 | REQ ID | PRD ID | Governing capability |
 |---|---|---|
@@ -787,6 +787,6 @@ The certification profile must exercise a representative multi-DC/DR/branch/hybr
 | `REQ-ECR-012` | `PRD-ECR-012` | Phase-2 DPI integration/native boundary |
 | `REQ-ECR-013` | `PRD-ECR-013` | ECRP-P2-v1 certification gate |
 
-### 26.5 Non-claims
+### Non-claims
 
 This roadmap is **SPECIFIED** only. It does not claim any listed technology, connector, regulated profile, AIOps feature or ECRP profile is implemented, tested, benchmarked, certified or deployed. Full native APM and full native DPI remain excluded from Phase 2 even if external evidence is integrated.
