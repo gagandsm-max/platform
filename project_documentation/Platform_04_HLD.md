@@ -1463,3 +1463,28 @@ Phase-2 enterprise breadth is implemented through existing logical modules:
 - Platform Operations for connector/pack/retention/DR/self-health.
 
 No Phase-2 module may require full native APM or full native always-on DPI. Those remain Phase 2.5+.
+
+---
+
+## Issue #272 HLD workstreams
+
+Phase 2 SHALL close enterprise roadmap requirements through existing Core/Sensor/Agent/Pack/Integration responsibilities.
+
+Phase 2.5 SHALL introduce two governed logical workstreams without creating customer-specific product forks:
+
+1. **Application Deep Observability**
+   - instrumentation/telemetry acquisition;
+   - trace transaction processing;
+   - profiling;
+   - RUM/mobile/session evidence;
+   - correlation into canonical service/entity/incident/RCA context.
+
+2. **Network Deep Observability**
+   - SPAN/TAP/vTAP/packet-broker acquisition;
+   - packet decoding/reconstruction and network-performance analytics;
+   - packet-derived service evidence;
+   - controlled raw evidence retention and investigation;
+   - correlation into canonical service/entity/incident/RCA context.
+
+Physical service decomposition remains a later LLD/architecture decision based on scale, failure isolation, security and operability evidence.
+
