@@ -234,3 +234,14 @@ The previously mixed `P1/P1.5/V1.x/P2` enterprise-gap labels are now constrained
 - Middleware monitoring, backup/data-protection monitoring, broader cloud/OCI, regulated-enterprise operational controls and remaining enterprise-adoption gaps required by `ECRP-P2-v1` are **Phase 2 mandatory targets** unless already certified earlier.
 - Regional federation remains a separate future capability unless needed by an explicit approved Phase-2 customer profile; Issue #269 does not silently redesign the fixed two-Core HA architecture.
 - Full native APM and full native always-on DPI are not enterprise-gap closure requirements for Phase 2; they are Phase 2.5+.
+
+---
+
+## Issue #272 enterprise-gap closure rule
+
+Every recurring enterprise requirement accepted into the roadmap SHALL have a closure disposition rather than an unowned Partial.
+
+Phase 2 is responsible for enterprise ITOM/AIOps breadth and certified integration/customer-profile mechanisms. Full native APM/RUM/profiling and full native DPI/continuous packet analytics are intentionally deferred to Phase 2.5 and are therefore **planned deferments**, not unknown gaps.
+
+Customer-specific impossible absolutes such as universal 100% uptime/zero-error guarantees remain commercial acceptance-profile matters and are not normalized into unsafe platform-wide guarantees.
+
