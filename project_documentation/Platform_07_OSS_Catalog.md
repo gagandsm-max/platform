@@ -262,3 +262,9 @@ Tooling-only status does not mean licensing can be ignored; it means the tool is
 ### 10.1 Podman decision
 
 Podman compatibility is **not** a v1 engineering requirement. Adding a second local container runtime would increase variance in Compose compatibility, networking, volume behavior, rootless operation and support burden. The project will standardize on Docker Compose until a customer/developer requirement justifies another runtime.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Issue #269 selects **no new OSS dependency**. Phase-2 breadth shall preferentially use already-approved protocol/SDK foundations and Capability/Integration Pack adapters. Any future database driver, middleware client, backup SDK, OCI SDK, APM/NPM/DPI SDK, browser/APM agent, packet engine or other runtime dependency requires normal exact-version OSS admission before implementation. Full native APM/DPI work is Phase 2.5+ and receives no dependency pre-approval from this roadmap.

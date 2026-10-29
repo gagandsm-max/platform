@@ -703,3 +703,90 @@ Evidence-dependent targets include GCP; Aruba/HPE, Dell networking, Extreme, Che
 ### 29.5 Integration Pack certification
 
 ITSM/CMDB adapters remain `INTEGRATION` Capability Packs using Platform_10 mechanics. Connector certification records exact deployment variant/edition/API/auth plus supported Incident/Problem/Change/Approval/activity/reverse-event/CMDB/relationship/business-service capabilities and limitations. Phase-1 connector priorities are ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus/MSP; six Phase-1.5 certification-priority connectors are defined by `REQ-INT-013`.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+### Founder-approved phase outcome
+
+This section is the authoritative specialized-master contract for Issue #269.
+
+**Phase 1** remains the frozen Network & Infrastructure Observability core.
+
+**Phase 1.5 — Enterprise Foundation** adds/finishes: exactly-two-Core HA and MSP certification; Integration Fabric and governed CMDB reconciliation; bounded sampled operational OTel spans/service-edge evidence; NCM Change Assurance; first-class serverless; and selected broader Capability/Integration Packs required to unlock enterprise operation.
+
+**Phase 2 — Enterprise ITOM/AIOps RFP Readiness** is a product/certification outcome, not a list of vendor names. By Phase-2 exit, AmrudAi shall be able to satisfy recurring large-enterprise monitoring/ITOM/AIOps requirement classes either **Native — Certified** or **Integrated — Certified**, with full native APM and full native DPI as deliberate exceptions.
+
+**Phase 2.5+** owns full native APM and full native always-on DPI/deep packet analytics.
+
+### Formal Phase-2 Enterprise Customer Requirements
+
+| PRD ID | Phase | Requirement |
+|---|---|---|
+| `PRD-ECR-001` | P2 | Platform shall achieve Enterprise ITOM/AIOps RFP readiness across heterogeneous large-enterprise estates and pass `ECRP-P2-v1`; specification or vendor listing alone is insufficient. |
+| `PRD-ECR-002` | P1.5 | Enterprise Foundation shall include the existing HA/MSP envelope plus Integration Fabric/CMDB reconciliation, bounded operational OTel span/dependency evidence, NCM Change Assurance, serverless and selected enabling packs/integrations. |
+| `PRD-ECR-003` | P2 | Platform shall provide certified heterogeneous infrastructure coverage including declared enterprise Linux/Windows/Unix modes, virtualisation/HCI, hardware/OOB, storage/SAN and dependency/topology evidence through Capability Packs. |
+| `PRD-ECR-004` | P2 | Platform shall provide enterprise database monitoring depth including Oracle-class estates (including RAC/Exadata where interfaces permit) plus PostgreSQL, SQL Server, MySQL/MariaDB, SAP HANA, MongoDB and other approved data-platform packs, with sessions/waits/locks/deadlocks/replication/storage/performance/change evidence and no autonomous tuning requirement. |
+| `PRD-ECR-005` | P2 | Platform shall provide certified middleware/application-platform and batch/scheduler monitoring through Capability Packs for high-demand enterprise technologies using supported APIs/JMX/metrics/logs/synthetics; full bytecode APM is not implied. |
+| `PRD-ECR-006` | P2 | Backup/Data Protection shall be a production-certifiable monitoring family covering job outcome, protected-asset coverage, SLA/RPO exposure, repository/media capacity, replication and restore-test/recoverability evidence where exposed. |
+| `PRD-ECR-007` | P1.5/P2 | Multi-cloud coverage shall be materially certifiable across AWS, Azure, GCP and OCI; serverless targets include Lambda, Azure Functions, Google Cloud Functions and Cloud Run. Provider/API failure remains monitoring-degraded evidence, not resource DOWN. |
+| `PRD-ECR-008` | P2 | Platform shall provide a Regulated Enterprise Deployment Profile for on-prem/private/air-gapped operation, explicit data-egress control, customer PKI/KMS/HSM integration where supported, offline signed updates, auditable privileged support, tamper-evident audit, governed immutable/WORM archive integration where required, legal hold, retention, backup/restore and DR evidence. |
+| `PRD-ECR-009` | P2 | Integration Packs shall provide certified coexistence with enterprise monitoring, APM, NPM/DPI, SIEM/SOC, CMDB, ITSM and change/deployment systems using normalized Platform contracts, connector health and provenance. |
+| `PRD-ECR-010` | P2 | Enterprise AIOps readiness shall include service mapping, event normalization/correlation, evidence qualification, noise reduction, anomaly/baseline intelligence, deterministic/revisioned RCA, change intelligence, Flight Recorder, Similar Incident Memory, predictive operations only where calibrated, recommendations and controlled remediation with audit/rollback safety. |
+| `PRD-ECR-011` | P2 / P2.5+ | Phase 2 shall support OTel metrics/logs, bounded sampled operational spans/service edges, API/synthetics, application/service dependency correlation and external APM integration. Full native APM — bytecode/auto-instrumentation, method/line-level diagnostics, continuous profiling, full RUM/session replay and full APM backend — is Phase 2.5+. |
+| `PRD-ECR-012` | P2 / P2.5+ | Phase 2 shall support Flow, active-path intelligence, eBPF process-network evidence, bounded incident-triggered packet evidence and external NPM/DPI integration. Full native always-on DPI — continuous payload capture, TLS decryption, deep L7 reconstruction/packet warehouse/NDR-style DPI — is Phase 2.5+. |
+| `PRD-ECR-013` | P2 exit | `ECRP-P2-v1` shall certify representative end-to-end enterprise operation, technology/version coverage, native/integrated evidence, security/tenant isolation, regulated data boundaries, HA/DR, scale/cardinality, retention/archive, failure/recovery, upgrade compatibility and NOC workflows. |
+
+### Phase-2 target families
+
+Minimum target families for certification planning include:
+- enterprise Windows/Linux plus demand-backed Unix such as AIX and Solaris;
+- VMware, Hyper-V, Nutanix and demand-backed KVM/Proxmox;
+- Redfish/iDRAC/iLO/CIMC/IPMI hardware/OOB;
+- storage arrays, SAN/FC fabrics, pools/volumes/LUNs/controllers/replication;
+- Oracle/RAC/Exadata, PostgreSQL, SQL Server, MySQL/MariaDB, SAP HANA, MongoDB and approved data platforms;
+- WebLogic, WebSphere, JBoss/WildFly, Tomcat, IIS, Apache/Nginx, Kafka, IBM MQ, RabbitMQ, API gateways and demand-backed enterprise middleware;
+- Veeam, Commvault, NetBackup and demand-backed backup/data-protection products;
+- AWS, Azure, GCP and OCI, including the declared serverless targets;
+- external monitoring/APM/NPM-DPI/SIEM/CMDB/ITSM/change/deployment integrations.
+
+These are certification targets, not implementation claims. Exact versions and capability dimensions live in the machine-readable compatibility/certification source.
+
+### ECRP-P2-v1
+
+The certification profile must exercise a representative multi-DC/DR/branch/hybrid-cloud estate and prove:
+1. discovery/onboarding/identity/CMDB reconciliation;
+2. network, host, virtualisation, storage, database, middleware, backup, cloud and declared serverless monitoring;
+3. Flow/log/OTel and external observability evidence ingestion;
+4. service/dependency topology and service-impact analysis;
+5. No Data/connector failure/credential failure/path failure separation from target DOWN;
+6. event→alert→incident compression and evidence-qualified states;
+7. deterministic/revisioned RCA with contradictions/missing evidence and `INCONCLUSIVE`;
+8. ITSM/notification/integration delivery and recovery;
+9. regulated data-boundary, retention/archive/legal-hold and support-access controls;
+10. HA/DR, replay, upgrade/rollback and connector/pack compatibility;
+11. enterprise-scale query/dashboard/report/RCA concurrency and noisy/cardinality cases;
+12. end-to-end operator workflows and auditable evidence.
+
+### Formal traceability supplement
+
+| REQ ID | PRD ID | Governing capability |
+|---|---|---|
+| `REQ-ECR-001` | `PRD-ECR-001` | Enterprise RFP readiness outcome |
+| `REQ-ECR-002` | `PRD-ECR-002` | Phase-1.5 Enterprise Foundation |
+| `REQ-ECR-003` | `PRD-ECR-003` | Heterogeneous infrastructure/storage depth |
+| `REQ-ECR-004` | `PRD-ECR-004` | Database performance monitoring |
+| `REQ-ECR-005` | `PRD-ECR-005` | Middleware/batch monitoring |
+| `REQ-ECR-006` | `PRD-ECR-006` | Backup/data protection monitoring |
+| `REQ-ECR-007` | `PRD-ECR-007` | Multi-cloud/serverless breadth |
+| `REQ-ECR-008` | `PRD-ECR-008` | Regulated-enterprise profile |
+| `REQ-ECR-009` | `PRD-ECR-009` | Enterprise integration ecosystem |
+| `REQ-ECR-010` | `PRD-ECR-010` | Enterprise AIOps maturity |
+| `REQ-ECR-011` | `PRD-ECR-011` | Phase-2 APM integration/native boundary |
+| `REQ-ECR-012` | `PRD-ECR-012` | Phase-2 DPI integration/native boundary |
+| `REQ-ECR-013` | `PRD-ECR-013` | ECRP-P2-v1 certification gate |
+
+### Non-claims
+
+This roadmap is **SPECIFIED** only. It does not claim any listed technology, connector, regulated profile, AIOps feature or ECRP profile is implemented, tested, benchmarked, certified or deployed. Full native APM and full native DPI remain excluded from Phase 2 even if external evidence is integrated.

@@ -27,13 +27,30 @@
 | BUILD-011 activation base SHA | `88c585c813c4a3ea6271c79739c9bbd1596c011f` — historical immutable activation base via PR #171; Slices 1–8 subsequently certified, with whole-BUILD final technical main `179a72837d050f4c757858452d3719c2e8978b95` and Issue #168 comment `6106750423`. Historical Slice-4-only status below is superseded. |
 | Active BUILD | BUILD-020 — Universal Sensor production runtime (primary engineering implementation lane); Phase-1 progress not certification. |
 | Active status | BUILD-020 IMPLEMENTING / NOT CERTIFIED. PR #217 OPEN/DRAFT at `335a6b7f423f0c2837f0c54e9696955f9a6ea3eb`. PR #234 provides an UNWIRED Core ICMP decoder only; PR #248 provides credential-aware principal/credential locking only; neither provides Core-issued poll-job grant issuance/admission (#229), structured ICMP production ingestion (#218), durable end-to-end ACK, or BUILD-021. |
-| Active GitHub issue | #210 BUILD-020; #229 authoritative Core-issued poll grants and delayed upload; #218 production typed ICMP ingestion (REOPENED after decoder-only merge); #222/#235 Kafka/ClickHouse integrity; #92 production certification; #211 source-of-truth execution ledger; #200 Phase 1/1.5 envelopes. #230 bounded Agent-delivery health defect CLOSED after PR #231 post-main PASS. |
-| Active PR | 2026-10-26 verified OPEN/DRAFT product PRs: #217 Universal Sensor runtime `335a6b7f423f0c2837f0c54e9696955f9a6ea3eb`; #227 Kafka/ClickHouse `5e462e3fa0f8883437afed4bbcc8ba6c8c530181`; #245 Kafka health/probe `b473597d0e6ba3d23b4962b856a1d0b5ca9d6d23`. PR #247 recovery verifier MERGED as `8c3c684dcde8347c61bba3f5b68eda954ff7f872`, post-main CI `40287346766` 4/4 SUCCESS. Documentation-only status changes are not product certificates. |
-| Register reconciled against main | Verified GitHub `main=8c3c684dcde8347c61bba3f5b68eda954ff7f872` on 2026-10-26 after PR #247 post-main CI `40287346766` 4/4 SUCCESS. This is dated provenance, not a live SHA lock. Last whole-BUILD certified: BUILD-011. BUILD-020 remains IMPLEMENTING / NOT CERTIFIED; no Phase1 GA or completion percentage inferred. |
+| Active GitHub issue | As verified 2026-10-29: #210 BUILD-020; #229 poll-grant authority (G1a runtime NOT_RUN); #218 typed ICMP OPEN; #222/#235 Kafka/ClickHouse integrity OPEN; #260 Kafka bootstrap-DNS health P1 OPEN; #240 intermittent UI typecheck P2 OPEN; #92 production certification OPEN; #211 runner/ledger OPEN; #200 phase envelopes OPEN; #204/#206 Tranche-C sizing reconciliation OPEN; #242 lifecycle-issue reconciliation OPEN; #249 durable IAM OPEN; #252 report/notification/formula documentation reconciliation OPEN. Historical #230 Agent-delivery defect CLOSED after PR #231. |
+| Active PR | 2026-10-29 verified OPEN/DRAFT product PRs: #217 Universal Sensor runtime `335a6b7f423f0c2837f0c54e9696955f9a6ea3eb`; #227 Kafka/ClickHouse integrity `5e462e3fa0f8883437afed4bbcc8ba6c8c530181` (both MERGE HOLD). Documentation PRs: #261 OPEN/DRAFT at `aefee69eee1b949b0fdeee2b56ed175f0a3714a9` (factual status delta integrated here, keep OPEN until merged-main readback); #270 OPEN/non-draft Phase-2 roadmap (must pass fresh exact-head CI/audit after this correction); #271 OPEN/DRAFT Phase-1.5 serverless (integrate only AFTER #270 post-main CI). PR #245 Kafka health/probe MERGED, audited source `8c9ad5594249435c603659c60d6fe934104c4260`, merge/main `a0b7d061e29b3306dd3ec2bee34d389493866e77`; #260 residual remains OPEN/P1. No product certification inferred. |
+| Register reconciled against main | Verified 2026-10-29 GitHub `main=aae0f9a1bb193412bacbd2b4ed19cd5cbf2e6994` after PR #267 (exact-main CI `40835886295` SUCCESS 4/4); this SHA is dated provenance, not a future live lock. Historical PR #245 post-main CI `40468060644` SUCCESS 4/4; 2026-10-27 historical checkpoint preserved below. BUILD-011 last whole-BUILD certified; BUILD-020 IMPLEMENTING / NOT CERTIFIED; Phase 1 NO-GO. PR #270/#271 not yet authoritative at this checkpoint. |
 | Live canonical source | GitHub `origin/main`; exact current SHA must be verified at handoff/runtime and must not be inferred from an embedded historical register SHA. |
 | Evidence | BUILD-004 is CERTIFIED. Issue #93 Agent/Skill governance CERTIFIED/CLOSED after PR #121 guarded merge to `d29c23f5d311f0a505d7e5faa670ef68ad584ebd`, exact-head CI #540 SUCCESS and post-merge CI #541 SUCCESS. BUILD-004 activation PR #123 merged to exact main `33dbee3db40c0fb443a1e10cd6267f6cccf3ab57`; post-merge Platform CI #543 / run DB `36229606787` SUCCESS. Independent BUILD-004 source audit on exact SHA returned ARCHITECTURE_DIRECTION_SOUND / READY_FOR_MASTER_TO_FREEZE_CONTRACT. Master reconciled source discrepancies and froze the corrected architecture on Issue #122 comment `5845158070`. Slice 1 POST-MERGE CERTIFIED — PR #125; audited head `8b06e349f3b922a6a6dbab1e133398abe28c7091`; merge/main `dda4d946d9fcc481e212f23c80cbdcc8f42e0d24`; independent Antigravity audit PASS (P0=0/P1=0/P2=0); pre-merge Platform CI #546 / run DB `36238420571` SUCCESS; post-merge Platform CI #547 / run DB `36239378495` SUCCESS; Issue #122 certification comment `5846067700`. Slice 2 POST-MERGE CERTIFIED — PR #126; audited head `b4b828e6d4e2e70681629f7958803bba88bdeb3c`; merge/main `e1124ca274ba1cee97fca69175f4eadd09885ef8`; independent Antigravity audit AUDIT_PASS (P0=0/P1=0/P2=0); manual exact-head CI `36290061926` SUCCESS; PR CI `36291110385` SUCCESS; post-merge main CI `36291960223` SUCCESS; Issue #122 certification comment `5852443162`. Governance reconciliation POST-MERGE CERTIFIED — PR #127; audited head `e1d222a87c86d021683907d0766c9142b5b37c68`; merge/main `38057bfe006691698ec1237a17b3944e2f9a347d`; post-merge CI `36294753046` SUCCESS. Slice 3 POST-MERGE CERTIFIED — PR #128; audited head `ace831e61aeec845793b9723540130103fb161cd`; merge/main `37c9eb5964ca63a800d6707a3d73df364acaa4f6`; post-merge CI `36302759894` SUCCESS; Issue #122 comment `5853868990`. Slice 4 POST-MERGE CERTIFIED — PR #129; audited head `2e3ae026ad11458dd38804ca9e53edb97ab77d51`; merge/main `79b34ed5ab0f4876f462fb8d552671c1e0e2cb25`; post-merge CI `36310123428` SUCCESS; Issue #122 comment `5854986699`. Slice 5 POST-MERGE CERTIFIED — PR #132; audited head `9616fc37c1421dcf6df4a9b5b0b17a405cfe2971`; merge/main `ed565b21f333d2857a955dc1dc216793056a0ed8`; post-merge CI `36323513134` SUCCESS; Issue #122 comment `5856856084`. Governance-test correction POST-MERGE CERTIFIED — PR #133; audited head `52ecc72e5ed7a90f406dc5058abe842891932284`; merge/main `f6e84be0a65abb1126374c79f5840ccd4f65d21e`; post-merge CI `36331423436` SUCCESS. AmrudAi / Service Assurance Mother Reference reconciliation POST-MERGE CERTIFIED — PR #131; merge/main `24fbf22725e959ab7ebf6ff95d5c9a5e7af4f1bb`; post-merge CI `36393502479` SUCCESS; Issue #122 comment `5865956661`. Master Build Sequence Register reconciliation POST-MERGE CERTIFIED — PR #134; audited head `f6df2708a3aeb88bb49b9108bb15e6d9ed797cd0`; merge/main `c3dcfb6ef2b83ae879329289404a88283b01240b`; PR CI `36403071701` SUCCESS; post-merge CI `36405463188` SUCCESS. Slice 6 POST-MERGE CERTIFIED — PR #136; audited/writer head `697182021f995bba050f5c5ef15cf261f6ac06b5`; merge/main `10483ec835f4c403b9b96a38b0ec5d61ec0d7709`; post-merge Platform CI run DB `36425717474` SUCCESS; production scheduler lifecycle/config ownership only (no runtime.Runtime production activation, no scheduler workload migration, no Discovery scheduler cutover, no BUILD-021 completion). Slice 7 POST-MERGE CERTIFIED — PR #137; final audited head `2d3b7fa77acd47494c9d01b1d155722448ec02b3`; merge/main `b8a1faae577c81166e3aae78f33d2ef424c1a2c3`; post-merge Platform CI run DB `36537950210` SUCCESS; production control.Reconciler active with APPLIED requiring current runtime acceptance + durable local proof, same-generation lost-ACK runtime re-proof, truthful APPLIED→REJECTED→APPLIED Core convergence, restart-required scheduler/transport drift rejected, and bounded control health/status/lifecycle. Master whole-BUILD completion review Issue #122 comment `5886391826` PASS (P0=0/P1=0/P2=0; NO_SLICE_8_REQUIRED). Final independent Antigravity whole-BUILD audit AUDIT_PASS (P0=0/P1=0/P2=0; NO_SLICE_8_REQUIRED) against canonical main `b8a1faae577c81166e3aae78f33d2ef424c1a2c3`. Production integration evidence on post-merge CI `36537950210`: 20/20 integration suite PASS; `platform-sensor-net` /health UP; `platform-sensor-infra` /health UP; mandatory PostgreSQL suite PASS; API/data contract PASS; security smoke PASS. Final Register reconciliation PR #138; audited Register candidate `9438599754e464b98f46b61bafc1e53c7d3849b8`; PR exact-head Platform CI `36563030801` SUCCESS; merge/main `7c662ed6fe411d693d14d389346ec8c5229bba3a`; post-merge exact-main Platform CI `36569168673` SUCCESS; final BUILD-004 certification comment `5890979572`; Issue #122 CLOSED/COMPLETED. BUILD-005 Issue #139 opened; independent BUILD-005 architecture/source audit returned ARCHITECTURE_DIRECTION_SOUND / READY_FOR_MASTER_TO_FREEZE_CONTRACT; Master architecture freeze Issue #139 comment `5891415875`. BUILD-005 is CERTIFIED from technical/certification evidence: architecture freeze `5891415875`; Slices 1–5 POST-MERGE CERTIFIED (Slice 5 PR #155 / head `b77a474793d585d170bfb8cd25a2eb983d508b5b` / merge/main `8c6880800a11772e2e47879e181875a42c8501c1` / post-merge CI `37053829317` / comment `5960084186`); whole-BUILD stress/soak requirement `5959893408`; stress PR #156 / final head `215344f9c463c2a278db8e98895e8e975d4be47a` / merge/main `dacdee47fe7962841f8207ba2646eda53547498a` / post-stress exact-main CI `37092659653` SUCCESS; Master stress exact-SHA review `5964986311`; Master whole-BUILD technical completion review `5965187625` PASS; final immutable Antigravity whole-BUILD audit `BUILD_005_WHOLE_BUILD_AUDIT_PASS` (P0=0/P1=0/P2=0) against `dacdee47fe7962841f8207ba2646eda53547498a`; final pre-register certified technical source `dacdee47fe7962841f8207ba2646eda53547498a`. Final BUILD-005 governance certification: Register reconciliation PR #157; Register candidate `2e5d13edcae1fcab49b148bd47ea994470bae22f`; final merge/main `7df20fa67bda23a3dfd50b42ce9562b50ac3be6e`; exact-main governance Platform CI `37103737197` SUCCESS; final certification comment `5966600002`; Issue #139 CLOSED/COMPLETED. Deferred scope preserved: BUILD-010/011/012/013/018/020/021/026/060/070/073/074/080+/086/110+/120+/130, full Support Bundle, Analytics RCA/AI are not certified by BUILD-005. Historical BUILD-010 activation state (superseded by final certification): architecture/source freeze base `7df20fa67bda23a3dfd50b42ce9562b50ac3be6e`; Core sizing reconciliation PR #161 merged to corrected canonical main `38d6b6d053c83932ab543205c707d1322e1ef35f`, exact-main Platform CI `37110142134` SUCCESS, Issue #160 CLOSED/COMPLETED; activation governance rebased to `38d6b6d053c83932ab543205c707d1322e1ef35f`; Issue #158 was OPEN at that historical point; independent BUILD-010 architecture/source audit ARCHITECTURE_DIRECTION_SOUND — READY_FOR_MASTER_TO_FREEZE_BUILD_010_CONTRACT; Master architecture/source freeze Issue #158 comment `5966719150`; BUILD-010 architecture FROZEN; this historical implementation-blocked state was later superseded by final BUILD-010 certification. |
-| Last updated | 2026-10-26 — Issue #211 actual-source update after PR #247 guarded merge and exact-main four-job CI success. Current code PRs OPEN/DRAFT: #217/#227/#245. Kafka K2b/K3/K4, physical ClickHouse proof and Core-issued grant G1b remain incomplete. Internal 2026-10-30 target does not waive enterprise certification. |
+| Last updated | 2026-10-29 — status-only reconciliation inside PR #270 of valid PR #261 facts against post-PR267 main. Correctly records PR #245 MERGED and Issue #260 OPEN/P1; retains historical 2026-10-27 checkpoint and all later 2026-10-29 Phase-2 ECR roadmap text without implementation claim. This branch edit is NOT a merge or product certificate; fresh exact-head 4-job CI, independent audit, guarded merge, post-main CI and PR #261 supersession readback still required. |
 | Sequencing authority | Master Chat only |
+
+## Rolling execution checkpoint — 2026-10-27 (Issue #211; verified status only)
+
+This 2026-10-27 checkpoint supersedes **only** earlier *current-state* assertions; the 2026-10-26 and 2026-10-15 checkpoints and original BUILD/certification trails remain preserved as historical provenance. Source: directly verified GitHub `main=a0b7d061e29b3306dd3ec2bee34d389493866e77` after PR #245. Mother References remain v3.3.0. `SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED != DEPLOYED`. Do not infer programme completion from bounded PR counts.
+
+| Lane / governed scope | Verified status as of checkpoint | Remaining gate |
+|---|---|---|
+| **Whole-BUILD certification** | Last whole-BUILD technical certificate remains **BUILD-011** (Issue #168 comment `6106750423`; historic exact-main CI `38120861672`). **BUILD-020** remains IMPLEMENTING / NOT CERTIFIED. Phase 1 / commercial product release remains **NO-GO**. | End-to-end security, durability, recoverability, capacity, tenant isolation, packaging and certification evidence remain mandatory. |
+| **Kafka health/probe (PR #245; residual Issue #260)** | **MERGED.** Audited source head `8c9ad5594249435c603659c60d6fe934104c4260`. Merge/main `a0b7d061e29b3306dd3ec2bee34d389493866e77`. PR CI `40344694943` attempt 2 SUCCESS (four required jobs). Exact-main push CI `40468060644` SUCCESS (four required jobs: Unit; Static contracts; Integration/PostgreSQL/contract/security; UI test and production build). Physical integration **20/20 PASS**. Mandatory PostgreSQL **193/193 PASS**. Physical Test19: completed HTTP **503**, same-broker restoration verified, completed HTTP **200**. | Scoped PR merge gate only. Issue **#260 remains OPEN/P1** (synchronous AdminClient bootstrap DNS can exceed health HTTP deadline). No universal three-second HTTP deadline or Phase-1 GA guarantee. |
+| **Residual Kafka health P1 (#260)** | **OPEN/P1.** Confirmed against audited PR #245 head `8c9ad5594249435c603659c60d6fe934104c4260`. Not resolved by merging #245. | Bounded lifecycle/deadline design, deterministic slow-DNS/concurrency proof, and documented certification envelope before any hard-deadline or GA claim. |
+| **Kafka committed-only/ClickHouse (#222/#235, PR #227)** | Remains **OPEN/DRAFT** at `5e462e3fa0f8883437afed4bbcc8ba6c8c530181` (heads not re-audited in this status-only pass beyond OPEN/DRAFT confirmation). | K2b/K3 recoverability/custody, physical ClickHouse/replay/capacity, independent audit, current-main integration and post-main CI. |
+| **Network Sensor runtime (#210, PR #217)** | Remains **OPEN/DRAFT** at `335a6b7f423f0c2837f0c54e9696955f9a6ea3eb` (OPEN/DRAFT confirmation only). | Core-issued grants (#229), typed ICMP ingress (#218), BUILD-021, physical end-to-end telemetry and failure/security certification. |
+| **Prior merged adjuncts (historical)** | PR #247 recovery verifier, #248 G1a locks, #234 decoder-only, #231 Agent delivery, #244 Sensor lifecycle, #243 G0 schema, #228 Kafka KRaft baseline remain historically MERGED as recorded in the 2026-10-26 checkpoint; not re-certified here. | Physical/operational recovery, grant issuance/admission, typed ICMP wire, BUILD-020 end-to-end and Phase-1 GA remain open. |
+
+**Operating priority:** keep Issue #260 OPEN/P1 visible; advance OPEN/DRAFT #217 and #227 under independent exact-head review; do not treat PR #245 merge as BUILD-020 or Phase-1 certification. Status-only Register changes require bounded PR review, exact-head CI, guarded merge and verified local fast-forward sync. No new release claims or competing source owners.
+
+**Maintenance control:** Each consequential PR publication, merge, failed/passed post-main CI, issue closure/reopening or source-breaking blocker must be reconciled into this root register through a separately reviewed, status-only GitHub change referencing Issue #211. GitHub `main` is canonical; local `/home/gagan/nms/Platform_Master_Build_Sequence_Register_v1.0.md` must be fast-forward synced only after checking local branch/worktree/dirty state. Issue comments alone do not update the register or the laptop copy. Preserve historical rows rather than silently rewriting or recertifying completed BUILD units.
 
 ## Rolling execution checkpoint — 2026-10-26 (Issue #211; verified status only)
 
@@ -295,3 +312,115 @@ BUILD-011 Slice 3 certification trail: Issue #168; PR #178; audited head `395b43
 BUILD-011 Slice 4 certification trail: Issue #168; PR #180; audited head `bdf317d642996af95788a1c3570add9871c21c5f`; merge/main `fe657eda4553ccb2c8c3906de61085e39fcaf481`; exact-head Platform CI #757 / run `37467279924` SUCCESS; post-merge Platform CI #758 / run `37474552157` SUCCESS; Master certification Issue #168 comment `6018969899`; Slice 4 POST-MERGE CERTIFIED (Linux installed-software source collection / typed structured-evidence boundary only); BUILD-011 remains IMPLEMENTING / not whole-build certified.
 BUILD-011 Slice 5 status (NOT CERTIFIED): branch `build/build-011-slice5-process-network-aggregator`; open PR #181; live head at Register update `7bfdeb3155e8194fec5933f58efa7c388020331e` (includes bounded-accounting review corrections after earlier rebased head `9fd235ae2e99322a5356b5f550e663f4b88e7ac2`); Master source-review / governance notes on Issue #168 include comments `6031673286`, `6031736746` and Codex-gate void correction `6031900689`. Slice 5 remains IMPLEMENTING / NOT CERTIFIED; no merge/post-merge certification is claimed.
 Capability Pack v1.3 status (IN PROGRESS / NOT CERTIFIED): Issue #92 commercial-depth Tranche 1 on branch `governance/capability-pack-v1.3-commercial-depth`; writer authorization / architecture comments include `6019016128`, `6017932424`, `6031900236`; corrected immutable Master source-review PASS is comment `6032403457`; Founder tool-authority amendment reactivating Codex as an isolated bounded writer while preserving Antigravity validation and Master Chat + GitHub certification authority is comment `6032406454`. Active pack inventory target is 34 Agents + 63 Skills with resource projection and deterministic evals; not certified.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Program — Issue #269
+
+**Authority:** Founder-approved roadmap decision, 2026-10-29.
+**Mother Reference version:** remains v3.3.0.
+**Maturity:** ROADMAP/SPECIFIED only. No implementation, test, benchmark, certification or deployment claim is created by this section.
+
+### Phase outcome
+
+| Phase | Certified outcome |
+|---|---|
+| **Phase 1** | Existing frozen production Network & Infrastructure Observability core. Issue #269 does not add Phase-2 breadth to the current first-GA critical path. |
+| **Phase 1.5 — Enterprise Foundation** | Exactly-two-Core HA/MSP + Integration Fabric/CMDB reconciliation + bounded operational OTel span/service-edge evidence + NCM Change Assurance + first-class serverless + selected broader Capability/Integration Packs. |
+| **Phase 2 — Enterprise ITOM/AIOps RFP Readiness** | Large-enterprise heterogeneous monitoring/ITOM/AIOps breadth can be answered as **Native — Certified** or **Integrated — Certified**, and the representative `ECRP-P2-v1` profile passes. |
+| **Phase 2.5+** | Full native APM and full native always-on DPI/deep packet analytics, only after separate architecture/dependency/security/capacity change control. |
+
+### Phase 1.5 implementation mapping — no new BUILD IDs
+
+| Capability | Existing BUILD ownership / gates | Required Phase-1.5 outcome |
+|---|---|---|
+| Exactly-two-Core HA + MSP | BUILD-060, 075, 120–124, 128, 130–132 | fencing/split-brain, PG/Kafka/CH continuity, Sensor reconnect/replay, noisy-neighbour/tenant isolation |
+| Integration Fabric / ITSM | BUILD-086 + integration contracts in 060/069/073/128 | transactional outbox/inbox, webhook/poll, mapping, sandbox, retry/idempotency, connector health |
+| CMDB reconciliation | BUILD-066/068/072/086 | ExternalBinding, CI/relationship reconciliation, field authority/conflicts, provenance/history |
+| Bounded operational OTel spans/service edges | BUILD-036/062–064/072/084/085 | bounded sampled span/edge evidence; no full APM backend |
+| NCM Change Assurance | BUILD-090/091 + 069/073/085 | immutable plan/approval binding, canary/batch, pre/post validation, stop/rollback where certified |
+| Serverless/FaaS | BUILD-026/036 + cloud/API Sensor paths | AWS Lambda, Azure Functions, Google Cloud Functions, Cloud Run per Issue #268 |
+| Broader enabling packs | BUILD-026/030–037/049 | only exact product/version dimensional certification counts |
+
+### Phase 2 implementation mapping — Enterprise RFP completeness
+
+| Workstream | Existing BUILD ownership / certification path | Phase-2 target |
+|---|---|---|
+| Enterprise OS/server monitoring | BUILD-010–019, 030/031, 037 | Windows/Linux plus demand-backed Unix (including AIX/Solaris where certified), agent/agentless matrices |
+| Hardware/OOB | BUILD-032 + 026/037 | Redfish/iDRAC/iLO/CIMC/IPMI health/lifecycle evidence |
+| Virtualisation/HCI | BUILD-033 + 026/037 | VMware, Hyper-V, Nutanix and demand-backed KVM/Proxmox; topology/performance/cross-vantage evidence |
+| Storage/SAN | BUILD-034 + 026/037/072 | arrays/pools/LUNs/controllers/replication + FC fabrics/ports/zones/WWNs + dependency graph |
+| Database performance monitoring | BUILD-035 + 026/037/072/084 | Oracle/RAC/Exadata where interfaces permit; PostgreSQL, SQL Server, MySQL/MariaDB, SAP HANA, MongoDB and approved data packs; waits/locks/deadlocks/replication/performance/change evidence |
+| Middleware/application-platform/batch | BUILD-026/035/036/047 + Integration/Pack framework | WebLogic/WebSphere/JBoss/Tomcat/IIS/Apache/Nginx/Kafka/MQ/RabbitMQ/API gateways and demand-backed batch/schedulers; no bytecode APM |
+| Backup/Data Protection | BUILD-026 + 086/097/095 | Veeam/Commvault/NetBackup and demand-backed products; job, coverage, SLA/RPO exposure, repository/media, restore evidence |
+| Multi-cloud | BUILD-036 + 026/049/072 | AWS/Azure/GCP/OCI operational depth; cloud-network + Kubernetes + serverless |
+| Network/Flow/log depth | BUILD-040–054, 093/094 | enterprise network/path/Flow/log analytics and correlation; no full native DPI |
+| Enterprise integrations | BUILD-086 + 060/069/073/128 | monitoring/APM/NPM-DPI/SIEM/CMDB/ITSM/change/deployment Integration Packs with governed health/mapping/provenance |
+| Service mapping / CMDB | BUILD-066/068/072/084/085 | service/dependency graph, reconciliation and impact analysis |
+| AIOps / RCA / operational intelligence | BUILD-080–085, 095, 100/101, 103 where enabled, Platform_19/22 | qualification/noise reduction, baselines/anomalies, change intelligence, Flight Recorder, Similar Incident, revisioned deterministic RCA, calibrated prediction, controlled remediation |
+| Regulated-enterprise deployment | BUILD-060/069/073/125–132 | on-prem/air-gap, no mandatory external AI, data-egress controls, PKI/KMS/HSM integration where certified, tamper-evident audit, WORM/archive integration, legal hold, offline update, privileged-support audit |
+| Scale / UX / operability | BUILD-067, 110–118, 130–132 | large-estate query/UI/report/RCA concurrency, connector cardinality/rate pressure, NOC workflows, supportability |
+
+### APM boundary through Phase 2
+
+Phase 2 **MUST support**:
+- OTel metrics/logs;
+- bounded sampled operational spans and service/dependency edges where certified;
+- trace/span correlation references/exemplars;
+- API/HTTP/synthetic monitoring;
+- service/application dependency and SLO context;
+- deployment/change correlation;
+- external APM Integration Packs and ingestion of transaction/trace/topology/error/user-experience evidence where the external product exposes it.
+
+Phase 2 **MUST NOT claim native full APM**:
+- bytecode/auto-instrumentation agents;
+- method/line-of-code diagnostics;
+- continuous profiling/flame graphs;
+- full RUM/mobile RUM/session replay;
+- unlimited/full-fidelity distributed trace backend.
+
+Those are Phase 2.5+.
+
+### DPI boundary through Phase 2
+
+Phase 2 **MUST support**:
+- NetFlow/IPFIX/sFlow/J-Flow;
+- active path and multi-vantage network diagnostics;
+- eBPF bounded process-to-network evidence;
+- bounded privileged incident-triggered packet evidence;
+- external NPM/DPI/NDR Integration Packs and source-labelled packet/flow metadata evidence.
+
+Phase 2 **MUST NOT claim native full DPI**:
+- continuous full-packet payload capture;
+- TLS decryption;
+- deep always-on L7 payload reconstruction;
+- packet warehouse/replay product;
+- native NDR-style detection engine.
+
+Those are Phase 2.5+.
+
+### ECRP-P2-v1 — mandatory Phase-2 exit gate (NOT a BUILD ID)
+
+`ECRP-P2-v1` is a certification profile under Platform_14/Platform_23. It does not renumber BUILDs.
+
+A Phase-2 complete/GA-ready claim is prohibited until the profile proves a representative multi-DC/DR/branch/hybrid-cloud enterprise estate across:
+1. discovery/onboarding/identity and CMDB reconciliation;
+2. network + host + virtualisation/HCI + OOB + storage/SAN;
+3. enterprise database + middleware + backup/data protection;
+4. Kubernetes + AWS/Azure/GCP/OCI + serverless;
+5. Flow/log/OTel + external APM/NPM-DPI/SIEM evidence;
+6. service/dependency mapping and service-impact analysis;
+7. No Data/connector/credential/path/collector failure classification;
+8. alert qualification, storm reduction, incident correlation and RCA with contradictions/INCONCLUSIVE;
+9. ITSM/notification/integration delivery, failure and replay;
+10. regulated data-boundary, retention/archive/legal hold and audited support;
+11. HA/DR, backup/restore, replay, upgrade/rollback and pack/connector compatibility;
+12. enterprise scale, cardinality/noisy sources, concurrent NOC users and end-to-end operator workflows.
+
+Each named technology must be tied to an exact product/version compatibility record and dimensional certification. Vendor/family presence in this register is never a certification claim.
+
+### Sequencing rule
+
+Issue #269 does **not** authorize Phase-1 enhancement diversion. Complete the current Phase-1 commercial certification critical path first. Phase-1.5 foundation work follows dependency readiness and may proceed in isolated lanes where it does not destabilize Phase 1. Phase-2 work is then driven by the ECRP gap matrix and Capability/Integration Pack certification priority.
+
+No separate Phase-2 codebase, schema fork, Core fork, customer-specific source branch, duplicate graph authority or generic telemetry datastore is allowed.

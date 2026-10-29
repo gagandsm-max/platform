@@ -223,3 +223,14 @@ This reconciliation promotes the **requirement phase**, not implementation state
 - Deep specialist VoIP/CDR/CMR/MOS/call-path depth beyond existing operational network/VoIP monitoring remains **Phase 2**.
 
 These phase decisions reuse existing architecture owners and do not select new dependencies by themselves.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+The previously mixed `P1/P1.5/V1.x/P2` enterprise-gap labels are now constrained by the Issue #269 phase outcome:
+
+- Enterprise Foundation capabilities required to unlock broad enterprise operation (HA/MSP, Integration Fabric/CMDB foundations, bounded OTel operational spans, NCM Change Assurance, first-class serverless and selected enabling integrations) target **Phase 1.5** where dependencies permit.
+- Middleware monitoring, backup/data-protection monitoring, broader cloud/OCI, regulated-enterprise operational controls and remaining enterprise-adoption gaps required by `ECRP-P2-v1` are **Phase 2 mandatory targets** unless already certified earlier.
+- Regional federation remains a separate future capability unless needed by an explicit approved Phase-2 customer profile; Issue #269 does not silently redesign the fixed two-Core HA architecture.
+- Full native APM and full native always-on DPI are not enterprise-gap closure requirements for Phase 2; they are Phase 2.5+.

@@ -2481,3 +2481,21 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|
 | **Phase 1** | DF-001 standalone Core; multi-Sensor enrollment/assignment/fencing; SNMP typed ingestion; DF-025 NCM backup subset; DF-047/048 backup/DR | Standalone deletion-ACK for certified recoverable failures; Sensors continue collect/buffer during Core unavailability within storage protection | No Core-HA claim from DF-001; no MSP isolation cert; Issue #218 ICMP Core acceptance gap open; DF-ACP-005 mass/canary privileged NCM automation not Phase 1 certified |
 | **Phase 1.5** | DF-002 HA pairing; DF-037/038 failover/rejoin; PG/Kafka/ClickHouse continuity; DF-ACP-005 NCM Change Assurance privileged automation; DF-026 single approved push | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push continuity | Physical fencing/replication unselected; HA does not replace DR; no third Core/witness/journal preselected |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+### DF-ECR-001 — External observability evidence integration
+
+`External APM/NPM/DPI/SIEM/monitoring tool -> authenticated Integration Pack -> tenant/source validation -> rate/schema/replay controls -> canonical entity/binding reconciliation -> normalized metric/log/trace-summary/packet-metadata/event/change/topology evidence -> Kafka/history/graph -> alert/incident/RCA/workbench`.
+
+Failure or staleness of an external connector produces monitoring/integration-degraded evidence and MUST NOT fabricate target DOWN.
+
+### DF-ECR-002 — Enterprise Capability Pack lifecycle
+
+`Pack/version -> compatibility/preflight -> credentials/privilege validation -> discovery/onboarding review -> monitoring policy/capacity preview -> activate -> collect -> quality/self-health -> graph/alerts/RCA -> upgrade compatibility/revalidation`.
+
+### DF-ECR-003 — Regulated enterprise
+
+All required telemetry/analytics remain inside the customer-approved deployment boundary unless an explicitly authorized connector/data-egress policy permits otherwise. Offline upgrades, backup/restore, archive/legal hold and support access follow governed audit and data-boundary controls.

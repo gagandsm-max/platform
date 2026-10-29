@@ -618,3 +618,11 @@ Triggered Fast RCA is product terminology only. It does not create a second RCA/
 - NCM Change Assurance supplies intended diff, precheck/risk/blast snapshot, approval, execution/canary/batch/postcheck/stabilization/rollback evidence to Change Intelligence/RCA. A change preceding an incident is temporal correlation unless additional evidence supports causality.
 - Investigation Workbench presents the same evidence/RCA truth and must expose contradictions, missing/stale evidence, external-vs-observed provenance and `INCONCLUSIVE`; it does not introduce an independent confidence or causal model.
 - AI/LLM may summarize mappings, external notes, trace/log context or proposed remediation only through existing AI Gateway/data/tool-policy controls. Untrusted log/ticket/CMDB text remains prompt-injection input and cannot directly select a tenant, execute NCM, alter authority or bypass approval.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase 2 shall productionize the monitoring-intelligence behavior needed for enterprise ITOM/AIOps readiness: telemetry-quality trust gates, semantic states, evidence coverage, alert-policy lifecycle, alert storm/noise reduction, anomaly/baseline quality, change correlation, revisioned evidence-led RCA, predictive operations only where calibrated, Incident Copilot grounding, provider/local/no-AI fallback and controlled remediation safety.
+
+ECRP-P2-v1 must prove deterministic operation with external AI unavailable and must include contradictory/missing/stale evidence. External APM/NPM/DPI evidence is an input with provenance/confidence, not causal truth. Full native APM/DPI remains Phase 2.5+.

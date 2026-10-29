@@ -918,3 +918,14 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|
 | **Phase 1** | Tenant-scoped APIs/events; Sensor/Agent mTLS identity; assignment/fencing generations; SNMP typed + ICMP typed observation contracts; `No Data != Device Down` | Standalone deletion-ACK durability matrix; tenant-aware contracts without MSP isolation cert claim | Issue #218 Core ICMP acceptance open; no Core-HA continuity claim; NCM automation not Phase 1 default |
 | **Phase 1.5** | Same contracts under two-Core HA continuity and MSP adversarial isolation certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | Physical HA mechanisms unselected; no new journal/witness/database invented by this contract note |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 external-observability evidence contracts shall preserve:
+`tenant_id, source_system_id, source_object_id, entity/binding reference, evidence_type, event_time, ingest_time, quality, provenance, correlation_id, schema/version, bounded payload/reference`.
+
+External APM trace summaries, external NPM/DPI packet/flow metadata, SIEM/security facts, CMDB CIs/relationships and third-party monitoring events are evidence classes, not independent Platform identity or RCA authority. Raw external payload retention is bounded and policy-controlled.
+
+No Phase-2 contract requires unlimited span storage or packet-payload warehousing; those physical models are Phase 2.5+ change-control items.

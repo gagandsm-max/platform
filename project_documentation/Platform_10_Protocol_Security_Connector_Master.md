@@ -300,3 +300,13 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|
 | **Phase 1** | Standalone Core; Sensor/Agent mTLS enrollment; SNMP typed read monitoring; ICMP typed availability evidence; Inform local ACK boundary; multi-Sensor assignment fencing | Tenant-aware Credential Profiles, RBAC and audit mandatory for single-customer enterprise; no MSP/shared-customer isolation cert claim | Issue #218 Core ICMP acceptance gap open; NCM automation not Phase 1 default; no Core-HA claim |
 | **Phase 1.5** | Same protocol contracts under exactly-two-Core HA continuity; push-protocol HA reconnect/re-anchor | MSP/shared multi-tenancy adversarial isolation certification across connectors/credentials/NCM | Physical HA mechanisms unselected; firmware remains Phase 1.5; listed ITSM vendors are targets until evidence passes |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 Integration Packs shall support governed adapters for monitoring tools, APM, NPM/DPI, SIEM/SOC, CMDB, ITSM, deployment/change systems and enterprise technology APIs. Every adapter inherits Credential Profile, TLS/mTLS/OAuth/API-key policy, bounded pagination/rate budgets, replay/idempotency, source validation, connector health, test sandbox and audit.
+
+OCI is added as a Phase-2 cloud-provider target through the Cloud/API + Capability Pack architecture; exact SDK/dependency admission remains Platform_07 authority.
+
+No Phase-2 connector may bypass server-side tenant/resource authorization or import vendor identity as canonical Platform authority.

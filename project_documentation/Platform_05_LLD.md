@@ -3273,3 +3273,13 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|---|
 | **Phase 1** | Standalone Core; multi-Sensor leases/assignment fencing; SNMP/ICMP typed observations; backup/restore + site-loss DR hooks | Standalone deletion-ACK for certified recoverable failures; ClickHouse not Sensor ACK gate; replay/idempotency retained | Tenant-aware schemas/APIs/events/mTLS/RBAC/audit mandatory; no MSP isolation cert claim | No Core-HA continuity claim; catastrophic single-Core loss is DR/backup, not HA RPO=0; Issue #218 Core ICMP acceptance gap remains open |
 | **Phase 1.5** | Exactly-two-Core HA Manager/PG/Kafka/ClickHouse continuity; Sensor reconnect/re-anchor; privileged NCM automation defaults | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures | MSP/shared-tenant adversarial isolation + noisy-neighbor certification | Physical fencing/replication mechanisms remain P0 unselected; no third Core/witness/journal preselected |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 implementation shall reuse canonical identity, evidence, relationship, telemetry-quality, change, incident and integration contracts. External APM/NPM/DPI/CMDB/SIEM evidence must carry at least tenant, source-system identity, source-object identity, event/ingest time, quality/provenance, correlation identity and bounded raw/reference payload metadata. External source IDs are identifiers/evidence, never tenant/entity authority.
+
+Capability Packs shall declare exact product/version support, collection mode, required privilege, discovery, monitoring dimensions, topology/dependency output, diagnostics, security behavior, rate/cardinality limits, upgrade compatibility and certification state.
+
+No physical schema in Phase 2 may assume full native APM span retention or full packet-payload warehousing. Phase 2.5+ change control owns those physical storage contracts.

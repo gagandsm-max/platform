@@ -434,3 +434,11 @@ Change Intelligence consumes both external ITSM Change metadata and NCM Change A
 ### 18.4 Problem management
 
 Similar Incident Memory may recommend creation/linkage of an external Problem and preserve its external binding, accepted RCA/workaround/known-error/corrective-action/PIR references. Automated external Problem creation is not a Phase-1 GA requirement; connector canonical support is established in Phase 1 and richer Problem workflow is Phase 1.5 unless a certified connector/use case promotes it through change control.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase 2 is the maturity target for OIV capabilities needed in large-enterprise ITOM/AIOps procurements: cross-domain Change Intelligence, Flight Recorder, Similar Incident Memory, service-impact context, evidence-led RCA, controlled remediation, MTTR/value measurement and external operational evidence integration shall be production-certifiable where included in ECRP-P2-v1.
+
+OIV may consume external APM/NPM/DPI evidence in Phase 2, but must preserve source provenance/quality and must not imply native full APM/DPI implementation. Full native APM/DPI remains Phase 2.5+.

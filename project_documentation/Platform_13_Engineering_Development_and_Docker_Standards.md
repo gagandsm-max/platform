@@ -158,3 +158,9 @@ Container stdout/stderr must be structured and bounded by Docker logging setting
 ## 11. Windows Agent exception
 
 Agent business logic and cross-compilation can run in Docker. Final Windows Service/SCM/MSI/reboot testing requires an isolated Windows VM/CI runner. This is required for correctness; Linux containers cannot certify Windows service semantics.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 enterprise breadth MUST NOT be implemented as customer-specific Core forks, duplicate services or dependency sprawl. Prefer Capability Packs, Integration Packs, versioned schemas and policy/configuration. Every new vendor adapter requires an actual supported API/protocol path, bounded failure behavior, tests, observability and exact-version compatibility evidence. Phase-2.5+ APM/DPI work is not an excuse to introduce its runtime/dependency footprint into Phase 2.
