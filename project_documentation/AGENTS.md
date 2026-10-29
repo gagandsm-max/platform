@@ -264,3 +264,18 @@ Non-negotiable boundaries:
 - Full developer-centric APM and full always-on DPI/NDR remain excluded. Existing bounded incident-triggered packet evidence remains governed under Platform_19.
 
 The v3.3.0 requirements are architecture/product authority only. Runtime implementation, benchmark, certification and deployment remain owned by their future BUILDs and evidence gates.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+**Founder-approved product-roadmap authority (2026-10-29).** Before implementing or reviewing any Phase 1.5, Phase 2, enterprise technology-coverage, regulated-enterprise, external-monitoring-tool integration, APM-adjacent or packet-intelligence work, engineers/agents MUST read Issue #269 and the governing Phase contract in `Platform_23_Enterprise_Monitoring_Coverage_and_Technology_Pack_Master.md`.
+
+Non-negotiable execution rules:
+- Phase 1 remains the frozen production Network & Infrastructure Observability core; do not pull Phase-2 breadth into Phase 1 merely because a customer RFP asks for it.
+- Phase 1.5 is the enterprise foundation: exactly-two-Core HA/MSP certification, Integration Fabric/CMDB reconciliation, bounded operational OTel span/dependency evidence, NCM Change Assurance, selected broader packs and serverless.
+- Phase 2 is the Enterprise ITOM/AIOps RFP-readiness envelope. Its exit gate is `ECRP-P2-v1`, not feature presence.
+- Full native APM (bytecode/auto-instrumentation, method/line-level tracing, continuous profiling, full RUM/session replay) and full native always-on DPI/deep packet analytics are prohibited from Phase 2 and require Phase 2.5+ change control.
+- Phase 2 MAY integrate with external APM/NPM/DPI/SIEM/CMDB/ITSM tools and ingest their evidence through governed Integration Packs; external-tool evidence never bypasses tenant identity, provenance, confidence, RBAC, audit, rate/cardinality controls or Platform RCA safety.
+- Capability/vendor/product/version claims remain dimensional certification claims. A named technology in a Mother Reference is never proof of implementation/certification.
+- Do not create customer-specific Core forks. Use Capability Packs, Integration Packs, policies and canonical contracts.
