@@ -1210,3 +1210,25 @@ This is an interpretation/certification supplement to existing indexed IDs, NOT 
 Physical acceptance matrix: (a) LLDP/CDP cross-vendor and identity negatives; (b) core-link failure with correlated downstream UNREACHABLE and one parent incident; (c) redundant LAG/ECMP or alternate Sensor/path continuing healthy with NO false parent/outage or child mute; (d) Sensor or SNMP-auth failure producing MONITORING_DEGRADED/UNKNOWN; (e) independent downstream child outage not suppressed; (f) late/stale/flapping/conflicting graph edges and as-of RCA revision; (g) authenticated vs spoofed Trap/Syslog; (h) codebook no-match/unknown/contradiction returns INCONCLUSIVE; (i) governed diagnostic sequence, cost/rate and tenant denial; (j) source→accepted→graph→alert→incident→RCA accounting, fail/restart/replay and declared estate workload. Numeric time windows or thresholds are customer policy, not globally selected values.
 
 This supplement does NOT re-certify the earlier historical base RTM checkmarks. Production certification requires actual source, tests and security/load/failure evidence, not this document change.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Platform_23 now owns the formal Phase-2 enterprise-readiness supplement `PRD-ECR-001..013` / `REQ-ECR-001..013`. This global RTM SHALL treat those IDs as mandatory where their phase applies.
+
+| REQ family | Scope | Phase |
+|---|---|---|
+| REQ-ECR-001 | Enterprise ITOM/AIOps RFP readiness outcome | Phase 2 |
+| REQ-ECR-002 | Enterprise foundation dependency envelope | Phase 1.5 |
+| REQ-ECR-003 | Heterogeneous infra/OS/virtualisation/storage depth | Phase 2 |
+| REQ-ECR-004 | Enterprise database performance monitoring depth | Phase 2 |
+| REQ-ECR-005 | Middleware/application-platform/batch monitoring | Phase 2 |
+| REQ-ECR-006 | Backup/data-protection monitoring | Phase 2 |
+| REQ-ECR-007 | AWS/Azure/GCP/OCI + serverless cloud breadth | P1.5/P2 |
+| REQ-ECR-008 | Regulated-enterprise deployment/evidence profile | Phase 2 |
+| REQ-ECR-009 | Enterprise integration ecosystem incl. external APM/NPM/DPI | Phase 2 |
+| REQ-ECR-010 | Enterprise AIOps/service mapping/controlled automation maturity | Phase 2 |
+| REQ-ECR-011 | Full native APM deferred; Phase-2 integration/bounded OTel boundary | Phase 2 / 2.5+ |
+| REQ-ECR-012 | Full native DPI deferred; Phase-2 Flow/path/triggered-packet/integration boundary | Phase 2 / 2.5+ |
+| REQ-ECR-013 | ECRP-P2-v1 certification profile | Phase 2 exit |
