@@ -300,8 +300,8 @@ Capability Pack v1.3 status (IN PROGRESS / NOT CERTIFIED): Issue #92 commercial-
 
 ## Phase 2 Enterprise RFP Readiness Program — Issue #269
 
-**Authority:** Founder-approved roadmap decision, 2026-10-29.  
-**Mother Reference version:** remains v3.3.0.  
+**Authority:** Founder-approved roadmap decision, 2026-10-29.
+**Mother Reference version:** remains v3.3.0.
 **Maturity:** ROADMAP/SPECIFIED only. No implementation, test, benchmark, certification or deployment claim is created by this section.
 
 ### Phase outcome
@@ -407,5 +407,3 @@ Each named technology must be tied to an exact product/version compatibility rec
 Issue #269 does **not** authorize Phase-1 enhancement diversion. Complete the current Phase-1 commercial certification critical path first. Phase-1.5 foundation work follows dependency readiness and may proceed in isolated lanes where it does not destabilize Phase 1. Phase-2 work is then driven by the ECRP gap matrix and Capability/Integration Pack certification priority.
 
 No separate Phase-2 codebase, schema fork, Core fork, customer-specific source branch, duplicate graph authority or generic telemetry datastore is allowed.
-
-
