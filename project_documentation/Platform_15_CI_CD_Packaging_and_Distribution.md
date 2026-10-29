@@ -116,3 +116,9 @@ Capability Packs shipped by Platform are versioned release artifacts with declar
 Phase-1.5 firmware images are **customer/vendor-entitled privileged artifacts**, not ordinary Platform dependencies. If Platform provides repository/caching/distribution functions, metadata must preserve source/vendor, exact image/version/model compatibility, entitlement/reference, checksum and vendor signature status where available, acquisition/import actor/time, approval state and immutable content identity. Firmware artifacts are access-controlled, auditable and excluded from general telemetry/support-bundle export. Platform must not redistribute vendor firmware without appropriate rights/entitlement.
 
 Selecting a browser-runtime package for Phase-1.5 synthetics requires separate Platform_07 admission, pinned browser/runtime provenance, SBOM/CVE/licence scans, signed/offline packaging strategy and rollback/upgrade evidence before release.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 Enterprise/Regulated profiles shall be distributable through the existing signed reproducible native package and offline/air-gap model. New Capability/Integration Packs must carry version/provenance/compatibility metadata and be admitted into release evidence. No Phase-2 customer deployment may require a public SaaS control plane for core monitoring. Full native APM/DPI agent/packet-engine packaging is not part of Phase 2.
