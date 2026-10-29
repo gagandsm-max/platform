@@ -7482,3 +7482,15 @@ Synchronization/conflict UI keeps **Monitoring State** separate from **External 
 ### 15.6 Phase-1.5 specialist UX
 
 Endpoint & Switch-Port Intelligence adds MAC/IP/user-when-available/AP/switch/port/VLAN attachment history and provenance. Browser Journey Synthetics adds step/assertion/timing/failure-evidence views only after browser runtime admission. Database Performance Intelligence adds bounded fingerprint/wait/blocking/deadlock/regression/plan evidence. Virtualization Optimization shows evidence-backed recommendations requiring governed human action. None of these Phase-1.5 screens are first-GA implementation claims.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 UI shall expose enterprise coverage truth instead of generic vendor badges:
+- Compatibility & Certification Matrix: product/version, collection mode, dimensional support, limitations and certification state.
+- Integration Health: connector freshness, auth/rate/throttle/backlog/degraded state.
+- Regulated Deployment / Data Boundary view: data-egress mode, archive/retention/legal-hold and DR evidence.
+- Enterprise Technology views for database, storage/SAN, middleware, backup/data protection and multi-cloud.
+- External evidence is visibly source-labelled; external APM/NPM/DPI conclusions are not presented as native Platform truth.
+- APM/DPI native-only controls are absent in Phase 2; UI must not imply bytecode instrumentation, RUM/session replay or continuous DPI availability.
