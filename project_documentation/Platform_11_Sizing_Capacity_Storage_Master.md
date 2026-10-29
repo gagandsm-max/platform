@@ -370,3 +370,13 @@ Before selecting/shipping a browser runtime, benchmark memory/browser, CPU/brows
 ### v3.3 formal CMDB scale requirement anchor
 
 - `REQ-CMDB-007` — CMDB reconciliation is incremental, idempotent, rate-bounded and audited; certification benchmarks representative 100K, 500K and 1M+ bindings/CIs plus multi-million relationships where applicable without converting those test points into universal capacity claims.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase 2 adds **ECRP-P2-v1 enterprise workload certification**, not a universal hardware guarantee. Capacity certification shall include mixed polling + Flow + logs + OTel + connector ingestion + database/storage/middleware/backup/cloud APIs + topology/RCA/reporting + concurrent NOC users.
+
+Regulated-enterprise retention profiles MAY include 180-day-or-longer searchable/archived classes when customer policy and certified storage sizing permit. 180 days is not a universal default. The sizing calculator must include connector-derived telemetry, bounded traces, external evidence metadata, archive/WORM targets and legal holds.
+
+Phase-2 optional enrichment (AI, external observability evidence, bounded spans, triggered packet evidence) must yield before protected monitoring correctness/durability objectives are violated.
