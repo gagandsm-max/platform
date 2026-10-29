@@ -77,9 +77,9 @@ Phase 1 architecture requires ICMP availability evidence as a protocol-aware typ
 | Hyper-V | WinRM/WMI | masterzen/winrm/native APIs | entity graph/metrics |
 | Proxmox/Nutanix/storage | HTTPS REST/API/SNMP/SSH per pack | Go HTTP/GoSNMP | API Studio/Device Pack normalization |
 | Databases | engine-specific username/password, TLS, certificate, integrated auth where driver supports | approved driver per engine | query packs, secret management, normalization; driver license review |
-| AWS | IAM roles/keys/session credentials as deployment permits | AWS SDK for Go v2 | account/region/resource normalization |
-| Azure | service principal/managed identity/OAuth as deployment permits | Azure SDK for Go | subscription/resource normalization |
-| GCP | service account/workload identity/OAuth as deployment permits | Google Cloud Go | project/resource normalization |
+| AWS | IAM roles/STS-style temporary credentials preferred over long-lived root keys where supported; least-privilege scoped for inventory/monitoring/logs/events/change as permitted | AWS SDK for Go v2 | account/region/resource normalization; Phase 1.5 serverless (Lambda) under `REQ-SLS-006` |
+| Azure | managed identity/service principal/OAuth as appropriate; least privilege | Azure SDK for Go | subscription/resource normalization; Phase 1.5 serverless (Functions) under `REQ-SLS-006` |
+| GCP | workload/service identity/OAuth as appropriate; least privilege | Google Cloud Go | project/resource normalization; Phase 1.5 serverless (Cloud Functions/Cloud Run) under `REQ-SLS-006` |
 | Kubernetes | kubeconfig/service-account/client cert/bearer token under least privilege | client-go | discovery/entity graph/RBAC safe use |
 | OpenTelemetry | OTLP gRPC/HTTP secured with TLS/mTLS/token as configured | OTel Collector/libraries | tenant/entity mapping, quotas, schema |
 
@@ -300,6 +300,26 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|---|
 | **Phase 1** | Standalone Core; Sensor/Agent mTLS enrollment; SNMP typed read monitoring; ICMP typed availability evidence; Inform local ACK boundary; multi-Sensor assignment fencing | Tenant-aware Credential Profiles, RBAC and audit mandatory for single-customer enterprise; no MSP/shared-customer isolation cert claim | Issue #218 Core ICMP acceptance gap open; NCM automation not Phase 1 default; no Core-HA claim |
 | **Phase 1.5** | Same protocol contracts under exactly-two-Core HA continuity; push-protocol HA reconnect/re-anchor | MSP/shared multi-tenancy adversarial isolation certification across connectors/credentials/NCM | Physical HA mechanisms unselected; firmware remains Phase 1.5; listed ITSM vendors are targets until evidence passes |
+
+## Phase 1.5 Serverless connector security — Issue #268
+
+Governing requirements: `REQ-SLS-006`, `PRD-SLS-006`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED.
+
+Mandatory controls for AWS Lambda, Azure Functions, Google Cloud Functions and Google Cloud Run connectors:
+
+- least-privilege cloud identity; prefer temporary STS/role, managed identity or workload identity patterns where supported;
+- tenant/resource scope on all reads and actions; server-side authorization;
+- provider credentials never returned to browser;
+- secrets and environment-variable values must not be logged, audited in cleartext, or captured into telemetry/support bundles;
+- function request/response payload capture is NOT part of baseline serverless monitoring;
+- no source-code retrieval required for baseline monitoring;
+- no arbitrary function invocation for health testing;
+- bounded APIs, dimensions and tags;
+- connector endpoints/identities MUST NOT create SSRF or tenant escape (allowlists, DNS/IP validation, redirect controls, private-address policy where applicable, timeouts);
+- audit onboarding/configuration/credential actions;
+- provider IDs cannot override Platform tenant/entity authority.
+
+OCI Functions remain future unless separately promoted; no new OSS SDK is admitted by this documentation task (reuse Platform_07 OSS-047/048/049).
 
 ---
 
