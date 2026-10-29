@@ -790,3 +790,100 @@ The certification profile must exercise a representative multi-DC/DR/branch/hybr
 ### Non-claims
 
 This roadmap is **SPECIFIED** only. It does not claim any listed technology, connector, regulated profile, AIOps feature or ECRP profile is implemented, tested, benchmarked, certified or deployed. Full native APM and full native DPI remain excluded from Phase 2 even if external evidence is integrated.
+
+---
+
+## Issue #272 — enterprise partial-closure contract and Phase 2.5 Deep Observability
+
+### PRD-ECR-014 — Procurement Requirement Closure Contract
+
+Every accepted recurring enterprise procurement requirement SHALL have a closure record with:
+1. requirement/cluster identity;
+2. owning phase;
+3. Native / Capability Pack / Integration Pack / Customer Acceptance Profile / explicit deferment route;
+4. owning product capability;
+5. exact product/version/collection-mode certification obligation where applicable;
+6. security/privacy and failure/degraded semantics;
+7. scale/retention expectations where applicable;
+8. required certification/acceptance evidence;
+9. explicit non-goal/fallback.
+
+A generic "later", "optional", "partial" or "TBD" without this information is not a valid roadmap disposition.
+
+### Remaining customer-cluster closure matrix
+
+| Cluster | Planned closure | Target phase | Certification/acceptance obligation |
+|---|---|---|---|
+| M02 gNMI/streaming | Native + Capability Pack | P2 | exact device/model/version, subscription/auth/fallback and stale/no-data semantics |
+| M09 topology/rack/DC | Native | P2 | vendor discovery freshness, L2/L3 relationship provenance, rack/DC UI and change latency |
+| M10 SD-WAN | Capability Pack | P2 | controller/version matrix, underlay/overlay/tunnel/SLA semantics |
+| M12 legacy OS/AIX | Capability Pack | P2 | OS/version/privilege/crypto matrix; no weakening of platform security |
+| M16 enterprise DB | Capability Pack | P2 | Oracle/RAC/Exadata/SQL Server/PostgreSQL/MySQL/Db2 and approved DB dimensional certification |
+| M17 data platforms | Capability Pack | P2 | exact MongoDB/Cassandra/Redis/Elasticsearch/Kafka version/metric/failure matrix |
+| M18 middleware | Capability Pack | P2 | exact app-server/JVM/JMX/version/privilege matrix; no bytecode APM requirement |
+| M19 web/MQ/API gateway | Capability/Integration Pack | P2 | exact product/API/version/metric/DLQ/latency/saturation matrix |
+| M21 M365/collaboration | Capability/Integration Pack | P2 | provider/API/tenant/feature matrix; deep media telemetry only where certified |
+| M23 EUC/VDI | Capability Pack | P2 | Citrix/Horizon/AVD privacy-limited collection and exact version matrix |
+| M24 security SaaS | Integration Pack | P2 | exact CrowdStrike/Qualys/Wiz/Proofpoint API/edition/event-context matrix |
+| M32 maintenance | Native + Integration API | P1.5/P2 | approval, scope, external activation, conflict, expiry and audit lifecycle |
+| M34 log continuity | Native bounded durability profile | P2 | declared ACK/backpressure/storage-exhaustion envelope; no absolute unbounded zero-loss claim |
+| M39 dashboards | Customer Acceptance Profile | P2 | customer-defined dashboard/UAT pack on top of native Dashboard Studio |
+| M40 named integrations | Integration Pack | P2 | product/edition/API fixture, idempotency, loop prevention, DLQ/replay and upgrade tests |
+| M42 retention | Customer Acceptance Profile | P2 | signal-specific 180-day or other declared profile sizing, archive and retrieval evidence |
+| M44 security/compliance | Native technical controls + external evidence profile | P2 | technical control certification plus separately governed compliance/pen-test evidence |
+| M46 customer SLA | Customer Acceptance Profile | P2 | measurable definitions/baselines/exclusions; no universal 100%/zero-error commitment |
+| S01 CMDB freshness/import | Native + Customer Acceptance Profile | P2 | import/dedup/reconciliation plus measured freshness target where contracted |
+| S02 monitoring integration | Integration Pack | P2 | Zabbix/ThirdEye/OEM/vCenter/hardware exact product/API fixtures where commercially required |
+| S03 scale | Customer Acceptance Profile | P2 | representative device/sensor/user/retention benchmark for declared estate |
+| P04 distributed traces | bounded native + external APM in P2; full native APM backend in P2.5 | P2/P2.5 | P2 sampled span/service-edge correlation; P2.5 DORP full-trace certification |
+| P07 synthetics | Native | P2 | HTTP/API/DNS/TLS plus governed multi-step browser journeys and secret handling |
+| P08 packet analytics | bounded native + external NPM/DPI in P2; full native DPI in P2.5 | P2/P2.5 | P2 triggered/metadata evidence; P2.5 DORP continuous capture/DPI certification |
+| P12 regulated retention | Regulated Customer Acceptance Profile | P2 | per-signal retention/archive/immutability/search/retrieval and sizing evidence |
+| P14 business transactions | Integration Pack | P2 | governed business-KPI ingestion with payload minimization and authority/provenance |
+| P16 banking/executive dashboards | Customer Acceptance Profile | P2 | configurable role-specific dashboard/UAT pack; no customer-specific Core fork |
+| P18 compliance reports | Native report framework + Customer Acceptance Profile | P2 | configurable evidence reports; exact regulatory mapping separately reviewed/approved |
+
+This matrix is roadmap ownership, not implementation or tender-compliance evidence.
+
+### REQ-ECR-014
+
+`REQ-ECR-014` SHALL trace PRD-ECR-014 across PRD, architecture, RTM, quality, security, operations and the Build Sequence Register.
+
+### Phase-2 exit closure rule
+
+A Phase-2 complete/GA-ready claim is prohibited if an accepted enterprise requirement remains an unresolved architecture-level Partial.
+
+Allowed final roadmap/certification dispositions are:
+- **Native — Certified**;
+- **Integrated — Certified**;
+- **Customer Profile — Certifiable**;
+- **Explicit Phase-2.5 deferment**.
+
+### Phase 2.5 — Native Deep Observability requirement family
+
+| ID | Requirement |
+|---|---|
+| PRD-DOR-001 | Phase 2.5 SHALL provide native deep application and network observability while preserving the existing identity/graph/evidence/RBAC/tenant/audit authorities. |
+| PRD-DOR-002 | Native APM SHALL support automatic instrumentation for an explicitly certified runtime/version matrix including approved Java, .NET, Python, Node.js and Go paths. |
+| PRD-DOR-003 | Native APM SHALL provide full distributed trace/transaction processing, service/resource identity, errors, DB/external calls, dependency context and bounded retention. |
+| PRD-DOR-004 | Native APM SHALL provide adaptive sampling/cardinality control and continuous CPU/memory/allocation/thread/lock profiling with flame-graph/operator workflows. |
+| PRD-DOR-005 | Native digital experience SHALL support browser RUM, mobile RUM, Core Web Vitals, user journeys and privacy/consent-governed session replay where enabled. |
+| PRD-DOR-006 | Native APM evidence SHALL correlate with logs, metrics, synthetics, changes, topology, incidents and deterministic RCA without creating a second RCA authority. |
+| PRD-DOR-007 | Native network deep observability SHALL support governed SPAN/TAP/vTAP/packet-broker acquisition and continuous capture within a certified line-rate/loss envelope. |
+| PRD-DOR-008 | Native DPI SHALL provide packet metadata, flow reconstruction, supported L2-L7 decoding, TCP diagnostics, DNS/TLS/HTTP transaction analytics and network-versus-application response decomposition. |
+| PRD-DOR-009 | Native DPI SHALL correlate packet-derived evidence to canonical entities/services/traces/incidents and support bounded historical packet investigation/replay where safe. |
+| PRD-DOR-010 | Raw payload/PCAP access SHALL be separately protected by tenant isolation, RBAC, audit, encryption, bounded retention, masking/redaction, export controls and evidence custody. |
+| PRD-DOR-011 | TLS decryption MAY be supported only under explicit lawful authorization with least privilege, key custody, KMS/HSM integration where applicable, audit and bounded scope; it is never mandatory. |
+| PRD-DOR-012 | Deep-observability ingest SHALL enforce sampling/capture policy, cardinality/rate protection, backpressure and explicit degraded states rather than uncontrolled resource exhaustion. |
+| PRD-DOR-013 | Phase 2.5 SHALL NOT claim completion until `DORP-P2.5-v1` passes; this requirement family does not make AmrudAi a general SIEM/NDR replacement. |
+
+Formal trace IDs `REQ-DOR-001..013` mirror these product requirements.
+
+### DORP-P2.5-v1
+
+`DORP-P2.5-v1` is owned by Platform_14 and is NOT a BUILD ID. It certifies the APM and DPI pillars, including exact runtime/protocol/version support, privacy/security/tenant negatives, load/cardinality/line-rate, failure/recovery, retention, upgrade/rollback and end-to-end operator workflows.
+
+### Non-claims
+
+Issue #272 is **SPECIFIED / ROADMAP** only. It does not establish implementation, benchmark, certification, customer tender compliance or production readiness.
+
