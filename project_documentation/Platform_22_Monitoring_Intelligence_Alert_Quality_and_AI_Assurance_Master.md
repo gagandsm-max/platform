@@ -626,3 +626,12 @@ Triggered Fast RCA is product terminology only. It does not create a second RCA/
 Phase 2 shall productionize the monitoring-intelligence behavior needed for enterprise ITOM/AIOps readiness: telemetry-quality trust gates, semantic states, evidence coverage, alert-policy lifecycle, alert storm/noise reduction, anomaly/baseline quality, change correlation, revisioned evidence-led RCA, predictive operations only where calibrated, Incident Copilot grounding, provider/local/no-AI fallback and controlled remediation safety.
 
 ECRP-P2-v1 must prove deterministic operation with external AI unavailable and must include contradictory/missing/stale evidence. External APM/NPM/DPI evidence is an input with provenance/confidence, not causal truth. Full native APM/DPI remains Phase 2.5+.
+
+---
+
+## Issue #272 intelligence boundary
+
+Phase-2 requirement closure SHALL preserve evidence quality, contradiction handling and INCONCLUSIVE outcomes.
+
+Phase 2.5 trace/profile/packet evidence may be additional deterministic/observational evidence classes for qualification and RCA, but packet or trace absence is not automatic proof of device/service down, sampled evidence must carry sampling/capture context, AI may rank/explain but may not invent missing packet/trace facts, and privacy-sensitive deep evidence must not be exposed to external models unless an explicitly certified deployment policy permits it.
+
