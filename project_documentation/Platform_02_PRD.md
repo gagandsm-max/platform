@@ -2496,3 +2496,18 @@ The following exact IDs are owned by the v3.3 product requirements in §58. Thes
 | `REQ-OTEL-003` | Phase-1 OTLP enforces request/decompression bounds, cardinality governance, sensitive-field policy, explicit reject/drop accounting and bounded backpressure; no-data is not service failure. |
 | `REQ-OTEL-005` | Phase-1.5 may add bounded sampled spans, short quota-controlled retention, trace search/waterfall, trace-derived service edges and sampling after benchmark gates. |
 | `REQ-OTEL-006` | Java/.NET/Node.js/Python instrumentation onboarding is a Phase-1.5 certification target; full developer APM/profiling/RUM/session replay remains excluded. |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+### Phase contract
+
+- **Phase 1:** current frozen Network & Infrastructure Observability commercial core.
+- **Phase 1.5:** enterprise foundation: HA/MSP, Integration Fabric + CMDB reconciliation, bounded sampled operational spans/service edges, NCM Change Assurance, selected broader Capability Packs and first-class serverless.
+- **Phase 2:** Enterprise ITOM/AIOps RFP Readiness. Platform shall deliver native or certified-integrated coverage for the `PRD-ECR-*` catalogue in Platform_23 and pass `ECRP-P2-v1`.
+- **Phase 2.5+:** native full APM and native full always-on DPI/deep packet analytics.
+
+Phase-2 application visibility includes OTel metrics/logs, bounded sampled operational traces where certified, service/dependency identity, API/synthetic monitoring, deployment/change correlation, service SLOs and external APM evidence ingestion. It does **not** include mandatory bytecode agents, method/line-of-code diagnostics, continuous profiling, full RUM/session replay or an unlimited trace backend.
+
+Phase-2 network visibility includes SNMP/streaming telemetry, Flow, active-path intelligence, eBPF process-network evidence, bounded incident-triggered packet evidence and external NPM/DPI evidence ingestion. It does **not** include continuous payload capture, TLS decryption, full L7 reconstruction or native NDR/DPI.
