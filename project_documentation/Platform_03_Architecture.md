@@ -1689,3 +1689,15 @@ Architecture placement:
 - Phase-2.5+ native full APM/DPI requires separate architecture/change control.
 
 External-tool evidence is supporting evidence with provenance/confidence. It never becomes independent tenant/entity/incident/RCA authority merely because a vendor declares a condition.
+
+---
+
+## Issue #272 architecture guardrails — Phase 2.5 Native Deep Observability
+
+Phase 2.5 APM/DPI SHALL extend the existing AmrudAi identity, graph, evidence, RBAC, tenancy, audit and incident/RCA authorities rather than create parallel authorities.
+
+Architecture planning SHALL preserve one canonical entity/service graph, one tenant/identity authority, source-labelled evidence contracts, bounded ingestion/backpressure/cardinality, independent retention classes for traces/profiles/packet metadata/raw packet evidence, strict separation of control-plane state from high-volume observability data, and privacy/consent/secret-redaction enforcement before durable deep-observability storage where required.
+
+This reconciliation intentionally does **not** select an APM agent framework, trace store, profile store, packet decoder, capture engine, TLS-decryption mechanism or new mandatory datastore/service. Those selections require separate architecture/OSS/capacity/security change control.
+
+No Phase-2 requirement may force premature full native APM or full native DPI into the Phase-2 Core.

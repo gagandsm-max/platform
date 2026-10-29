@@ -192,3 +192,21 @@ Additional Phase-2 threat classes: malicious/compromised enterprise connector; f
 Mitigations: source authentication, tenant-bound external bindings, schema/rate/cardinality bounds, replay/idempotency, Credential Profiles, least privilege, data-egress policy, audit, evidence provenance/confidence, pack/version fail-closed compatibility, archive checksum/tamper evidence/WORM integration where required, and independent ECRP-P2-v1 security negatives.
 
 Native full APM/DPI threat models are deferred with those capabilities to Phase 2.5+.
+
+---
+
+## Issue #272 deep-observability threat extension
+
+Phase 2.5 introduces high-sensitivity threats that SHALL be explicitly modeled before implementation:
+- secrets/PII captured in traces, RUM, session replay or packet payloads;
+- TLS-key compromise or over-broad decryption authority;
+- cross-tenant trace/profile/packet leakage;
+- packet/session replay misuse;
+- instrumentation supply-chain compromise;
+- decoder/parser memory-safety and malformed-input attacks;
+- cardinality/packet-rate storage exhaustion;
+- unauthorized raw-PCAP export;
+- excessive privileged capture;
+- covert data egress through external analysis providers.
+
+Required controls include least privilege, explicit enablement, audit, encryption, redaction/masking, tenant isolation, bounded retention, export controls, key custody, rate/cardinality limits and safe parser isolation.

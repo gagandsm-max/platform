@@ -829,3 +829,13 @@ ITSM/CMDB connectors use the same governed onboarding principles: test network/T
 By Phase 2, governed onboarding applies to enterprise Capability/Integration Pack sources including databases, storage, middleware, backup/data-protection, cloud/OCI, CMDB and external monitoring/APM/NPM/DPI connectors. Activation requires identity/source reconciliation, credential/permission preflight, capability/version compatibility, capacity/rate impact and audit.
 
 External connector discovery cannot silently duplicate canonical entities or let external source IDs override Platform entity authority.
+
+---
+
+## Issue #272 discovery/identity extension
+
+Phase-2 closure SHALL require exact discovery/onboarding identity for vendor packs and integrations.
+
+Phase 2.5 planning SHALL extend canonical identity to instrumented applications/services/instances/runtimes, browser/mobile application identities where governed, capture sources/interfaces/TAPs/packet brokers and decoded conversations/transactions linked back to canonical services/entities.
+
+Deep-observability sources must reconcile to existing identity authority; they may not create a parallel CMDB or service graph.

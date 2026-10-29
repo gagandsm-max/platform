@@ -2587,3 +2587,29 @@ No row above implies implementation, benchmark, certification or deployment.
 Phase-2 application visibility includes OTel metrics/logs, bounded sampled operational traces where certified, service/dependency identity, API/synthetic monitoring, deployment/change correlation, service SLOs and external APM evidence ingestion. It does **not** include mandatory bytecode agents, method/line-of-code diagnostics, continuous profiling, full RUM/session replay or an unlimited trace backend.
 
 Phase-2 network visibility includes SNMP/streaming telemetry, Flow, active-path intelligence, eBPF process-network evidence, bounded incident-triggered packet evidence and external NPM/DPI evidence ingestion. It does **not** include continuous payload capture, TLS decryption, full L7 reconstruction or native NDR/DPI.
+
+---
+
+## Issue #272 — procurement-requirement closure and Phase 2.5 product boundary
+
+### PRD-ECR-014 — Procurement Requirement Closure Contract
+
+Every accepted recurring enterprise procurement requirement SHALL have an explicit roadmap closure record identifying target phase, product route (Native, Integration Pack, Capability Pack, Customer Acceptance Profile or explicit deferment), owning capability, supported product/version/collection-mode matrix obligation where applicable, security/privacy and failure semantics, scale/retention expectations, certification evidence and explicit non-goal/fallback.
+
+A generic "later", "optional", "partial" or "TBD" without these fields is not an acceptable roadmap disposition.
+
+At Phase-2 completion every accepted enterprise requirement class SHALL resolve to exactly one of:
+1. **Native — Certified**;
+2. **Integrated — Certified**;
+3. **Customer Profile — Certifiable**;
+4. **Explicit Phase-2.5 deferment**.
+
+### Phase 2.5 — Native Deep Observability
+
+Phase 2.5 SHALL be the planned native deep-observability phase.
+
+Full native APM scope SHALL include, subject to later implementation/dependency change control: automatic instrumentation for approved Java/.NET/Python/Node.js/Go paths; full distributed trace/transaction processing; method/code diagnostics where technically supportable; exception/error, DB and external-call analytics; adaptive sampling/cardinality control; continuous CPU/memory/allocation/thread/lock profiling; flame graphs; trace/log/metric/change correlation; browser/mobile RUM, Core Web Vitals, user journeys and privacy/consent-governed session replay; synthetic-to-APM correlation; secret/PII redaction and tenant isolation.
+
+Full native DPI / Network Performance Intelligence scope SHALL include, subject to later implementation/dependency change control: SPAN/TAP/vTAP/packet-broker acquisition; continuous capture with bounded raw-PCAP retention; packet metadata, flow reconstruction and L2-L7 decoding; TCP/DNS/TLS/HTTP performance analytics; network-versus-application response decomposition; packet-to-service/trace correlation; historical investigation/replay where safe; controlled TLS decryption only where lawful and authorized; key-custody controls; payload masking/privacy filters; evidence custody and role-restricted packet access.
+
+Phase 2.5 MUST NOT redefine AmrudAi as a general SIEM/NDR replacement.
