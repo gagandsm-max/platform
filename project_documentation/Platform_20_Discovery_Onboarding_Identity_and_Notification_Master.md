@@ -821,3 +821,11 @@ A governed OpenTelemetry source onboarding flow records ingress profile, endpoin
 ### 15.3 Integration onboarding
 
 ITSM/CMDB connectors use the same governed onboarding principles: test network/TLS/proxy/authentication, discover API/version/capability/permissions, propose standard mappings, show unsupported/edition-limited features, exercise Integration Test Sandbox and activate only explicitly selected synchronization modes. Notification/onboarding events are deduplicated/rate-bounded so connector or reconciliation storms do not flood administrators.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+By Phase 2, governed onboarding applies to enterprise Capability/Integration Pack sources including databases, storage, middleware, backup/data-protection, cloud/OCI, CMDB and external monitoring/APM/NPM/DPI connectors. Activation requires identity/source reconciliation, credential/permission preflight, capability/version compatibility, capacity/rate impact and audit.
+
+External connector discovery cannot silently duplicate canonical entities or let external source IDs override Platform entity authority.
