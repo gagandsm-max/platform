@@ -774,3 +774,17 @@ Phase-1 business outcomes are:
 Phase-1.5 specialist outcomes include endpoint/switch-port intelligence, browser journey synthetics, deeper DB performance intelligence, virtualization optimization, NCM firmware lifecycle and the second-wave ITSM connector certification set. Deep VoIP specialist depth is Phase 2.
 
 Explicit non-goals remain: full traditional developer-centric APM, continuous profiling/flame graphs/source navigation/full RUM/session replay, unlimited trace retention, full always-on DPI/NDR, uncontrolled automated NCM, another graph/CMDB, or customer-specific Core forks.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+### Business outcome
+
+By the end of Phase 2, AmrudAi shall be capable of competing for and delivering the monitoring/ITOM/AIOps portion of large-enterprise procurements represented by real automotive/manufacturing and regulated-banking requirements, without relying on roadmap promises for core infrastructure/network/database/storage/cloud/ITOM/AIOps capability families.
+
+Phase 2 shall cover, directly or through certified integrations, heterogeneous infrastructure, database, storage/SAN, middleware/application platforms, backup/data-protection monitoring, multi-cloud including OCI, service mapping/CMDB, enterprise integrations, regulated on-prem/air-gapped operation, AIOps/RCA, service assurance, automation and large-estate operations.
+
+**Deliberate exclusions through Phase 2:** full native APM and full native always-on DPI/deep packet analytics. These are Phase 2.5+ product domains. Phase 2 shall remain capable of integrating external APM/NPM/DPI products and correlating their telemetry/evidence inside the AmrudAi graph, incident and RCA model.
+
+Commercial readiness principle: named vendor/family support is insufficient. Exact product/version, collection mode, privilege, topology, monitoring depth, diagnostics, security, upgrade compatibility and certification evidence must be publishable from one governed compatibility source.
