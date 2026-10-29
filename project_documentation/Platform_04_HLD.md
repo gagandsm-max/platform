@@ -1449,3 +1449,17 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 | **Phase 1.5** | Exactly two full Core nodes Active/Standby; positive fencing; split-brain prevented | MSP/shared multi-tenancy + noisy-neighbor adversarial certification | `ACKED-FOR-DELETION TELEMETRY RPO = 0` for certified permanent one-Core HA failures; Sensor reconnect/re-anchor + push HA continuity; PG/Kafka/ClickHouse recovery | Privileged NCM automation defaults (maker-checker, canary, blast-radius, rollback where eligible) |
 
 Multi-Sensor assignment generation, lease ownership, stale privileged-work rejection and replay/idempotency remain **Phase 1 mandatory** even with standalone Core. Physical HA mechanisms remain unselected. Issue #218 records that Core numeric-only ingestion does not yet accept Sensor ICMP typed evidence end-to-end; architecture still requires typed ICMP observation acceptance without collapsing missing/partial evidence into DEVICE_DOWN.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Phase-2 enterprise breadth is implemented through existing logical modules:
+- Capability Pack Runtime/Certification for OS, virtualisation/HCI, hardware/OOB, storage/SAN, databases, middleware, backup/data protection, cloud/serverless and SaaS families;
+- Integration Service for monitoring/APM/NPM/DPI/SIEM/CMDB/ITSM/change-system adapters;
+- CMDB Reconciler for external CI/relationship authority and conflicts;
+- Graph/Incident/RCA/OIV for cross-domain reasoning;
+- Reporting/Service Assurance for operational and regulated-enterprise evidence;
+- Platform Operations for connector/pack/retention/DR/self-health.
+
+No Phase-2 module may require full native APM or full native always-on DPI. Those remain Phase 2.5+.
