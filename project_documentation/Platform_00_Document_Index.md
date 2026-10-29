@@ -642,3 +642,17 @@ The authoritative phase outcome is:
 - **Phase 2.5+:** full native APM and full native always-on DPI/deep packet analytics. Phase 2 may integrate those external tools and consume their evidence without claiming native full APM/DPI.
 
 Completeness rule: a future Phase-2 readiness claim is invalid unless `ECRP-P2-v1` has certified the applicable native and integrated capability dimensions. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED` remains mandatory.
+
+---
+
+## Issue #272 roadmap reconciliation — partial closure and Phase 2.5
+
+The authoritative Mother Reference set remains **v3.3.0 / 25 files**. Issue #272 adds no new Mother Reference and does not create `Platform_24`.
+
+Issue #272 extends Issue #269 by requiring explicit closure ownership for remaining enterprise roadmap partials and by formalizing **Phase 2.5 Native Deep Observability**:
+- full native APM, RUM and continuous profiling;
+- full native DPI / continuous packet-derived Network Performance Intelligence.
+
+Phase 2 remains Enterprise ITOM/AIOps readiness and continues to use bounded OTel spans, Flow/path/eBPF/triggered packet evidence plus certified external APM/NPM-DPI integrations.
+
+Primary authorities: `Platform_23` (requirements/closure matrix), `Platform_14` (ECRP-P2-v1 and DORP-P2.5-v1), `Platform_12` (decision provenance), and the Build Sequence Register (sequencing only; no new BUILD IDs in this reconciliation).

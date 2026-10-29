@@ -397,3 +397,13 @@ Phase 2 adds **ECRP-P2-v1 enterprise workload certification**, not a universal h
 Regulated-enterprise retention profiles MAY include 180-day-or-longer searchable/archived classes when customer policy and certified storage sizing permit. 180 days is not a universal default. The sizing calculator must include connector-derived telemetry, bounded traces, external evidence metadata, archive/WORM targets and legal holds.
 
 Phase-2 optional enrichment (AI, external observability evidence, bounded spans, triggered packet evidence) must yield before protected monitoring correctness/durability objectives are violated.
+
+---
+
+## Issue #272 sizing/capacity roadmap
+
+Phase-2 customer acceptance profiles SHALL independently size device/CI count, ingest rate, users, retention, connector cardinality and HA/DR.
+
+Phase-2.5 SHALL introduce separate capacity profiles for trace spans/transactions per second, unique services/resources and attribute cardinality, profile samples and symbol/storage overhead, RUM/mobile event rate, packet capture line rate, packets/bytes per second, decoded transaction rate, packet metadata retention, bounded raw-PCAP retention and query/replay concurrency.
+
+Core reference sizing MUST NOT be reused as an unqualified deep-observability sizing claim.
