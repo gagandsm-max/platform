@@ -61,5 +61,15 @@ public final class AuditActions {
     public static final AuditAction SENSOR_CONTROL_DESIRED_SET =
             new AuditAction("sensor.control.desired.set");
 
+    /**
+     * Core poll-grant issuance (Issue #229 G1a). Metadata is a small fixed set of
+     * opaque identifiers only ({@code grant_id}, {@code sensor_id}, {@code entity_id},
+     * {@code endpoint_id}, {@code protocol}, {@code grant_generation},
+     * {@code assignment_generation}). Never log address, credential, secret,
+     * unrestricted actor text or arbitrary plan text.
+     */
+    public static final AuditAction SENSOR_POLL_GRANT_ISSUE =
+            new AuditAction("sensor.poll_grant.issue");
+
     private AuditActions() {}
 }
