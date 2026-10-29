@@ -463,3 +463,16 @@ Per certified connector/edition/API test authentication/permissions, standard/cu
 ### 12.7 Phase-1.5 browser/DB/virtualization/endpoint
 
 Browser journeys require credential isolation, sandbox/runtime admission, deterministic steps/assertions/timing, screenshot/artifact access/TTL/redaction, crash/timeout/cancellation and capacity isolation. DB intelligence requires safe fingerprint/wait/blocking/deadlock/regression/plan evidence without dangerous query execution/autotuning. Virtualization recommendations require evidence/false-positive testing and no autonomous apply. Endpoint/switch-port history requires identity/provenance/movement/tenant/privacy tests and no duplicate endpoint store.
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+### ECRP-P2-v1 — Enterprise Customer RFP Readiness Profile
+
+Phase 2 cannot be certified complete until a representative large-enterprise profile proves the applicable chain:
+`discovery -> onboarding -> monitoring -> topology/service mapping -> qualification -> incident -> RCA -> ITSM/integration -> recovery -> reporting/assurance`.
+
+The profile shall cover representative multi-DC/DR/branch, large-estate inventory, network, Windows/Linux plus declared Unix coverage, virtualisation/HCI, hardware/OOB, storage/SAN, Oracle-class and additional databases, middleware, backup/data protection, Kubernetes, AWS/Azure/GCP/OCI, Flow/log/OTel, CMDB/ITSM, external APM, external NPM/DPI and SIEM evidence, regulated data boundaries, HA/DR, retention/archive, concurrent NOC users and connector failure/degradation.
+
+Certification requires exact product/version/collection-mode matrices, tenant/security negatives, stale/missing/contradictory evidence, API throttling, replay/idempotency, upgrade compatibility, scale/cardinality, retention, failure/recovery and operator workflows. Full native APM and full native DPI are explicitly **not** ECRP-P2-v1 requirements.
