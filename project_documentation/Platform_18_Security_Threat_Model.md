@@ -164,3 +164,13 @@ Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified 
 |---|---|---|
 | **Phase 1** | Standalone Core; mTLS Sensor/Agent identity; tenant-aware RBAC/resource scope/audit; Credential Profile separation; assignment/fencing stale-work rejection; Inform local ACK != Core durable ACK; `No Data != Device Down` semantic integrity; backup/restore + site-loss DR security hooks | No Core-HA availability claim; no MSP/shared-tenant isolation certification claim; Issue #218 Core ICMP typed-acceptance gap is an integrity/availability risk until closed—not an authorization to invent false DOWN; NCM automation not Phase 1 default |
 | **Phase 1.5** | Exactly-two-Core HA peer fencing/split-brain prevention; PG/Kafka/ClickHouse continuity trust; HA deletion-ACK RPO=0 matrix; MSP/shared-tenant adversarial isolation across identity/API/RBAC/credentials/NCM/AI/audit; privileged automation guardrails | Physical fencing/replication mechanisms remain unselected; no third Core/witness/journal preselected; HA does not replace DR |
+
+---
+
+## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+
+Additional Phase-2 threat classes: malicious/compromised enterprise connector; forged external APM/NPM/DPI/CMDB/SIEM evidence; cross-tenant external ID collision; connector credential theft; API quota exhaustion; high-cardinality/vendor-payload exhaustion; regulated data egress; support-session exfiltration; mutable archive presented as immutable; unsupported pack/version silently collecting wrong semantics.
+
+Mitigations: source authentication, tenant-bound external bindings, schema/rate/cardinality bounds, replay/idempotency, Credential Profiles, least privilege, data-egress policy, audit, evidence provenance/confidence, pack/version fail-closed compatibility, archive checksum/tamper evidence/WORM integration where required, and independent ECRP-P2-v1 security negatives.
+
+Native full APM/DPI threat models are deferred with those capabilities to Phase 2.5+.
