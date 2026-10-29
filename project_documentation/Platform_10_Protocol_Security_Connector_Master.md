@@ -310,3 +310,14 @@ Phase-2 Integration Packs shall support governed adapters for monitoring tools, 
 OCI is added as a Phase-2 cloud-provider target through the Cloud/API + Capability Pack architecture; exact SDK/dependency admission remains Platform_07 authority.
 
 No Phase-2 connector may bypass server-side tenant/resource authorization or import vendor identity as canonical Platform authority.
+
+---
+
+## Issue #272 protocol/security planning
+
+Phase 2 closure contracts SHALL require exact product/version/API/protocol/privilege matrices for gNMI, SD-WAN, legacy OS, DB, middleware, M365, EUC/VDI, security SaaS and buyer-specific integrations.
+
+Phase 2.5 planning adds governed protocol families for approved APM instrumentation/OTel-compatible trace interoperability, browser/mobile telemetry, profiling transport, SPAN/TAP/vTAP/packet-broker capture, packet protocol decoding and optional controlled TLS decryption.
+
+No TLS decryption or payload capture may be enabled without explicit authorization, key-custody controls, audit, privacy policy and bounded retention.
+
