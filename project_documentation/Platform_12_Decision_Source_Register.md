@@ -501,3 +501,21 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 | Full native DPI | **USER-FIXED** | Explicitly outside Phase 2. Continuous full-packet capture, TLS decryption, deep L7 reconstruction/packet warehouse/NDR-style DPI belong Phase 2.5+ change control. Phase 2 retains Flow, active path, eBPF process-network evidence, bounded triggered packet evidence and external NPM/DPI integration. |
 | ECRP-P2-v1 | ARCH-DELEGATED | Phase-2 exit requires an Enterprise Customer RFP Readiness certification profile; feature presence or vendor naming is insufficient. |
 | Customer requirement provenance | USER-FIXED | Real customer procurement requirements are strategic product evidence, but confidential customer names/inventories/commercial clauses remain outside generic Mother Reference requirements. Normalize recurring needs into reusable product/certification contracts. |
+
+---
+
+## 2026-10-29 — Issue #272 partial closure and Phase 2.5 Deep Observability
+
+**Source:** Founder directive + Master technical decision.
+
+**USER-FIXED / TECHNICALLY NORMALIZED decisions:**
+- advance-plan all accepted remaining enterprise requirement partials instead of leaving generic future/TBD ownership;
+- preserve honest maturity separation: planning coverage is not implementation/certification;
+- Phase 2 remains Enterprise ITOM/AIOps RFP Readiness;
+- Phase 2.5 is the planned full-native deep-observability phase;
+- Phase 2.5 includes full native APM, RUM, continuous profiling and full native DPI/packet analytics;
+- Phase 2.5 is not a general SIEM/NDR replacement;
+- no Platform_24, no BUILD renumbering and no new OSS/dependency selection in this reconciliation.
+
+**Master technical decision:** At Phase-2 exit every accepted enterprise requirement class must resolve to Native—Certified, Integrated—Certified, Customer Profile—Certifiable, or Explicit Phase-2.5 deferment. This prevents paper compliance while eliminating unowned architecture-level partials.
+
