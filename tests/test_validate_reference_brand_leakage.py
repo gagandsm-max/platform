@@ -30,6 +30,7 @@ class BrandHygieneTest(unittest.TestCase):
                 (repo / name / "native.txt").write_text("AmrudAi", encoding="utf-8")
             html = repo / "ui" / "index.html"
             html.write_text("AmrudAi", encoding="utf-8")
+            (repo / "compose.yaml").write_text("name: amrudai", encoding="utf-8")
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["--repo", temp]), 0)
                 html.write_text("NetAI", encoding="utf-8")
@@ -167,6 +168,18 @@ class BrandHygieneTest(unittest.TestCase):
             (root / "good.ts").write_text("AmrudAi", encoding="utf-8")
             with contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["--repo", str(repo), "--path", "ui/src", "--artifact", "missing.zip"]), 1)
+
+    def test_cli_additional_release_zip_scans_payload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            (root / "good.ts").write_text("AmrudAi", encoding="utf-8")
+            artifact = repo / "release.zip"
+            with zipfile.ZipFile(artifact, "w") as archive:
+                archive.writestr("assets/manifest.json", '{"product":"Enterprise360"}')
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--repo", temp, "--path", "ui/src", "--artifact", "release.zip"]), 1)
 
 
 if __name__ == "__main__":
