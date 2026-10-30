@@ -549,4 +549,3 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 | Phasing | ARCH-DELEGATED within existing USER-FIXED envelopes | Windows Server and Windows Infrastructure/IIS remain Phase-1 *certification targets*, not GA claims. WSFC/CSV, NIC teaming, comprehensive per-user inventory and pending-reboot reconciliation are **not** expanded into universal Phase-1 Agent requirements by this audit. Later scope requires pack/profile acceptance and dedicated gates. |
 
 Independent implementation review and real Windows certification are mandatory before any production support claim. This decision does **not** assert that the Windows Agent currently implements these contracts.
-
