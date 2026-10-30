@@ -213,3 +213,14 @@ Phase 2.5 introduces high-sensitivity threats that SHALL be explicitly modeled b
 - covert data egress through external analysis providers.
 
 Required controls include least privilege, explicit enablement, audit, encryption, redaction/masking, tenant isolation, bounded retention, export controls, key custody, rate/cardinality limits and safe parser isolation.
+
+## Database tenant, purge and ephemeral-state threat clarification — 2026-10-30
+
+The architecture audit identified preventive controls, not reproducible production failures. Under existing tenant, data-integrity and offboarding requirements, the following failure cases remain mandatory design/test inputs:
+
+- **Cross-tenant SQL/history disclosure:** Missing tenant predicates, forged session context, pool reuse, owner/`BYPASSRLS` access, cross-tenant foreign keys, uncontrolled background jobs and direct DB access can defeat isolation. Use server-derived authorization, least-privilege DB roles, tenant-consistent relationships and fail-closed query scoping. PostgreSQL RLS and ClickHouse read-only row policies are optional defence layers only when the exact role/connection/query model is independently tested; sort keys are not access controls.
+- **Overbroad deletion:** A time-partition drop, TTL exception or unchecked mutation can erase unrelated tenant data or held incident evidence. Tenant offboarding and targeted erasure require authorized scope, protected-record exclusion, bounded operation, replica/rollup/archive/backup reconciliation, evidence of actual-versus-pending erasure, and durable audit. An immutable-backup expiry window cannot be advertised as immediate physical destruction.
+- **Ephemeral-state safety:** Valkey outage must not silently authorize an otherwise denied request, bypass security throttling, release authoritative leases, assume HA leadership or override fencing. Read-only cache bypass may degrade latency within budget; no secure fallback means deny/degrade with stable status and audit.
+- **Counter-rate evidence poisoning:** Restart, alternate Sensor ownership, counter discontinuity, replay or precision truncation must not generate fabricated high rates, false threshold alerts or misleading RCA. Exact raw counters and uncertainty markers remain authoritative until valid rate derivation is proven.
+
+These are Phase-1 preventive and correctness tests where applicable; shared-customer/MSP and two-Core HA negative certification remain Phase 1.5. No cryptographic tenant-isolation certification, new dependency or production readiness is claimed by this clarification.
