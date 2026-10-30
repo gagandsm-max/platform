@@ -3389,6 +3389,6 @@ No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unre
 - Counter32/Counter64 arithmetic is performed in exact integer range prior to derived floating-point rate; legitimate wraps require evidence against reset/discontinuity and plausibility relative to elapsed time and certified interface capacity. Do not infer every decrease to be a wrap.
 - Where Phase-1 network interfaces expose traffic/utilization, correct derived-rate behaviour is a Phase-1 release gate, not a silent Phase-1.5 deferment. Existing `Platform_14` SNMP/counter gates remain mandatory.
 
-**Implementation gate:** Inspect actual migrations, execution plans, ClickHouse DDL, Valkey call sites and Counter64 runtime before classifying a speculative audit scenario as a confirmed defect. Preserve already-fixed PR #81/#84 semantics and certification-envelope boundaries. See `Platform_12` §27 and `Platform_14` DB-specific evidence gate.
+**Implementation gate:** Inspect actual migrations, execution plans, ClickHouse DDL, Valkey call sites and Counter64 runtime before classifying a speculative audit scenario as a confirmed defect. Preserve already-fixed PR #81/#84 semantics and certification-envelope boundaries. See `Platform_12` §28 and `Platform_14` DB-specific evidence gate.
 
 ---
