@@ -799,6 +799,9 @@ Tenant/entity authority fields are inherited from existing transport/Core author
 
 `inventory_scope` is the stable/versioned canonical comparison-scope identity for the certified collector/source definition (opaque/versioned fingerprint of what that source enumerates). Distinct certified collector/source-definition versions that change enumerated authority MUST use distinct `inventory_scope` values. Absence/removal may compare only the same endpoint authority + same native source + same `inventory_scope`.
 
+For Windows default machine inventory, `source_provenance` identifies the exact native source and registry view (for example, the 64-bit or 32-bit `HKLM` Uninstall view), while each `native_package_id` is qualified by its native source/hive/view and stable entry identity. The logical `inventory_scope` fingerprints the declared source set, privilege/scope and compatible collector definition; a failed view/source means `PARTIAL` even if other views completed. Raw dual-view/bundle registrations must not collide in Core native keys. Any cross-record product deduplication belongs to a versioned normalized identity resolver and must not rewrite source-native lifecycle evidence. Per-user inventory is never implicitly `FULL` from a Session-0 service; it requires a separately authorized/certified source scope, without offline hive mounting by default.
+
+
 Replay / ordering / stale-snapshot authority:
 
 - Duplicate replay of an identical `snapshot_id` must not create duplicate authoritative state, duplicate `SOFTWARE_*` events, incorrect `first_seen_at`/`last_seen_at` mutation, or false lifecycle history.

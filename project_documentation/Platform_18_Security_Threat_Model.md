@@ -124,6 +124,9 @@ Additional threats and mandatory controls for Linux kernel instrumentation and a
 
 No new privilege, endpoint Python runtime, unrestricted shell/PowerShell facility or endpoint causal AI is authorized by these enhancements.
 
+**Windows Agent additional threat/negative-test contract (BUILD-014/015/016/018/019).** A virtual service account may present a domain computer identity to remote resources; local vs. remote identity and egress rights require explicit threat review. Unconditional `LocalSystem`/`SeDebugPrivilege`, broad SCM SDDL ACEs and local performance/event-reader group membership are not safe substitutes for a least-privilege Windows read capability matrix. Per-source denied access must be observable without a broadening privilege fallback. Protect Agent enrollment keys and the NTFS spool with service-scoped ACLs, integrity checks and security-product interference tests; do not disable Defender/EDR or add unapproved global exclusions to pass benchmarks. Volume/provider hangs, reboot/upgrade races, PID recycling, out-of-order inventory and oversized socket tables must not starve SCM control, leak private process/network data, corrupt replay identity, or authorize deleting telemetry before a valid durable ACK. Windows event evidence must retain provider/channel and access/freshness provenance to resist mistaken or attacker-injected causal attribution.
+
+
 
 ---
 
