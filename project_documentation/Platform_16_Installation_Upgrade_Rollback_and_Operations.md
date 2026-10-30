@@ -195,3 +195,15 @@ Install/upgrade must preserve pack/connector compatibility and provide preflight
 Phase-2.5 operations SHALL include explicit install/upgrade/rollback/runbook coverage for application instrumentation agents/SDKs, browser/mobile instrumentation where used, profile collectors, packet capture sources/sensors, decoder/content compatibility, trace/profile/packet storage, privacy/redaction policies and TLS-decryption/key-custody configuration where explicitly enabled.
 
 Failure of deep-observability components MUST degrade visibility, not silently change authoritative device/service state or bypass safe RCA evidence rules.
+
+---
+
+## Infrastructure/Log Sensor safe operations — 2026-10-30 architecture reconciliation
+
+For certified Syslog/TLS, OTLP, SSH/WinRM, vSphere/cloud, DB/storage and SIEM profiles, deployment/runbooks MUST document trusted ingress profile-to-tenant/source assignment, listener/interface/NAT and TLS certificate mapping, source Syslog framing, credential rotation/expiry, connector query privilege, vendor quota discovery, target-side impact baselines and alert/monitoring-quality interpretations. An unresolved/ambiguous source must remain denied or sanitized metadata-only; an MSP cannot enable a shared Syslog listener on overlapping private networks without proving deterministic attribution.
+
+**Producer continuity:** Prefer local durable file/journald or managed asynchronous shipping to the Log Sensor. Synchronous network appenders can block if TCP receiver/relay slows; operators must test source-side backpressure, finite buffer/loss policies, relay restarts and upstream durability before production activation. Do not promise that a Sensor can always avoid TCP ZeroWindow while retaining every event.
+
+**Spool/export runbooks:** Expose per-Sensor primary replay horizon and 80% storage health, per-source redaction/parser failures and multiline truncation, OTLP rejected/partial-success counts, per-tenant ingress drops, per-SIEM destination backlog/oldest age/expiry/loss and recovery state. Declare actual end-to-end delivery/ACK, retry horizon, privacy/retention/legal-hold/export policy, destination outage drill and operator escalation. Protected audit streams require an explicitly provisioned alternate/authoritative durable path or visible fail-safe; finite disk cannot guarantee infinite no-loss quarantine.
+
+**Agentless maintenance:** Detect and report quota/GPO/permission/TTY/identity/host-key failure separately from guest/VM/database/volume health; rate-govern vCenter inventory resync and cloud 429 recovery with measured budgets. This is a documentation/runbook requirement until its connector/certification tests pass.

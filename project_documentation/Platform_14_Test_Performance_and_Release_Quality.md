@@ -491,6 +491,20 @@ Per certified connector/edition/API test authentication/permissions, standard/cu
 
 Browser journeys require credential isolation, sandbox/runtime admission, deterministic steps/assertions/timing, screenshot/artifact access/TTL/redaction, crash/timeout/cancellation and capacity isolation. DB intelligence requires safe fingerprint/wait/blocking/deadlock/regression/plan evidence without dangerous query execution/autotuning. Virtualization recommendations require evidence/false-positive testing and no autonomous apply. Endpoint/switch-port history requires identity/provenance/movement/tenant/privacy tests and no duplicate endpoint store.
 
+### 12.8 Infrastructure/Log Sensor edge safety profile — 2026-10-30 audit reconciliation
+
+**SPECIFIED / NOT YET CERTIFIED.** Before the applicable `INFRASTRUCTURE`/`LOG` connector/profile is declared production-certified, record exact-version executable fixtures, CPU/RAM/disk/quota and target-side impact under concurrent normal polling, delayed responses, restarts and backpressure:
+
+1. **Structured Agent transport (Phase 1, BUILD-016/062/063/064/098):** scalar-wire compatibility, typed mixed-size batches, fragment/replay/partial/late/no-loss-evidence, malformed/oversize rejection, authoritative snapshot completeness, no fabricated uninstall, correct actual agent-ingress ACK tier and no silent `CURRENT_IMPLEMENTED` claim.
+2. **Syslog trust (Phase 1 baseline; MSP overlap Phase 1.5):** UDP/TCP/TLS framing and source-mapping; overlapping private addresses, NAT, relays, forged payload tenant/hostname, unknown/revoked client cert, wrong site/Sensor, ambiguous/unmatched source; no cross-tenant persistent event/PII and no default-tenant fallback.
+3. **Agentless target safety (Phase 1 for certified packs):** SSH/WinRM burst/fan-out, WS-Man target quota/GPO, shell leak/process cost, timeouts/cancellation, credential and host-key/cert rotation, dead session cleanup, privilege denied/TTY failure, limited read-only PowerShell fallback, banned `Win32_Product` side effects; prove no host DOWN on partial collection.
+4. **VMware/cloud/storage/database:** PropertyCollector invalid version/resync/session expiry versus PerformanceManager metric queries; large inventory pagination, account/region/service/operation rate limits, 429/Retry-After and STS near-expiry/role-chaining behavior, fair retries; database max sessions/statement timeout/least privilege; slow SAN/SMI-S controller isolation and unknown-not-down state.
+5. **OTLP integrity:** per-tenant active-series/attribute/decompressed-size/cardinality attacks, exact partial-success counts and replay, cumulative counter/histogram semantics, no forbidden identity merge/Gauge conversion, sensitive attribute rejection before spool, bounded estimator state and accurate observability.
+6. **Logs/transport:** many simultaneous multiline streams plus malformed/framing/oversize/compression bombs, aggregate memory/idle eviction/linear-time regex, pre-spool redaction failure closed and replay, sustained TCP reader/sink congestion and synchronous source safety. Record measured socket windows/producer impact and admitted loss; do not assert impossible absolute no-block/no-loss guarantees.
+7. **SIEM exporter isolation:** each sink outage, authentication failure, throttling, shared-disk pressure at 80%, source-side retention exhaustion, legal-hold policy and downstream partial ACK; verify primary control/monitoring headroom, per-sink finite backlog, irreversible-gap alert and tenant/RBAC separation.
+
+Acceptance numbers are release-specific `Platform_11`/`Platform_14` evidence, not the auditor's illustrative constants. Phase-1.5 MSP certification requires cross-tenant negative proof; these assertions remain gates, not shipped functionality.
+
 ## Phase 1.5 Serverless certification gates — Issue #268
 
 Governing requirement: `REQ-SLS-009` / `PRD-SLS-009`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Listing a provider or metric is NOT certification.
