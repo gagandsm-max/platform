@@ -66,6 +66,17 @@ class BrandHygieneTest(unittest.TestCase):
             findings, count = scan(repo, [root], [])
             self.assertEqual((findings, count), ([], 1))
 
+    def test_first_party_binary_directory_is_not_skipped(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "agent"
+            artifact = root / "bin" / "agent.exe"
+            artifact.parent.mkdir(parents=True)
+            artifact.write_bytes(b"\x00" + "NetAI".encode("utf-16-le"))
+            findings, count = scan(repo, [root], [])
+            self.assertEqual(count, 1)
+            self.assertTrue(any("NETAI" in item.problem for item in findings))
+
     def test_missing_required_source_scope_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             with contextlib.redirect_stderr(io.StringIO()):
