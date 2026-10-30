@@ -12,6 +12,7 @@ from pathlib import Path
 
 from validate_reference_brand_leakage import (
     MAX_MEMBER_BYTES,
+    REQUIRED_SOURCE_DIRS,
     detect_brands,
     inspect_archive,
     inspect_bytes,
@@ -21,6 +22,19 @@ from validate_reference_brand_leakage import (
 
 
 class BrandHygieneTest(unittest.TestCase):
+    def test_default_source_scope_and_ui_entrypoint_end_to_end(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            for name in REQUIRED_SOURCE_DIRS:
+                (repo / name).mkdir(parents=True, exist_ok=True)
+                (repo / name / "native.txt").write_text("AmrudAi", encoding="utf-8")
+            html = repo / "ui" / "index.html"
+            html.write_text("AmrudAi", encoding="utf-8")
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--repo", temp]), 0)
+                html.write_text("NetAI", encoding="utf-8")
+                self.assertEqual(main(["--repo", temp]), 1)
+
     def test_case_punctuation_and_embedded_identifiers(self):
         sample = b"NetAI thought-data Enterprise_360 companyThoughtDataSuffix"
         self.assertEqual(detect_brands(sample), {"NETAI", "THOUGHTDATA", "ENTERPRISE360"})
