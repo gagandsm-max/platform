@@ -1058,6 +1058,14 @@ Support UDP/TCP/TLS according to deployment. TLS is recommended; unencrypted tra
 
 ---
 
+### 15.1 Runtime invariants for mixed Log/Syslog workloads — 2026-10-30 audit reconciliation
+
+1. Resolve source and tenant through the configured, trusted ingress profile **before** entity correlation or durable spool. For Phase-1.5 MSP overlap, ambiguous UDP/TCP source identities fail closed; bounded metadata-only quarantine or counted rejection is permitted, never a default-tenant event or shared raw sensitive DLQ.
+2. Respect UDP datagram and TCP/TLS Syslog transport framing. Multiline assembly is **opt-in** only for trusted identified application/file or certified stream sources with known framing; it must not join unrelated Syslog messages or tenants. Bound message bytes, line/part count, per-source state, aggregate active streams/bytes, idle lifetime and compression/decompression allocation. On limits/timeout, emit an explicit partial/truncated/segmented/rejected result and count loss; reject unsafe patterns and prefer linear-time Go `regexp` for user-configurable expressions.
+3. Secret/PII minimization/redaction and parser safety occur **before local durable spool, downstream Kafka/ClickHouse, raw diagnostics, or SIEM export**. A redaction/parser error fails closed for protected fields (drop/redact body with reason and metadata-only audit), never saves the unsanitized payload as a debugging fallback. Encryption at rest remains required where profile/governance says so; declaring automatic PCI/GDPR compliance from redaction alone is prohibited.
+4. TCP transport controls cannot guarantee simultaneous finite-resource operation, zero receiver window avoidance, zero source blocking and zero event loss. Bound read/processing and spool queues; communicate overload where feasible, expose gaps and prefer source-side durable/asynchronous log shipping for production applications. A policy demanding lossless regulated audit must define upstream durability/alternate sink or fail visibly rather than silently shed `protected` records or claim infinite quarantine.
+5. Forwarding is a separately authorized and capacity-governed downstream consumer; destination outage never overrides Core alert/ingest authority. Isolate queues and retry/disk quotas per destination without introducing a compulsory secondary datastore; under shared resource exhaustion, measured primary-work protection and explicit degraded/loss state are required, not an unqualified `100% unaffected` claim.
+
 ## 16. gNMI/NETCONF/REST LLD
 
 ### 16.1 gNMI
@@ -2580,6 +2588,12 @@ No domain package may import an OSS protocol/client library directly except its 
 | `K8sAdapter` | client-go | canonical K8s entities, relationships, events/metrics references |
 | `NcmDriver` | scrapli/scrapli_cfg/Nornir + approved drivers | config snapshot/diff/commit/rollback/job evidence |
 
+### 74.1 Bounded agentless and provider-API adapter lifecycles — 2026-10-30 audit reconciliation
+
+The approved adapter modules (no new runtime or library) own per-target active/queued concurrency, connection/session cleanup, credential rotation and invalidation, request deadlines, vendor error mapping and source-health telemetry. Optional SSH multiplexing must bound authenticated client lifetime and number of channels. WinRM may use structured WMI/CIM/WS-Man where certified; never assume `masterzen/winrm` implements a raw CIM/StdRegProv API or require permanent WinRS shells. Constrained, versioned PowerShell fallback stays allowed by Platform_10. Failure of an individual privileged Linux query or OS/vendor source produces missing-evidence/partial quality, not target DOWN.
+
+`VsphereAdapter` separates inventory/change retrieval via bounded PropertyCollector from `PerformanceManager` metrics. It checkpoints and resynchronizes after version/session invalidity under MWU budgets. Cloud adapters pace per provider/account/region/service/operation and retain SDK retry/credential-expiry semantics; database/storage adapters enforce target-side privilege/connection/query budgets. Physical pool/cache/schema selection and benchmark limits are BUILD-owned, not architectural claims of current implementation.
+
 ### LLD rule: third-party errors never escape directly to users
 
 Every adapter maps failures into the Platform provisioning/collection taxonomy. Raw vendor/library error is retained as diagnostic evidence for authorized support users, while customer UI receives a stable reason code and remediation guidance.
@@ -3036,6 +3050,12 @@ Physical storage and streaming schemas are decoupled from logical contracts:
 2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
 3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
 4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.
+
+### 92.3 Structured Agent evidence is an additive gated transport, not scalar-label packing
+
+The existing `software_inventory_snapshot`, `ProcessNetworkEvidence` and EDS logical contracts **do not** imply a working physical Agent→Sensor→Core transport. BUILD-016 must evolve versioned typed evidence payloads with bounded item/byte/fragment envelopes and replay-safe per-capture identity while keeping currently implemented scalar metrics wire-compatible. BUILD-062/063/064/098 own ingress validation, physical streaming/storage and authoritative reconciliation; no compulsory Valkey/PG whole-snapshot staging table or new service is selected here. If fragmentation is used, no fragment/partial/truncated capture can assert a complete authoritative FULL inventory or removals; assembly state, missing pieces and terminal outcome must be bounded, explicitly accounted and replay-idempotent.
+
+**Durability distinction:** Agent→Sensor ACK = durable local Sensor spool; current Sensor→Core agent-ingress ACK = at-least-once Kafka + PostgreSQL watermark with BUILD_003 reservation parity still a **TARGET** (Platform_17 §10.3). Do not copy the stronger Sensor→Core telemetry PG-reserve→Kafka-txn→PG-finalize claim onto agent-ingress or call this structured path implemented/certified before exact-head tests.
 
 ---
 

@@ -2555,3 +2555,14 @@ Planned Phase-2.5 dataflows SHALL preserve source identity and evidence provenan
 - external Phase-2 APM/NPM-DPI remains source-labelled integration evidence and does not silently become native authority.
 
 Backpressure, sampling/capture reduction and explicit degraded states SHALL be preferred over uncontrolled memory/disk growth.
+
+---
+
+## 2026-10-30 Infrastructure/Log Sensor guarded dataflow clarification
+
+The following are **SPECIFIED** flow invariants, not proof of a current deployed implementation or a change to frozen edge ACK naming:
+
+1. **DF-014 Syslog/OTLP trust and durability:** `Source → configured listener/source/Sensor binding → unambiguous tenant authorization (Phase-1.5 MSP overlap gate) → transport/framing/size checks → bounded parse + pre-spool redaction/cardinality admission → durable authorized Sensor route → existing Core ingestion → event/entity correlation`. On ambiguous tenant, malformed/decompression failure or quota exhaustion, reject with counted reason or metadata-only sanitized diagnostics; never write unassigned raw payload to a default tenant. TCP ingress and OTLP have different acknowledgement/delivery semantics.
+2. **DF-016 typed Agent evidence:** `Agent certified typed capture → (BUILD-016 versioned bounded envelope/optional fragments) → durable Sensor acceptance → current agent-ingress Kafka+PG watermark/at-least-once Core path (BUILD_003 reservation parity target) → BUILD-062/063/064 validation/storage → BUILD-098 authoritative complete-snapshot reconciliation`. Scalar metrics wire is preserved; partial/late/incomplete inventory never triggers disappearance/removal. The typed physical path is NOT yet implementation-certified.
+3. **DF-017 agentless/provider control:** `scheduled admitted job → per-target/session/credential API budget → versioned read-only query or provider API → typed normalized evidence+provenance → Core quality`; credential, quota, source privilege, expired vSphere token and cloud 429 failures follow bounded retry/resync and `PARTIAL/UNKNOWN`, not target DOWN.
+4. **SIEM export:** `authorized sanitized Log/Syslog event → primary durable Sensor→Core ingest → Core/Integration Service → independently capped per-tenant/destination SIEM export`. The Core→SIEM path is the current HLD default (Platform_04 §31). A Sensor-local parallel export is **optional, not selected as a mandatory architecture**; it requires separate connector approval, tenant authority, backpressure tests and noninterference proof. SIEM delivery outcome never substitutes for Core durable ACK. Exhaustion/retention/80% disk protection yields explicit destination lag, expiry and loss; no infinite spool or absolute lossless guarantee.
