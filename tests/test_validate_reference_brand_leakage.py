@@ -137,6 +137,22 @@ class BrandHygieneTest(unittest.TestCase):
             findings = inspect_archive(path, path.name)
             self.assertTrue(any("UNSCANNABLE" in item.problem for item in findings))
 
+    def test_empty_artifact_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "empty.zip"
+            path.touch()
+            self.assertTrue(any("UNSCANNABLE" in item.problem for item in inspect_archive(path, path.name)))
+
+    def test_empty_artifact_directory_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            (root / "good.ts").write_text("AmrudAi", encoding="utf-8")
+            (repo / "empty-release").mkdir()
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                self.assertEqual(main(["--repo", temp, "--path", "ui/src", "--artifact", "empty-release"]), 1)
+
     def test_nested_archive_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:
             path = Path(temp) / "release.zip"
