@@ -108,6 +108,12 @@ If devices are divided into multiple network-isolated/locality pools, redundancy
 
 High-volume NetFlow/IPFIX/sFlow/J-Flow, Syslog, traps and high-rate OTel are separated from polling when volume risks starving normal collection. A small deployment may combine roles, but Platform's Capacity Engine must recommend/require role separation once safe limits are approached. Exact records/sec and EPS certification values are benchmark-defined.
 
+### 5.1 Infrastructure/Log edge admission budgets — 2026-10-30 audit reconciliation
+
+The `INFRASTRUCTURE` and `LOG` roles have separately tracked budgets for: per-target/credential/tenant SSH and WinRM active sessions and pending jobs; cloud account/region/service/operation and vSphere API requests; DB/storage query pools; syslog/OTLP record and decoded-byte rates; multiline active streams, bytes **per stream and in aggregate**, partial-record idle age; active metric series/cardinality; pre-spool redaction work; and independent SIEM destination backlog, disk quota and replay age. Expensive agentless, inventory, API resync, log parsing and SIEM export must yield to control, monitoring and durable ingestion under existing precedence.
+
+Finite memory/disk queues require deterministic reject/defer/shed policies, explicit loss/quality counters and remaining-horizon estimates. **No fixed universal** 64-KB record, 5,000 stream, 30-second idle, 100-session, 2-shell, 120-second storage API, 10-GB SIEM or vendor TPS constant is certified here. Defaults and admission envelopes are capability/deployment-specific `Platform_14` benchmark results, bounded by Sensor 80% storage protection. A protected audit-retention requirement cannot manufacture infinite disk capacity; it requires capacity/egress planning and a visible fail-safe policy.
+
 ## 6. Monitoring Work Units (MWU)
 
 Platform must compute a workload score using at least:

@@ -65,6 +65,15 @@ Phase 1 architecture requires ICMP availability evidence as a protocol-aware typ
 
 **Issue #218 implementation gap (SOURCE_FACT / NOT CLOSED):** Current Core numeric-only ingestion rejects Sensor `icmp_observation_v1` envelopes that lack `protocolPayload.observations` or `metric_id`+numeric `value`. That Core gap is a P1 telemetry-integrity blocker for end-to-end ICMP enablement; it does not authorize rewriting Mother Reference architecture to numeric-only ICMP or collapsing missing ICMP into DEVICE_DOWN. Closure requires Master-selected Core contract work and evidence—not documentation fiction.
 
+### 2.3 Syslog ingress profiles and tenant attribution — 2026-10-30 audit reconciliation
+
+A `LogIngressProfile` is a **logical, server-administered configuration contract**, not a new service or new wire protocol. It binds `profile_id`, assigned Sensor/site/tenant authority, transport/listener/interface or trusted route, configured source identities/CIDRs, TLS trust/client identity where supported, parser/redaction policy, quotas and reject/quarantine handling. The precise API/schema name and physical persistence remain governed by BUILD-062/063/064 and the existing config authority (Platform_17); there is no assumption that a single tenant needs its own VIP or port.
+
+- **Phase 1:** Single-customer Syslog may use a shared listener only where source-to-entity and server-side tenant assignment are deterministic; payload hostname, untrusted headers and source IP alone are never tenant authority.
+- **Phase 1.5 MSP/shared tenancy:** Before enabling any listener handling multiple tenants, prove **unique ingress binding** across overlapping RFC 1918, NAT, forwarding relays, interfaces and sites. A distinct listener/IP, trusted site/Sensor boundary or authenticated TLS client certificate mapped through a server-side Credential/Ingress Profile are possible mechanisms; no mechanism is mandated without deployment proof. TLS cert DN/SAN text alone does not create tenant authority. CIDR allowlisting is a filter, not a proof of identity when sources overlap.
+- If more than one tenant/source authority matches or none can be proved, **fail closed**: no default-tenant assignment, no cross-tenant entity lookup, and no raw event stored in a tenant's spool. Drop with reason accounting or use a bounded access-restricted **metadata-only** unresolved diagnostic record; never a shared unredacted dead-letter stream.
+- Protocol boundaries remain transport-specific: UDP message/datagram and loss semantics, TCP Syslog framing (RFC 6587 where supported), and certificate-validated TLS Syslog (RFC 5425) are not interchangeable. Source configuration and framing compatibility are part of acceptance.
+
 ## 3. Infrastructure/cloud credential matrix
 
 | Domain | Authentication/security | OSS/SDK | Platform-owned layer |
@@ -180,6 +189,12 @@ WinRM/WMI/CIM diagnostics require HTTPS/TLS where supported by the selected tran
 
 Where a certified PowerShell fallback is unavoidable, the exact script/command template is Platform-owned, fixed, versioned, read-only by declared policy, exact-operation scoped, typed-parameter constrained, output/timeout bounded, audited and separately security-certified. No generic PowerShell facility and no model/user-supplied arbitrary PowerShell are permitted for routine monitoring/EDS.
 
+### 9.3.1 Agentless transport/session and target-protection invariants
+
+SSH and WinRM/WMI/CIM query packs use **bounded per-target and per-credential concurrency**, Sensor-wide worker/MWU admission, deadline/timeout/cancellation where supported, output/item limits, retry+jitter budgets, and leak-free session cleanup. Capacity is based on target and Sensor measurements, not fixed ceilings such as `100 SSH sessions` or `two WinRM shells per host`. Session/transport reuse is **optional and verified per operation**: long-lived WinRS/PowerShell shells are not an unconditional pool and must not outlive credential revocation or assignment/fencing authority. Each connection validates SSH host keys or WinRM HTTPS server identity; rotate/revoke credentials without reusing stale authenticated contexts.
+
+WinRM shell/process quotas and GPOs vary by target; collector packs must distinguish shell-backed execution from direct CIM/WMI/WS-Man operations and certify the chosen transport/OS/version. The existing fixed, read-only, versioned PowerShell fallback remains permitted when required, and `Win32_Product`-style side-effecting inventory remains prohibited. Linux sudo/TTY/permission denial degrades only affected probes to `PARTIAL` with a missing-evidence/privilege reason; it cannot fabricate host DOWN or turn a failed privileged check into a zero value.
+
 ### 9.4 Evidence privacy
 
 Default EDS excludes environment variables, arbitrary file content, packet payload, interactive user content and unrestricted process command lines. Privacy-sensitive process arguments/log fields require explicit policy, minimization/redaction and tenant authorization.
@@ -194,6 +209,10 @@ Agent/Sensor credentials, reusable secrets and unrestricted device-control capab
 - Log forwarding: secret/PII minimization/redaction; per-destination queue isolation; SIEM outage must not block base monitoring.
 - Webhooks: signature/auth, replay protection, tenant/source binding, SSRF/egress allowlists, secrets, schema validation, rate limits, idempotency, audit; no arbitrary scripts.
 - ITSM callbacks: signed/authenticated inbound; remote ticket state cannot override Platform health authority.
+
+### Log/SIEM forwarding isolation
+
+Where external SIEM forwarding is enabled, use per-destination/tenant bounded **asynchronous** workers, retry/backoff, authorization/egress and independent queue/memory/disk quotas; a separate disk partition or `10 GB` allocation is not mandatory. Primary monitoring, authority/control and durable Sensor→Core replay retain priority. Forwarding backlog/oldest age/failed delivery/drops are visible. When a finite forwarding quota is exhausted, apply the configured, legally reviewed forwarding retention/loss policy and expose the gap; do not promise absolute non-interference, lossless delivery, or an unlimited compliance quarantine. Distinguish a transport send from destination application acknowledgement where an actual sink ACK exists.
 
 ---
 
@@ -270,6 +289,10 @@ Windows installed-software inventory is observational. Certified Agent/WinRM/WMI
 
 Certified OTLP/gRPC and OTLP/HTTP listeners are configurable and default to TLS-protected operation. mTLS is preferred where deployment permits; scoped token/OAuth-style credentials may be certified for compatible deployment profiles. Tenant/site/source authority is derived from the authenticated Platform ingress/connector binding, never from caller-supplied resource attributes or headers not bound by server configuration. Enforce compressed and post-decompression request bounds, record/attribute length/count limits, cardinality quotas, schema/protobuf/JSON validation where supported, rate limits, redaction/data-minimization policy and explicit accepted/rejected/dropped accounting.
 
+### 11.1.1 OTLP cardinality and sensitive-attribute admission
+
+Enforce per-tenant, Resource/service, metric identity and data-type budgets **before local durable acceptance**: request/decoded-byte/attribute limits, bounded in-flight stream and series state, rate/cardinality and fairness budgets, PII/secret minimization, and explicit accepted/rejected accounting. When a metric would exceed a budget, reject the affected points/series with correct OTLP partial-success semantics (where supported), without silently rewriting series identity, merging counter streams, changing cumulative Sum/histogram temporality to Gauge, or storing stripped sensitive values in an `overflow_attributes` JSON column. Any governed aggregation must have a separately certified, semantics-preserving transformation and provenance. HLL/sketches are optional **estimation** mechanisms, not a required dependency nor exact membership authority.
+
 ### 11.2 Platform-wide ITSM adapter contract
 
 Vendor adapters implement capability-advertised mappings over the canonical external-object model; unsupported objects/transitions must fail explicitly. Outbound connector egress uses destination allowlists/SSRF protections, TLS verification, proxy policy, least-privilege credentials, rate-budget awareness and deterministic operation/idempotency metadata. Inbound webhook/event processing requires connector authentication/signature where supported, replay protection, source binding, payload/schema/size bounds, rate limiting and server-side tenant derivation. Free-text comments/work notes are untrusted content and never directly become commands, templates, targets or authorization.
@@ -291,6 +314,12 @@ External ITSM approval is workflow evidence, not privileged execution authority.
 **Phase 1 / Phase 1.5 privileged separation (Issue #200):** Phase 1 independently certifiable NCM is backup/version/diff/compliance/golden-state plus controlled manual CLI only when RBAC/credential brokering/audit are certified. Mass push, canary/staged automated privileged remediation and maker-checker automation defaults belong to **Phase 1.5** unless Founder change control promotes them. Protocol connectors must not bypass Sensor assignment/fencing or local Platform authorization.
 
 ---
+
+### 11.6 Hypervisor, cloud, database and storage API safety
+
+- VMware inventory/topology connectors should use version-compatible `PropertyCollector` initial bounded retrieval and incremental update/version handling where supported; performance counters use `PerformanceManager`, not an assumed PropertyCollector metric stream. Restart, invalid update token, expired session and partial update require bounded resync/checkpointing with explicit evidence quality; benchmark benefits instead of claiming `95%` traffic reduction.
+- Cloud requests use provider/account/subscription/project, region, **service and operation** rate budgets, SDK-supported retry/backoff/jitter, pagination/point-count limits and fairness. Do not hard-code an AWS CloudWatch `GetMetricData` `50 TPS` universal ceiling; quota values are provider-published, operation/region/account-specific and changeable. Prefer SDK v2 credential caching/refresh; refresh from actual STS expiry with a bounded safety margin, not an assumed compulsory one-hour lifetime or fixed ten-minute prefetch.
+- Database query packs enforce least privilege, read-only and allowlisted SQL, bounded per-target connections, server-side statement/execution deadlines where supported, cancellation and connection cleanup; no global `MaxOpenConns=2` or `5s` promise. Storage/SMI-S/REST targets get operation-specific concurrency/call deadlines and a separate expensive-work budget so a slow controller does not starve base polling. API/permission/transport failure is connector or monitoring `PARTIAL/UNKNOWN`, not asserted guest/database/volume DOWN without corroboration.
 
 ## 12. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
 
