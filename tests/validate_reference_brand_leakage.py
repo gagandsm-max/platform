@@ -100,6 +100,11 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
     consumed = 0
     if path.is_symlink():
         return [Finding(label, "UNSCANNABLE: symbolic link")]
+    try:
+        if not path.is_file() or path.stat().st_size == 0:
+            return [Finding(label, "UNSCANNABLE: empty or nonregular artifact")]
+    except OSError:
+        return [Finding(label, "UNSCANNABLE: unreadable artifact")]
     lower_name = path.name.lower()
     if lower_name.endswith(UNSUPPORTED_PACKAGES) and not lower_name.endswith(SUPPORTED_ARCHIVES):
         return [Finding(label, "UNSCANNABLE: package format needs an unpacked release payload")]
@@ -184,7 +189,11 @@ def scan(repo: Path, paths: list[Path], artifacts: list[Path]) -> tuple[list[Fin
         if not root.exists() and not root.is_symlink():
             findings.append(Finding(str(root), "UNSCANNABLE: artifact missing"))
             continue
-        for path in walk_files(root, source=False):
+        artifact_files = walk_files(root, source=False)
+        if not artifact_files:
+            findings.append(Finding(str(root), "UNSCANNABLE: empty artifact directory"))
+            continue
+        for path in artifact_files:
             visited += 1
             label = path.relative_to(repo).as_posix() if path.is_relative_to(repo) else str(path)
             findings.extend(inspect_bytes(label, label.encode("utf-8")))
