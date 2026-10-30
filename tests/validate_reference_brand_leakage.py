@@ -21,9 +21,14 @@ from pathlib import Path
 SOURCE_ROOTS = (
     "ui/src",
     "ui/public",
+    "ui/index.html",
+    "ui/nginx.conf",
+    "ui/Dockerfile",
     "core/src/main",
+    "core/Dockerfile",
     "sensor/cmd",
     "sensor/internal",
+    "sensor/Dockerfile",
     "agent",
     "deploy",
     "analytics",
@@ -31,7 +36,8 @@ SOURCE_ROOTS = (
     "device-packs",
     "packaging",
 )
-REQUIRED_SOURCE_ROOTS = ("ui/src", "core/src/main", "sensor/internal", "agent", "schemas", "device-packs")
+REQUIRED_SOURCE_DIRS = ("ui/src", "core/src/main", "sensor/internal", "agent", "schemas", "device-packs")
+REQUIRED_SOURCE_FILES = ("ui/index.html",)
 SOURCE_SKIP_DIRS = frozenset({".git", ".test-dist", "node_modules", "target", "dist", "bin", "__pycache__", "third_party"})
 MAX_MEMBER_BYTES = 32 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
@@ -184,7 +190,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     repo = args.repo.resolve()
     if not args.path:
-        missing = [name for name in REQUIRED_SOURCE_ROOTS if not (repo / name).is_dir()]
+        missing = [name for name in REQUIRED_SOURCE_DIRS if not (repo / name).is_dir()]
+        missing.extend(name for name in REQUIRED_SOURCE_FILES if not (repo / name).is_file())
         if missing:
             print(f"[ERROR] Required product source roots missing: {', '.join(missing)}", file=sys.stderr)
             return 2
