@@ -462,3 +462,9 @@ This reconciliation deliberately allocates **no new BUILD IDs** and does not sil
 5. Require DORP-P2.5-v1 before any Phase-2.5 completion claim.
 
 No separate Phase-2.5 codebase, customer-specific Core fork, duplicate graph/RCA authority or ungoverned packet/trace datastore is authorized.
+
+## Database architecture audit decision checkpoint — 2026-10-30
+
+**Authority:** Master Chat / ARCH-DELEGATED v3.3.0 Mother Reference reconciliation. Independent DB audit findings were challenged; all six are **PARTIALLY ACCEPTED** as preventive hardening/clarification, not verified implementation failures. PostgreSQL, ClickHouse, Kafka and Valkey remain unchanged. Physical DDL, RLS/row policies, JSONB/generated columns, mutation strategy, every-FK indexing and cache implementation remain evidence-driven rather than preselected.
+
+**Build sequence:** No new BUILD ID, changed owner, reprioritized certified milestone or reserved migration. Existing Phase-1 SNMP/Counter64, storage/ingest and Core-resilience quality gates apply; Phase-1.5 MSP tenant isolation and HA gates remain separate. No SPECIFIED→IMPLEMENTED or release-readiness upgrade. Governed detail in `project_documentation/Platform_05_LLD.md` §97, `Platform_12_Decision_Source_Register.md` §27, `Platform_14_Test_Performance_and_Release_Quality.md` §8.3.1 and `Platform_18_Security_Threat_Model.md`. Confirm actual code/DDL/benchmarks before any targeted implementation task; preserve Issue #211 ledger authority.
