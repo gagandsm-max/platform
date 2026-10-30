@@ -38,7 +38,7 @@ SOURCE_ROOTS = (
 )
 REQUIRED_SOURCE_DIRS = ("ui/src", "core/src/main", "sensor/internal", "agent", "schemas", "device-packs")
 REQUIRED_SOURCE_FILES = ("ui/index.html",)
-SOURCE_SKIP_DIRS = frozenset({".git", ".test-dist", "node_modules", "target", "dist", "bin", "__pycache__", "third_party"})
+SOURCE_SKIP_DIRS = frozenset({".git", ".test-dist", "node_modules", "target", "dist", "__pycache__", "third_party"})
 MAX_MEMBER_BYTES = 32 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
 UNSUPPORTED_PACKAGES = (".deb", ".rpm", ".7z", ".cab", ".msi", ".xz", ".gz")
@@ -59,11 +59,18 @@ class Finding:
 
 
 def detect_brands(data: bytes) -> set[str]:
-    text = data.decode("utf-8", errors="ignore")
-    # Windows UTF-16LE resources are common in MSI and executable artifacts.
+    brands: set[str] = set()
+
+    def check(text: str) -> None:
+        brands.update(name for name, pattern in RULES.items() if pattern.search(text))
+
+    check(data.decode("utf-8", errors="ignore"))
+    # Windows binary resources can contain UTF-16 at either byte alignment.
     if b"\x00" in data:
-        text += "\n" + data.decode("utf-16-le", errors="ignore")
-    return {name for name, pattern in RULES.items() if pattern.search(text)}
+        for encoding in ("utf-16-le", "utf-16-be"):
+            for offset in (0, 1):
+                check(data[offset:].decode(encoding, errors="ignore"))
+    return brands
 
 
 def inspect_bytes(label: str, data: bytes) -> list[Finding]:
