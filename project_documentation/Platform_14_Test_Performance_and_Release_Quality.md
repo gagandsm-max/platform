@@ -492,6 +492,19 @@ Browser journeys require credential isolation, sandbox/runtime admission, determ
 
 Acceptance numbers are release-specific `Platform_11`/`Platform_14` evidence, not the auditor's illustrative constants. Phase-1.5 MSP certification requires cross-tenant negative proof; these assertions remain gates, not shipped functionality.
 
+### 12.9 Data transportation, replay integrity and HA negative gates — 2026-10-30
+
+**SPECIFIED / NOT CERTIFIED.** Preserve the existing BUILD and release-gate ownership; no auditor-suggested token TTL, retry-count, universal RTT formula, third coordinator or fixed capacity number is adopted.
+
+1. **Phase 1 upload/backpressure:** Test real Core 429/503 plus absent/valid/invalid/HTTP-date/delta-seconds `Retry-After`, clock skew, retry cap, jitter, repeated overload, cancellation/reboot, bounded memory/connections, spool retention, 80% protection and explicit loss/age counters. A 2xx without a valid final application ACK cannot delete data; neither can 429/503. Compare stable batching with measured alternatives; no universal batch shrinking or default shedding.
+2. **Phase 1 ingest/idempotency:** Inject crash/EOF at each transition: PG reservation, Kafka send/commit, PG finalization, ACK transmit, lease expiry/change and same-range concurrent retry. Verify actual Kafka transaction visibility (including aborted records, Issue #222), downstream ClickHouse 200-with-late-body error/no offset ACK (Issue #235), correct preservation/replay for numeric and Counter64, and no duplicate authoritative alert/incident/export effects. Run physical Kafka/PostgreSQL/ClickHouse restart and replay tests; mock-only/FINAL-only success does not certify the whole pipeline.
+3. **Phase 1 polling:** Benchmark Device Pack-bounded SNMP/ICMP RTT variance, high-tail/WAN latency, timeouts, retry caps, 800-device Sensor reference workload and congestion/failure-domain storms. RTT percentile/mean formulas and `MaxRetries=2` are evaluation candidates, not frozen defaults. Transport uncertainty maps to `UNKNOWN`/`MONITORING_DEGRADED`, not automatic target DOWN.
+4. **Phase 1.5 authority/fencing:** Test partial WAN partitions, asymmetric reachability, lost heartbeat with old Active still writable, clock/lease skew, VIP/DNS stale routes, mTLS/certificate rotation, restart and returning-old-Active race. Prove **no simultaneous authoritative write/ACK paths at all relevant storage/control-plane boundaries**, not merely denial by an HTTP handler. An operator cannot promote a node without verifiable old-Active fencing/lease exclusivity.
+5. **Phase 1.5 ACK RPO/scale:** At every deletion-authorizing ACK crash-point, permanently remove either Core and recover only the survivor; prove complete accepted telemetry plus watermark/replay identity against the certified failure matrix. Measure failover and backlog drain separately under peak mix/reconnect storm and supported geographic deployment. When the durable replication barrier is unavailable, Core must withhold deletion-ACK and Sensors retain backlog; quantify availability and data-loss risk under finite spool/80% policy. <60s is not promised for ambiguous fail-closed cases.
+
+The Phase-1.5 P0 evidence remains open under `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124; passing generic CI or signed-token unit tests is insufficient.
+
+
 ## Phase 1.5 Serverless certification gates — Issue #268
 
 Governing requirement: `REQ-SLS-009` / `PRD-SLS-009`. Status: SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED. Listing a provider or metric is NOT certification.

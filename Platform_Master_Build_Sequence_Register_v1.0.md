@@ -462,3 +462,16 @@ This reconciliation deliberately allocates **no new BUILD IDs** and does not sil
 5. Require DORP-P2.5-v1 before any Phase-2.5 completion claim.
 
 No separate Phase-2.5 codebase, customer-specific Core fork, duplicate graph/RCA authority or ungoverned packet/trace datastore is authorized.
+
+## 2026-10-30 — Data Transportation / Connectivity / Redundancy architecture audit checkpoint (Issue #211)
+
+**Architecture decision only — NOT implementation, whole-BUILD completion, product certification or GA.** Exact challenged evidence baseline: GitHub `main=ba1d3add55df5362d5f881c3383c1652afc3541f`; Mother References remain v3.3.0/25 files. Details/dispositions in `project_documentation/Platform_12_Decision_Source_Register.md`. This checkpoint **does not supersede** the last whole-BUILD certificate (BUILD-011), primary active BUILD-020 IMPLEMENTING/NOT CERTIFIED, or Phase-1 NO-GO. No existing BUILD ID, owner, dependency or certification phase changed.
+
+| Governing work | Maturity / priority | Next mandatory proof, no new BUILD ID |
+|---|---|---|
+| Phase-1 Sensor→Core overload/replay and 80% local buffer protection | **PARTIAL implementation / NOT CERTIFIED**, P1 residual | BUILD-003/062–064 (plus BUILD-020 uploader runtime) and Issue #92: real Core 429/503 `Retry-After` fallback/cap/jitter/spool retention; Kafka committed-only (#222), complete ClickHouse insert-response/offset custody (#235), PG/Kafka finalize crash/lease replay, numeric and typed/alert/export idempotency, negative/capacity tests. Existing bounded Go uploader/PG watermark/`FINAL` views do **not** certify full path. |
+| Phase-1 SNMP/ICMP RTT/retry/failure-domain adaptive performance | **SPECIFIED / benchmark OPEN** | BUILD-020/021/040 and existing `Platform_14`/11 acceptance: Device Pack bounded timeouts, high-tail WAN tests, 800-device Sensor load, no-data-not-down; no universal formula, 2s floor or `MaxRetries=2` frozen by the audit. |
+| Phase-1.5 two-Core stable endpoint, positive fencing, stateful failover | **SPECIFIED / OPEN P0 / NOT CERTIFIED** | BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE`: exact Active authority and old-node fencing, PostgreSQL/Kafka/ClickHouse promotion/rejoin, healthy and asymmetric partitions, former Active write rejection, fail-safe operator recovery. No witness/consensus/token mechanism selected. |
+| Phase-1.5 ACK-for-deletion telemetry RPO=0, reconnection/storm/large-estate capacity | **SPECIFIED / OPEN P0 / NOT CERTIFIED** | Prove survivor durable telemetry + watermark before ACK for declared permanent-one-Core matrix, withhold ACK on degraded replication, backlog recovery, <60s safe-failover profile only, and measured global WAN/retention/CPU/storage envelopes. No blanket zero-loss, inter-region HA or large-enterprise certification claim. |
+
+**Coordination:** Documentation-only review must reconcile against the then-current `main` and overlapping drafts #281 (Network Sensor) and #283 (DB), pass exact-head 4-job CI, independent Antigravity negative audit, controlled merge/post-main CI and a guarded local `/home/gagan/nms` fast-forward. Preserve untracked user files and other worktrees. An OPEN/DRAFT PR remains non-authoritative until merged.
