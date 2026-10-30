@@ -824,6 +824,8 @@ Capability/Device Packs compile Monitor Definitions into bounded poll groups. Th
 
 The planner consumes Device Pack compatibility metadata, observed response size/RTT/error history and current Sensor capacity. It may reduce bulk repetitions after `tooBig`/fragmentation-risk evidence and may fall back from GETBULK only according to bounded certified policy. It may not create an unbounded retry or adaptive-poll loop.
 
+**Adaptive PDU safety clarification (2026-10-30 Network Sensor audit):** Learn bounded GETBULK/PDU limits per effective device, protocol/security context and relevant table/subtree/poll-plan compatibility profile. Distinguish an explicit `tooBig` response or supported response-size evidence from generic timeouts caused by reachability, authentication, rate limiting or device load; a timeout alone must not be labelled an MTU/PDU-size failure. Any reduction, cautiously governed upward probe, GETNEXT fallback, cache expiry or invalidation must preserve table traversal/progress, OID coverage, worker budgets, freshness and measured error classification. Device firmware/Pack/profile changes must invalidate incompatible learned state. No universal max-repetitions ladder, fixed 24-hour lock or unbounded adaptive retry is selected without representative-device certification.
+
 The normal scheduled SNMP operational-metric default is **5 minutes**. That default does **not** require polling every available OID every five minutes; Cap Pack/monitor definitions drive which objects are collected and how often. Availability/liveness remains a separate plane. Configured intervals are durations under the existing policy hierarchy, not a rigid database enum. Exact generic scheduler hash/algorithm details are out of scope here; SNMP spreading must remain deterministic/stable and compatible with later scheduler reconciliation.
 
 ### 12.3 Typed observation contract
@@ -909,6 +911,8 @@ Scheduled jobs carry Credential Profile identity/reference and authorization con
 
 No default `public` community fallback is permitted.
 
+**Secret materialization/crash-safety clarification:** Use the shortest practicable execution lifetime and avoid long-lived, cross-job or cross-tenant plaintext caches. Go strings, garbage collection and best-effort buffer clearing cannot be represented as guaranteed zeroization. Production Sensor service policies must restrict core dumps and diagnostic memory capture, limit filesystem access to any crash/support artifacts, and prove that panic/error paths, logs, telemetry, support bundles and monitoring-quality fields do not disclose community/auth/privacy secrets. A safer mutable secret buffer may be used where the approved protocol library permits it; no claim of guaranteed in-memory erasure is made.
+
 ### 12.8 SNMP trap/inform receiver
 
 Authoritative successful Inform path:
@@ -951,6 +955,8 @@ For v1/v2c UDP traps, source IP/community/enterprise OID are evidence and do not
 Only after durable local acceptance/accounting succeeds may Platform send a successful Inform ACK. MIB/Capability Pack semantic enrichment, final entity resolution, semantic dedup/correlation, alert correlation, Core delivery, Kafka persistence, ClickHouse persistence and incident creation are **not** prerequisites for protocol ACK. Semantic enrichment and semantic dedup/correlation may proceed after ACK from the durably preserved source event. If Platform cannot durably accept/account the Inform, it must **not** falsely return successful acceptance.
 
 Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED`. It does **not** mean Core completed, Kafka completed, ClickHouse completed, alert generated or incident generated. This boundary is distinct from the Sensor→Core telemetry ACK model.
+
+A bounded group-commit/WAL acceptance mechanism may amortize disk synchronization, but the individual successful Inform ACK must wait until that Inform's accepted event or qualifying bounded aggregation/accounting record is durably committed. An in-memory channel, queued-but-unflushed record, asynchronous best-effort counter or pre-ACK fingerprint drop alone does not satisfy acceptance. When parsing, attribution, spool admission, commit or storage-pressure protection fails, return no false successful Inform ACK; bound and measure outstanding requests, duplicate/retransmitted Inform identities, queue occupancy, admission latency and socket loss. Pre-ACK aggregation must durably account for source, time window, first/last occurrence, count and the evidence needed to avoid hiding distinct critical transitions; post-ACK semantic dedup remains separate. Batch interval, record count, fsync characteristics and sustainable EPS are benchmark-selected for the certified Sensor storage profile, not fixed to the audit's 10 ms / 256 / 25,000 EPS claims.
 
 Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, pre-ACK storm admission/aggregation, failed durable acceptance and enrichment unavailable after durable acceptance.
 
@@ -1018,6 +1024,12 @@ Flow LLD must cover NetFlow v5/v9, IPFIX, sFlow and vendor/J-Flow where applicab
 
 Streaming Sensor/Network Sensor receives datagrams/streams and tracks exporter/template state.
 
+**Ingress authority and overlapping addresses:** Resolve a canonical tenant/site/exporter from an explicitly configured trusted ingress domain (for example tenant-dedicated Sensor placement or a genuinely segregated listener/interface/VRF/network namespace plus approved exporter mapping). Capture the actual receiving network context and bind it to the authorized exporter, profile and source; a packet's RFC1918 source IP, self-declared attributes or single global UDP socket alone are not tenant authentication. Reject/quarantine ambiguous or unauthorized exporters before canonical tenant attribution or cross-tenant enrichment. The Flow production profile must support same-source-IP exporters belonging to distinct tenant networks without collision; MSP shared-ingress certification is Phase 1.5.
+
+**Template lifecycle:** NetFlow v9/IPFIX template/options state is scoped by trusted ingress and exporter identity, protocol, applicable source/collector transport endpoints, Observation Domain/Source ID and Template ID, with source lifecycle/epoch and last-refresh/expiry evidence where available. Expired, withdrawn, incompatible or exporter-restart-invalid templates must not decode new records. Under UDP, enforce protocol-specific refresh/lifetime and template-redefinition rules; cache miss, sequence gap and invalidation are explicit quality/loss events. A persistent template snapshot may at most be treated as an untrusted restart hint until valid live exporter/session continuity is established; a disk cache must never be accepted solely by exporter IP + Template ID or silently turn unknown bytes into plausible flow facts. No BoltDB, SQLite or separate template database is selected by this clarification.
+
+**Sampling correctness:** Preserve raw exported packet/octet values and the source's sampling selector/algorithm, interval or probability, option-template scope, observation point and validity window. Emit estimated traffic rates/volumes separately only when semantics justify scaling; never multiply every received record by an assumed global rate or scale a value already normalized by the exporter. Missing, changed, conflicting or unverified sampling metadata yields explicit `UNKNOWN`/`ESTIMATED` quality and coverage limits, not invented exact utilization.
+
 ### 14.2 Enrichment pipeline
 
 ```text
@@ -1041,7 +1053,7 @@ raw flow
 - template-miss counters;
 - backpressure metrics;
 - cardinality detection;
-- dedicated Streaming Sensor recommendation.
+- capacity-driven explicit FLOW/LOG role separation or dedicated Sensor placement when required to protect polling and critical-event budgets; the one Universal Sensor runtime is retained.
 
 No silent drop: every intentional/forced drop must be counted and surfaced.
 

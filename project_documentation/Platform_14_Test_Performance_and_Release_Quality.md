@@ -237,6 +237,18 @@ Required evidence, as applicable to the declared certification dimensions, inclu
 
 False-alert regression shall include: SNMP failure while ICMP/API/neighbor/path evidence remains healthy → `MONITORING_DEGRADED`/appropriate semantic state, not authoritative `DEVICE_DOWN`.
 
+### 7.1 Network Sensor protocol-edge adversarial acceptance — 2026-10-30
+
+The existing SNMP, Flow, Log, active-path and Sensor-runtime requirements retain their ownership and phase boundaries. Before declaring the relevant capability certified, prove:
+
+- **Adaptive SNMP:** explicit `tooBig`, truncated/smaller valid GETBULK responses, MTU/fragmentation evidence, timeout from unrelated causes, subtree traversal continuity, capability/profile invalidation, bounded GETNEXT fallback and no retry/poll amplification. No universal repetition ladder or cache TTL is presumed.
+- **Secret handling:** SNMPv3/community material is absent from panic/structured-log/error, support-bundle, spool, telemetry and audit outputs; production crash/core-dump policy, file permissions, concurrent tenant jobs, rotation and revoked credentials are tested. Do not call best-effort Go memory clearing verified zeroization.
+- **Inform durability and overload:** fault-inject immediately before/after the durable group-commit boundary, crash/power loss, duplicate/retransmitted Inform, storm aggregation count integrity, queue and UDP receive-buffer exhaustion, storage 80%, slow disk, failed sync, sustained mixed SNMP polling and competing Flow/Log load. A successful ACK must correspond to a recoverable durable local event/accounting record; throughput/latency/error ceilings are versioned benchmark results, not auditor estimates.
+- **Flow integrity and tenancy:** exporter/collector endpoint + observation-domain/source-ID template separation; same template ID with different layouts; exporter restart, expiry/refresh, out-of-order UDP, missing templates, source/tenant collision and spoofing, independently isolated overlapping-RFC1918 exporters, duplicate/HA exporters, unknown/changed/previously applied sampling factors, raw-versus-estimated preservation and no silent parse/scale corruption. Confirm FLOW high-rate reception cannot starve liveness, SNMP or critical LOG/trap work.
+- **Active paths:** ECMP per-flow versus per-packet, NAT/middlebox transformations, hidden hops, packet limits, IPv4/IPv6 and multi-vantage disagreement; stable fingerprints must not turn incomplete/ambiguous paths into false `DEVICE_DOWN`.
+
+The Flow receiver and Inform production runtime remain `NOT IMPLEMENTED / NOT CERTIFIED` unless source and full physical acceptance evidence separately prove their readiness.
+
 
 ## 8. Final handoff certification supplements — v3.2.2
 

@@ -549,3 +549,20 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 | Phasing | ARCH-DELEGATED within existing USER-FIXED envelopes | Windows Server and Windows Infrastructure/IIS remain Phase-1 *certification targets*, not GA claims. WSFC/CSV, NIC teaming, comprehensive per-user inventory and pending-reboot reconciliation are **not** expanded into universal Phase-1 Agent requirements by this audit. Later scope requires pack/profile acceptance and dedicated gates. |
 
 Independent implementation review and real Windows certification are mandatory before any production support claim. This decision does **not** assert that the Windows Agent currently implements these contracts.
+
+
+## 27. v3.3.0 ARCH-DELEGATED Network Sensor external-audit disposition — 2026-10-30
+
+**Authority:** Lead Architect independent review of the 2026-10-30 external Network Sensor audit against canonical `main`, existing Phase 1/1.5 certification envelopes, Issues #92/#218/#229, and governing SNMP/Flow/Path/Inform contracts. This is a **specification clarification**; no production-path code is modified, no dependency is admitted, no new mandatory runtime, database, Sensor binary or fixed capacity guarantee is selected. Mother Reference version remains **3.3.0**. Existing requirements/BUILD owners and `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED` remain unchanged.
+
+| Audit issue | Decision / authority | Binding design guardrail |
+|---|---|---|
+| Typed ICMP rejected, scheduler/runtime disconnected, raw Counter64 lacks derived rates | ACCEPT documented release gaps; existing #218/#229/#92 and BUILD gates own implementation | Preserve versioned existing spool/PG reserve/Kafka finalization/deletion-ACK and Core-issued grant authority; missing evidence never authorizes invented DEVICE_DOWN; Counter64 raw exactness does not certify rate analytics; do not replace envelope or scheduler with speculative parallel service |
+| Adaptive GETBULK/PDU limits and interface identity | CLARIFY existing enterprise SNMP requirements | Safe evidence-specific bounded fallback, cache invalidation and canonical interface continuity; no universal repetition ladder/24h lock |
+| Inform fsync/storm pressure | ACCEPT throughput risk, REJECT unbenchmarked numeric prescription | Durable local event or bounded storm accounting precedes successful ACK; batch/group commit may be evaluated without unsynced ACK, arbitrary 10ms/256 or 25k EPS claim |
+| Flow template restart cache | ACCEPT coverage risk; REJECT unconditional persisted-template reuse | Scope by trusted exporter/session/Observation Domain/Source ID/transport and lifetime, invalidate on restart/expiry; no BoltDB/SQLite selection or stale decoding |
+| Flow overlapping-address ingress and sampling | ACCEPT isolation/correctness gaps; REJECT bare source-IP listener YAML and blanket 1:N scaling | Tenant authority binds trusted ingress context; sampled values preserve raw and qualified estimates; MSP adversarial certification remains Phase 1.5 |
+| Flow/Log role and SNMP secret memory | RETAIN one Universal Sensor; CLARIFY resource/security gates | Explicit FLOW/LOG certified roles as volume requires; protect polling/critical-event budgets; minimize plaintext secret lifetime and crash-dump exposure without guaranteed Go string zeroization |
+| ECMP path probing | RETAIN BUILD-040 evaluation, REJECT universal path guarantee | Flow-stable probes and strict budgets with qualified outcomes; per-packet balancing/middleboxes can remain inconclusive |
+
+**Cross-document reconciliation:** `Platform_05` implementation contracts; `Platform_10` protocol/security boundary; `Platform_14` negative/capacity certification; `Platform_17` Flow event/data integrity; `Platform_18` threat controls. `Platform_03`, `Platform_08`, `Platform_11`, `Platform_22` and `Platform_23` retain existing authority; no new requirement IDs or maturity uplift. Conflicting concurrent PRs must rebase and be independently audited before merge.

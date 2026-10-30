@@ -913,6 +913,12 @@ Change Assurance APIs and NCM privileged-execution contracts retain maker-checke
 
 ---
 
+### 13.9 Flow ingress, template validity and sampling data contract — 2026-10-30 Network Sensor audit
+
+This refines the existing Flow/NTA/tenant/data-integrity contracts; it does not authorize a new ingest protocol, database or shared-MSP deployment. Every canonical Flow observation must bind the trusted ingress/Sensor/tenant context and resolved exporter/observation-domain identity separately from untrusted packet source attributes. The raw event retains protocol/version, source and destination collector transport context where applicable, source ID/Observation Domain, template/options identity and accepted version/lifetime/refresh/epoch evidence, sequence/gap/duplicate/unknown-template accounting, and raw capture/export times. An ambiguous tenant/exporter binding must fail closed or quarantine without misattributing a record to another customer.
+
+The template used for decoding must be valid for the exporter transport/session/observation-domain and event window; a restart-persisted dictionary is not an authoritative substitute for newly validated exporter context. Unknown, expired, conflicting or missing templates produce explicit loss/quality evidence rather than fabricated decoded flow rows. Sampling metadata preserves selector/algorithm, rate/interval/probability, scope and valid time window where available. Raw exported counters are immutable source facts; any sampling-normalized/estimated bytes, packets, rates or utilization carry distinct derived identity, estimation method, source sampling provenance and `ESTIMATED`/`UNKNOWN` quality. No blanket multiplication or duplicate normalization is permitted. Authenticated Sensor→Core mTLS does not make unauthenticated exporter UDP data intrinsically trusted.
+
 ## 14. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
 
 Architecture target ≠ implementation ≠ tested ≠ benchmarked ≠ certified ≠ deployed. Mother Reference set version remains **3.3.0** through Tranche B; v3.4.0 is reserved for gated Tranche D. This document remains TRANSITIONAL_LEGACY except where BUILD-000 edge freeze applies.
