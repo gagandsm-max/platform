@@ -35,9 +35,12 @@ SOURCE_ROOTS = (
     "schemas",
     "device-packs",
     "packaging",
+    "scripts",
+    "compose.yaml",
+    ".env.example",
 )
 REQUIRED_SOURCE_DIRS = ("ui/src", "core/src/main", "sensor/internal", "agent", "schemas", "device-packs")
-REQUIRED_SOURCE_FILES = ("ui/index.html",)
+REQUIRED_SOURCE_FILES = ("ui/index.html", "compose.yaml")
 SOURCE_SKIP_DIRS = frozenset({".git", ".test-dist", "node_modules", "target", "dist", "__pycache__", "third_party"})
 MAX_MEMBER_BYTES = 32 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 256 * 1024 * 1024
