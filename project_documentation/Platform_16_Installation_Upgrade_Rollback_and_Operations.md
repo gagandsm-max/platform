@@ -55,6 +55,9 @@ Rollback restores compatible package/config/schema state where supported. One-wa
 
 Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance.
 
+For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required outcomes and blocked in-use binaries must be surfaced to the deployment operator with bounded retry/reboot procedure; an unattended install must not schedule an unapproved forced reboot. After any approved reboot, verify SCM start, identity/cert continuity, spool replay/ACK safety and actual telemetry freshness; MSI success alone is not recovery proof. An irreducible blocked native call/EDR lock requires explicit degraded state and operator path, not an infinite stop wait or silent deletion of queue segments.
+
+
 ## 4. Platform — Operational Runbooks Master
 
 > Consolidated from `Platform_23_Operational_Runbooks.md` v3.1. Requirements in this section remain normative.
@@ -142,6 +145,9 @@ Operational runbooks shall include the following new failure classes without cre
 - **Cross-vantage evidence unavailable:** retain endpoint EDS and other available evidence independently; do not convert missing OOB/VMware/storage/path evidence into confirmation of a cause.
 
 Support evidence shall expose the last inventory reconciliation, effective process/service monitor selector, effective Monitoring Profile source/mode, EDS job/result status and related evidence-window references without exposing credentials/secrets.
+
+Windows-specific support runbooks (BUILD-014/015/016/018/019) shall distinguish: missing PDH counter vs. localized path vs. corrupted/hung PerfLib; inaccessible Event Log channel vs. event absence; PPL/process-path access denial; machine-registry view failure vs. genuine uninstall; trigger-start/DelayedAutoStart service behavior; stale Windows Time quality; EDR/NTFS sharing violation; blocked SAN/volume collection; Agent spool pending/un-ACKed state; and Windows MSI/SCM stop/reboot-required recovery. Each gives permission-safe diagnostic steps, bounded retry/backoff, escalation and a negative-proof rule against declaring endpoint DOWN or data loss from missing evidence alone.
+
 
 No installation/upgrade change is required merely by these logical features beyond their owning future BUILDs; BUILD-018/126 remain packaging/install authorities.
 

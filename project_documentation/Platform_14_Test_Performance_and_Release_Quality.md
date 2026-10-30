@@ -200,6 +200,17 @@ Applicable implementation may not be represented as production-ready until evide
 - Tier-2 hosted/on-Core/dedicated-local/no-LLM degradation behavior as applicable;
 - dedicated local/private inference provider outage (when that optional mode is enabled) proving no impact on collection, alerting, incidents, deterministic RCA, Core HA or data durability; and proving that mode is not required for EDS/base monitoring.
 
+**Mandatory real-Windows Agent test matrix for BUILD-014/015/016/018/019** (not a cross-compiled simulator-only pass):
+- Fresh signed MSI install, SCM automatic/delayed boot, update/uninstall/rollback, service recovery and stop under a blocked collector; Windows SCM wait-hint/checkpoint correctness; silent deployment without an unapproved forced reboot, and truthful reboot-required/locked-binary outcomes.
+- Service-token capability/denial matrix under local vs. domain account, virtual-account outbound network identity, domain Group Policy and restrictive EDR: PDH/PerfLib, readable vs. protected Event Log channels, SCM read, process executable path including PPL/EDR-denied paths; no blanket group/ACL escalation or debug privilege.
+- Non-English Windows Server counter paths, valid localized/English PDH paths, nonexistent/corrupt/inaccessible/stalled PerfLib providers; exact status-code handling, bounded hung-call concurrency and rapid SCM stop without losing the Agent control loop.
+- Processor-group CPU accounting on representative >64-CPU hosts or documented group-aware fixture; commit/limit/paged/nonpaged-pool and physical-memory pressure contrasted; unavailable source never becomes zero.
+- Local fixed/mounted/SAN-backed vs. mapped UNC/removable drives, blocked volume query, disk/NTFS/StorPort event provider/channel/version distinctions, quota/cancellation/suppression and no indefinite worker growth.
+- NTFS Agent spool rename/compact/delete under open handles and Defender/EDR-style sharing/lock errors; crash/restart/disk-full/replay/ACK fault injection proves no deletion of unacknowledged data and no regression of existing deletion-authorizing ACK durability.
+- On-demand Windows TCP aggregate/owner-PID IPv4/IPv6 tables with bounded high-connection-count workload and PID reuse, privacy filters, default port-range configuration changes, Event Log inaccessible/late/reordered outcomes and no per-connection EStats mutation.
+- Windows service expected-state tests for delayed/trigger/manual starts, recovery transitions, startup grace, deliberate stops, error and zero exit codes; time-service source/offset/last-sync freshness; explicit `PARTIAL`/`UNAVAILABLE` and no false host/service DOWN.
+
+
 No fixed endpoint-overhead number is asserted by documentation alone. Release certification records measured idle and triggered overhead per supported OS/profile and establishes the admissible envelope. Specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
 
 
@@ -384,6 +395,9 @@ Certification requires applicable Linux and Windows tests for:
 - normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events or fabricate first/last-seen lifecycle changes;
 - proof that typed inventory is not faked through scalar metric labels on the current Agent CollectionBatch path;
 - proof that no patch/deployment/remediation action is implied.
+
+Windows inventory certification must additionally exercise 64-bit/32-bit registry views (including dual-written and distinct bundle/MSI keys), access denied to one declared view, both views complete, unsupported MSIX/AppX sources, scoped `FULL` vs. `PARTIAL`, user profiles not loaded, `HKEY_CURRENT_USER` service-token isolation, view-qualified `native_package_id` and source-provenance preservation. A view failure must not emit any false uninstall event, and resolver-based deduplication must not change native package lifecycle truth. Read-only enumeration must never instantiate `Win32_Product`/installer repair or load offline `NTUSER.DAT`.
+
 
 Deterministic RCA certification must prove RCA remains available with contradictions/missing evidence/`INCONCLUSIVE` when software inventory/change evidence is absent; BUILD-098 evidence is consumed when available and must not be a hard runtime dependency.
 

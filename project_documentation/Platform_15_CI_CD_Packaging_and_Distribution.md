@@ -86,6 +86,11 @@ Package scripts must be idempotent and must not require a customer to run ad-hoc
 
 Runtime: `PlatformAgent.exe` (name subject to branding freeze), compiled and code-signed. GA installer: code-signed MSI. Convenience wrappers: `install-agent.bat`, `uninstall-agent.bat`, optionally parameterized for silent enterprise deployment. BAT is not the runtime binary.
 
+Windows MSI/SCM packaging (BUILD-018) shall version and attest: exact service identity/rights chosen from the BUILD-014/019 permission matrix, protected spool/config ACLs, install/upgrade/rollback identity and certificate preservation, automatic/delayed start, recovery and failure diagnostics. The MSI must **not** silently add the service identity to Performance Monitor Users or Event Log Readers, rewrite broad SCM/Event Log ACLs, grant `SeDebugPrivilege` or default to `LocalSystem`. Any additional group/channel read grant must be minimal, justified by real token tests, opted into by authorized customer administration, reversible and compatible with domain GPO.
+
+Service-control stop/drain and file replacement shall tolerate Windows sharing/lock contention using bounded retries and Windows Installer/Restart Manager semantics. No package step may delete unacknowledged Agent spool segments or purge enrollment/customer state as a workaround. Suppressed unattended reboot, explicit `3010` reboot-required (where returned), safe post-reboot resume and negative cases for an irreducible file-in-use condition must be tested; neither MSI success nor silently returned success may falsely guarantee that every deployment is reboot-free. Package logs are secret-safe and actionable.
+
+
 ## 5. Offline bundles
 
 Air-gapped release bundle contains packages, dependencies/repository metadata as required, SBOMs, notices, checksums, signatures/certificates, upgrade/rollback metadata and documentation. No runtime internet download is required.

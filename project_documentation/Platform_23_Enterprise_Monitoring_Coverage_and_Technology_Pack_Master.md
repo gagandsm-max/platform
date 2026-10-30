@@ -262,6 +262,9 @@ Minimum normalized server evidence targets, subject to OS/version/privilege capa
 
 Agent collection may provide richer/local evidence than remote collection. Product/UI/API shall disclose these differences rather than falsely claim identical raw coverage. Agentless Linux shall use governed SSH query packs; agentless Windows shall use governed WinRM/WMI/CIM query packs. Collection/credential/path failure is monitoring-health evidence and shall not automatically assert host/service failure.
 
+For the Phase-1 Windows Server and Windows Infrastructure/IIS **certification targets**, the declared compatibility matrix shall distinguish native Windows service/PDH/Event Log privileges, OS locale, local-vs-remote collection, on-demand EDS and least-privilege GPO/EDR restrictions. IIS AppPool-level monitoring must identify application pools using certified typed IIS administration/CIM interfaces (for example, the `root\WebAdministration` provider where available) and relate worker-process observations using bounded verified identity; `w3wp.exe` process name alone is not a pool/site identity. IIS authorization failures/disabled pools/recycled workers remain typed partial/stale evidence, not invented application downtime. Windows Failover Clustering/CSV, LBFO/SET teaming and broad per-user installed-software enumeration are separate versioned coverage dimensions, **not** silently guaranteed by the Phase-1 Windows Server or Windows Infrastructure pack listing. No claim is certified without its tests and supported-version/privilege matrix.
+
+
 Legacy systems must never weaken Core security defaults.
 
 ### 8.3 Virtualization

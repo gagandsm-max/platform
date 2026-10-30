@@ -532,3 +532,20 @@ P0 spikes are evidence gates, not permission to invent numeric defaults or certi
 - no Platform_24, no BUILD renumbering and no new OSS/dependency selection in this reconciliation.
 
 **Master technical decision:** At Phase-2 exit every accepted enterprise requirement class must resolve to Native—Certified, Integrated—Certified, Customer Profile—Certifiable, or Explicit Phase-2.5 deferment. This prevents paper compliance while eliminating unowned architecture-level partials.
+
+---
+
+## 26. v3.3.0 ARCH-DELEGATED Windows Agent audit disposition — 2026-10-30
+
+**Source:** Independent Windows Agent architecture audit, challenged against native Windows API/SCM/MSI behavior and existing Phase-1 contract ownership. This is a controlled clarification of BUILD-014/015/016/018/019/098 and existing REQ-INF/REQ-MIA families; no new BUILD/REQ/PRD, service, OSS dependency, architectural fork or Mother Reference version increase.
+
+| Decision | Authority | Governing outcome |
+|---|---|---|
+| Windows service token and access | ARCH-DELEGATED | Per-OS/per-operation least-privilege certification matrix; no default LocalSystem, blanket Windows group grants, SeDebug, SCM DACL rewrites or automatic Security-channel access. Select exact account only after token/network-identity, domain/GPO/EDR and read-capability tests. |
+| Native collector safety | ARCH-DELEGATED | Locale-aware PDH, supported OS APIs, processor-group correctness, bounded provider/volume hang isolation, explicit incomplete/denied quality. `PDH_CSTATUS_NO_MACHINE` is not a privilege diagnosis; `IOCTL_DISK_PERFORMANCE` is not admitted as the default passive disk API. |
+| Durable spool/SCM/MSI | ARCH-DELEGATED | Preserve deletion-ACK and replay guarantees on NTFS; handle sharing violations, close owned handles, bounded stop, signed MSI, lifecycle/rollback and explicit reboot-required outcomes. An absolute zero-reboot promise is rejected. |
+| Inventory truth | ARCH-DELEGATED | Phase-1 default Windows machine-source scope includes declared 64-bit/32-bit registry views where applicable, view-qualified native identities and Core-safe partial/full/replay semantics; inaccessible per-user hives are not an implicit FULL source. |
+| Evidence and alert truth | ARCH-DELEGATED | Expected-state/trigger-aware Windows services; time/commit/storage/TCP evidence with provider, version, permission and freshness provenance; no causal proof from event IDs or process-name-only IIS identity. |
+| Phasing | ARCH-DELEGATED within existing USER-FIXED envelopes | Windows Server and Windows Infrastructure/IIS remain Phase-1 *certification targets*, not GA claims. WSFC/CSV, NIC teaming, comprehensive per-user inventory and pending-reboot reconciliation are **not** expanded into universal Phase-1 Agent requirements by this audit. Later scope requires pack/profile acceptance and dedicated gates. |
+
+Independent implementation review and real Windows certification are mandatory before any production support claim. This decision does **not** assert that the Windows Agent currently implements these contracts.
