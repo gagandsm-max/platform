@@ -2244,8 +2244,8 @@ sequenceDiagram
     S1->>T: Final probe packet
     T-->>S1: Port unreachable / TCP SYN-ACK / Echo reply
     S1->>S1: Compute hop RTT min/mean/max, packet loss, jitter
-    S1->>S1: Calculate path fingerprint (hash of responsive hops)
-    S1->>S1: Detect fingerprint change -> emit PathChangeEvidence
+    S1->>S1: Calculate candidate path fingerprint + path_identity_quality / comparison_eligible
+    S1->>S1: If BOTH baseline and current are comparison-eligible and qualified delta exists -> emit PathChangeEvidence
   and Sensor 2 probing
     S2->>NET: Send flow-stable traceroute probes from Vantage 2
     NET-->>S2: Hop responses
@@ -2262,9 +2262,10 @@ sequenceDiagram
 ```
 
 Rules:
-- Flow-stable probing techniques (evaluated in BUILD-040) maintain constant flow identifiers across probes, avoiding ECMP routing artifacts.
-- Unresponsive intermediate hops or middlebox ICMP suppressions set `hop_state = UNRESPONSIVE` and do NOT assert target DOWN.
-- Multi-vantage divergence (e.g. Vantage 1 degraded, Vantage 2 normal) preserves independent results and contradiction evidence.
+- Flow-stable probing techniques are evaluated in BUILD-040 to reduce false multipath artifacts by preserving protocol-relevant flow identifiers where feasible. They do **not** guarantee identical physical paths under per-packet ECMP, NAT/middleboxes, MPLS, IPv6 Flow Label behaviour, ICMP CoPP or return-path asymmetry.
+- Ambiguous/unpinned/insufficient/unqualified path observations are first-class machine-readable quality evidence (`path_identity_quality`, `comparison_eligible` per `Platform_17` §11.3). A path fingerprint may describe an observed candidate path but MUST NOT assert topology or latency/loss change when the observation is not comparison-eligible. Absent optional quality metadata is treated as not comparison-eligible. `PathChangeEvidence` requires **both** baseline and current observations to be qualified and comparable. Fingerprint-only change emitters are not safe. Uncertain multipath MUST NOT produce false `PATH_DIVERGENCE`, `RTT_SHIFT`, `LOSS_ANOMALY` or `DEVICE_DOWN`.
+- Unresponsive intermediate hops or middlebox ICMP suppressions set `hop_state = UNRESPONSIVE`/`HIDDEN` as applicable and do NOT assert target DOWN.
+- Multi-vantage divergence (e.g. Vantage 1 degraded, Vantage 2 normal) preserves independent results and contradiction evidence. Existing `schema_version` and BUILD-040 ownership are retained; optional quality fields are additive.
 
 ---
 

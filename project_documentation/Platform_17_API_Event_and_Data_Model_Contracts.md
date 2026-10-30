@@ -668,7 +668,7 @@ In accordance with Platform security threat models (`Platform_18`), the followin
 
 #### 11.3.1 Active path hop-by-hop observation contract
 
-Sensor-executed active path probes emit structured hop sequences and path-level performance facts:
+Sensor-executed active path probes emit structured hop sequences and path-level performance facts. `path_summary.status` remains the probe-completion outcome. Path **identity/quality** and **comparison eligibility** are a separate machine-readable dimension (orthogonal to completion status) so AMBIGUOUS/UNPINNED/INSUFFICIENT/UNQUALIFIED observations are first-class evidence without overloading `COMPLETE|PARTIAL|TARGET_UNREACHABLE|FAILED` or inventing a breaking `schema_version` migration.
 
 ```text
 ActivePathObservation:
@@ -690,9 +690,14 @@ ActivePathObservation:
     end_to_end_rtt_max_ms:  float32 (nullable, null if target unreachable or unmeasured)
     end_to_end_loss_pct:    float32 (nullable, null if unmeasured)
     jitter_ms:              float32 (nullable, null if insufficient samples)
-    path_fingerprint:       string (opaque, versioned, deterministic path fingerprint; algorithm selected and implemented by BUILD-040)
+    path_fingerprint:       string (opaque, versioned, deterministic fingerprint of the observed candidate hop sequence; algorithm selected and implemented by BUILD-040. Describes a candidate observation identity only. MUST NOT be used alone to assert topology change, RTT/loss change or PathChangeEvidence.)
     fingerprint_version:    string (e.g. "1")
     status:                 "COMPLETE" | "PARTIAL" | "TARGET_UNREACHABLE" | "FAILED"
+    # Optional identity/quality metadata — backward-compatible additions under schema_version "1.0".
+    # Absent metadata MUST be treated conservatively (see §11.3.3). Do not claim mixed-version
+    # change-emission safety for consumers that still emit PathChangeEvidence from fingerprint deltas alone.
+    path_identity_quality:  "PINNED" | "AMBIGUOUS" | "UNPINNED" | "INSUFFICIENT" | "UNQUALIFIED" (optional)
+    comparison_eligible:    boolean (optional; true ONLY when the producer asserts this observation is qualified and comparable under BUILD-040 rules for topology and latency/loss comparison)
   hops:
     - hop_index:            uint8 (bounded hop index; max/probe limits governed by BUILD-040 policy and certification)
       hop_ip:               string (nullable IPv4 or IPv6 canonical string; null if unresponsive or hidden)
@@ -710,9 +715,16 @@ ActivePathObservation:
       is_hidden:            boolean (true if router suppresses TTL expiry)
 ```
 
+**Identity/quality and comparison eligibility (machine-readable):**
+- `path_identity_quality = PINNED` means the observation is sufficiently flow-stable/pinned for BUILD-040-qualified geometry comparison.
+- `AMBIGUOUS` / `UNPINNED` / `INSUFFICIENT` / `UNQUALIFIED` mean the fingerprint may still describe the observed candidate path but the observation is **not** eligible to assert topology or latency/loss change.
+- `comparison_eligible = true` requires `path_identity_quality = PINNED` and BUILD-040-qualified sample sufficiency for the comparison class being considered. Producers MUST set `comparison_eligible = false` (or omit it) whenever quality is not `PINNED`.
+- When `path_identity_quality` or `comparison_eligible` is **absent** (older producer): consumers MUST treat the observation as **not comparison-eligible** (`UNQUALIFIED` / `comparison_eligible = false`). Fingerprint presence alone never upgrades eligibility.
+- When an older consumer cannot evaluate these fields: it MUST NOT emit `PathChangeEvidence` from fingerprint deltas. Claiming “schema compatible” while still creating false change events from fingerprint-only logic is prohibited.
+
 #### 11.3.2 Path change event contract
 
-When the path fingerprint changes between consecutive probing intervals or deviates from the established baseline, the Sensor or Core generates a versioned internal change event (physical Kafka topic naming, partitioning, and serialization owned by BUILD-063):
+`PathChangeEvidence` may be emitted **only** when **both** the baseline (previous) and current `ActivePathObservation` are comparison-eligible (`comparison_eligible = true` and `path_identity_quality = PINNED`) under the same `fingerprint_version` / BUILD-040 comparison class, and a qualified topology or latency/loss delta is observed. A fingerprint difference, incomplete path, AMBIGUOUS/UNPINNED/INSUFFICIENT/UNQUALIFIED observation, or absent quality metadata MUST NOT authorize `PATH_DIVERGENCE`, `HOP_ADDED`, `HOP_REMOVED`, `RTT_SHIFT`, `LOSS_ANOMALY` or fabricated `DEVICE_DOWN`. Physical Kafka topic naming, partitioning and serialization remain owned by BUILD-063:
 
 ```text
 PathChangeEvidence:
@@ -733,11 +745,16 @@ PathChangeEvidence:
   delta_rtt_ms:             float32 (nullable)
   delta_loss_pct:           float32 (nullable)
   correlation_id:           string
+  # Optional emission provenance — absent on older producers; consumers must still enforce the dual-observation eligibility gate above.
+  baseline_path_identity_quality: "PINNED" (optional; when present must be PINNED for a valid emission)
+  current_path_identity_quality:  "PINNED" (optional; when present must be PINNED for a valid emission)
 ```
 
 #### 11.3.3 Operational and causal integrity rules
 
-- **Incomplete Path != Target Down:** An unresponsive intermediate hop or incomplete traceroute (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
+- **Incomplete Path != Target Down:** An unresponsive intermediate hop or incomplete traceroute (e.g. intermediate ICMP suppression, CoPP or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
+- **Ambiguous / unpinned path quality (machine-readable):** Flow-stable probing is an evaluation technique under BUILD-040 ownership; it does not guarantee identical physical paths. When ECMP/per-packet balancing, NAT/middleboxes, MPLS, IPv6 Flow Label behaviour, ICMP CoPP or return-path asymmetry prevent a pinned observation, emit `path_identity_quality` of `AMBIGUOUS` / `UNPINNED` / `INSUFFICIENT` / `UNQUALIFIED` as applicable and set `comparison_eligible = false` (or omit it). A `path_fingerprint` may describe the observed candidate path but MUST NOT be used to assert topology or latency/loss change, and MUST NOT produce false `PATH_DIVERGENCE`, `RTT_SHIFT`, `LOSS_ANOMALY` or `DEVICE_DOWN`. Existing `schema_version` `"1.0"` and mandatory field requirements are preserved; optional quality/eligibility fields are additive. Mixed-version safety is conservative: absent optional metadata ⇒ not comparison-eligible; fingerprint-only change emitters are not safe.
+- **PathChangeEvidence dual-qualification gate:** Emit only when **both** baseline and current observations are qualified and comparable. Otherwise retain quality/uncertainty evidence on the observations themselves.
 - **Multi-Vantage Contradiction Preservation:** Divergence between probes from different Sensors (e.g. Sensor-A sees 100% loss at transit hop 4, Sensor-B reaches target normally) represents an upstream routing or peering anomaly, not target failure. Contradictions must be preserved and surfaced to RCA as evidence.
 
 ### 11.4 Distributed trace reference contract
@@ -915,9 +932,9 @@ Change Assurance APIs and NCM privileged-execution contracts retain maker-checke
 
 ### 13.9 Flow ingress, template validity and sampling data contract — 2026-10-30 Network Sensor audit
 
-This refines the existing Flow/NTA/tenant/data-integrity contracts; it does not authorize a new ingest protocol, database or shared-MSP deployment. Every canonical Flow observation must bind the trusted ingress/Sensor/tenant context and resolved exporter/observation-domain identity separately from untrusted packet source attributes. The raw event retains protocol/version, source and destination collector transport context where applicable, source ID/Observation Domain, template/options identity and accepted version/lifetime/refresh/epoch evidence, sequence/gap/duplicate/unknown-template accounting, and raw capture/export times. An ambiguous tenant/exporter binding must fail closed or quarantine without misattributing a record to another customer.
+This refines the existing Flow/NTA/tenant/data-integrity contracts and reconciles `Platform_05` §5.4 `network_flow` field semantics; it does not authorize a new ingest protocol, database, storage dependency, shared-MSP deployment or breaking schema migration. Every canonical Flow observation must bind independently verified ingress context, routing domain and authorization plus resolved exporter/observation-domain identity separately from untrusted packet source attributes. A bare UDP port is not a trusted isolation boundary. The raw event retains protocol/version, source and destination collector transport context where applicable, source ID/Observation Domain, template/options identity and accepted version/lifetime/refresh/epoch evidence, sequence/gap/duplicate/unknown-template accounting, and raw capture/export times. An ambiguous tenant/exporter binding must fail closed or quarantine without misattributing a record to another customer. Quarantined/unmapped traffic must not produce canonical Flow analytics. Phase 1 covers intra-tenant overlapping RFC1918/VRF spaces on verified ingress contexts; MSP/shared-customer isolation certification remains Phase 1.5.
 
-The template used for decoding must be valid for the exporter transport/session/observation-domain and event window; a restart-persisted dictionary is not an authoritative substitute for newly validated exporter context. Unknown, expired, conflicting or missing templates produce explicit loss/quality evidence rather than fabricated decoded flow rows. Sampling metadata preserves selector/algorithm, rate/interval/probability, scope and valid time window where available. Raw exported counters are immutable source facts; any sampling-normalized/estimated bytes, packets, rates or utilization carry distinct derived identity, estimation method, source sampling provenance and a separate estimation indicator alongside the applicable existing quality state (such as `UNKNOWN` or `PARTIAL`). No blanket multiplication or duplicate normalization is permitted. Authenticated Sensor→Core mTLS does not make unauthenticated exporter UDP data intrinsically trusted.
+The template used for decoding must be valid for the exporter transport/session/observation-domain and event window. Data Templates and Options Templates share one Template ID namespace per Observation Domain/exporter scope. Under UDP, enforce refresh/redefinition semantics and **ignore UDP Template Withdrawal messages**. After collector restart, do not decode UDP Data Sets using an unvalidated persisted template; require appropriate live template validation/session continuity. Unknown, expired, conflicting or missing templates produce explicit loss/quality evidence rather than fabricated decoded flow rows. Sampling metadata preserves selector/algorithm, rate/interval/probability, scope, observation-domain identity and valid time window where available. Distinguish **sFlow sampled-frame evidence**, **sFlow interface/device counter samples**, and IPFIX/NetFlow flow counters: an sFlow Counter sample is not an ordinary per-flow `network_flow` fact and must use existing typed metric/device-counter evidence paths (no new database). sFlow sampled header **capture length** is not automatically original packet/frame octet length; preserve original frame length only where the protocol supplies it and it is qualified. Never interpret cumulative sFlow interface counters as per-flow `bytes`/`packets`, nor scale those counters by packet sample rate. Raw exported `bytes`/`packets` (or sFlow qualified sampled-frame length evidence) are immutable source facts and must not be silently overloaded with estimates; any sampling-normalized/estimated bytes, packets, rates or utilization use separately identified fields (`bytes_estimated`/`packets_estimated` or equivalent), estimation method, source sampling provenance and a separate estimation indicator alongside the applicable existing quality state (such as `UNKNOWN` or `PARTIAL`). No blanket multiplication or duplicate normalization is permitted. Authenticated Sensor→Core mTLS does not make unauthenticated exporter UDP data intrinsically trusted.
 
 ## 14. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
 
