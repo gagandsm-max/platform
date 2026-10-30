@@ -211,6 +211,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     artifacts = [repo / name for name in args.artifact]
     findings, visited = scan(repo, paths, artifacts)
+    if visited == 0:
+        print("[ERROR] No product files were scanned", file=sys.stderr)
+        return 2
     for finding in findings:
         print(f"[ERROR] {finding.problem} at {finding.path!r}", file=sys.stderr)
     if findings:
