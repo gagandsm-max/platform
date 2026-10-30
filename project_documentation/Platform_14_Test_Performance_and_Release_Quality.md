@@ -512,3 +512,54 @@ Phase 2 cannot be certified complete until a representative large-enterprise pro
 The profile shall cover representative multi-DC/DR/branch, large-estate inventory, network, Windows/Linux plus declared Unix coverage, virtualisation/HCI, hardware/OOB, storage/SAN, Oracle-class and additional databases, middleware, backup/data protection, Kubernetes, AWS/Azure/GCP/OCI, Flow/log/OTel, CMDB/ITSM, external APM, external NPM/DPI and SIEM evidence, regulated data boundaries, HA/DR, retention/archive, concurrent NOC users and connector failure/degradation.
 
 Certification requires exact product/version/collection-mode matrices, tenant/security negatives, stale/missing/contradictory evidence, API throttling, replay/idempotency, upgrade compatibility, scale/cardinality, retention, failure/recovery and operator workflows. Full native APM and full native DPI are explicitly **not** ECRP-P2-v1 requirements.
+
+---
+
+## Issue #272 certification extension
+
+### Strengthened ECRP-P2-v1
+
+At Phase-2 exit, **no accepted enterprise requirement may remain an unresolved architecture-level Partial**.
+
+Each requirement class must resolve to:
+- **Native — Certified**;
+- **Integrated — Certified**;
+- **Customer Profile — Certifiable**;
+- **Explicit Phase-2.5 deferment**.
+
+Customer-specific absolute SLA claims remain separately negotiated and evidenced.
+
+### DORP-P2.5-v1 — Deep Observability Readiness Profile
+
+`DORP-P2.5-v1` is a certification profile, **not a BUILD ID**.
+
+A Phase-2.5 native deep-observability completion claim is prohibited until representative evidence covers:
+
+**APM pillar**
+1. supported instrumentation runtimes and version matrix;
+2. service/resource identity and tenant isolation;
+3. distributed trace/transaction correctness;
+4. adaptive sampling/cardinality/backpressure;
+5. errors, DB/external calls and service dependencies;
+6. continuous CPU/memory/allocation/thread/lock profiling;
+7. browser/mobile RUM and Core Web Vitals where enabled;
+8. consent/privacy-governed session replay where enabled;
+9. secret/PII redaction;
+10. trace/profile/log/metric/change/incident correlation;
+11. agent/collector outage, upgrade/rollback and compatibility.
+
+**DPI / Network Performance Intelligence pillar**
+1. SPAN/TAP/vTAP/packet-broker ingest;
+2. supported line-rate/capture-loss envelope;
+3. packet metadata/flow reconstruction;
+4. L2-L7 decoder correctness;
+5. TCP/DNS/TLS/HTTP network-performance diagnostics;
+6. network-versus-application response decomposition;
+7. packet-to-service/trace correlation;
+8. bounded PCAP retention/retrieval;
+9. payload masking and tenant/RBAC isolation;
+10. controlled TLS-decryption authorization/key-custody tests where enabled;
+11. capture/storage exhaustion and degraded-mode behavior;
+12. upgrade/rollback and decoder compatibility.
+
+The gate SHALL include scale/load/soak, failure/recovery, security, privacy, tenant-negative, retention, migration/upgrade and operator-workflow evidence.

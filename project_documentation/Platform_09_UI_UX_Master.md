@@ -7527,3 +7527,13 @@ Phase-2 UI shall expose enterprise coverage truth instead of generic vendor badg
 - Enterprise Technology views for database, storage/SAN, middleware, backup/data protection and multi-cloud.
 - External evidence is visibly source-labelled; external APM/NPM/DPI conclusions are not presented as native Platform truth.
 - APM/DPI native-only controls are absent in Phase 2; UI must not imply bytecode instrumentation, RUM/session replay or continuous DPI availability.
+
+---
+
+## Issue #272 UI/UX roadmap
+
+Phase 2 UI SHALL expose honest capability/certification state and customer-profile scope.
+
+Phase 2.5 planning SHALL include role-aware deep-observability experiences for application/service transaction traces, service maps and trace-waterfall correlation, errors/exceptions, continuous profiles/flame graphs, browser/mobile experience and user journeys, packet-derived network/application response analysis, packet conversations/transactions and historical investigation, and evidence linkage from trace/profile/packet findings into Investigation/RCA.
+
+Raw payload/session-replay visibility SHALL be privacy-, tenant- and RBAC-governed and must not be exposed by default.

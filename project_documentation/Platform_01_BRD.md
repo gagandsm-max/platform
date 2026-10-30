@@ -788,3 +788,15 @@ Phase 2 shall cover, directly or through certified integrations, heterogeneous i
 **Deliberate exclusions through Phase 2:** full native APM and full native always-on DPI/deep packet analytics. These are Phase 2.5+ product domains. Phase 2 shall remain capable of integrating external APM/NPM/DPI products and correlating their telemetry/evidence inside the AmrudAi graph, incident and RCA model.
 
 Commercial readiness principle: named vendor/family support is insufficient. Exact product/version, collection mode, privilege, topology, monitoring depth, diagnostics, security, upgrade compatibility and certification evidence must be publishable from one governed compatibility source.
+
+---
+
+## Issue #272 business outcome — planned closure of enterprise requirement gaps
+
+AmrudAi SHALL advance-plan every accepted recurring enterprise monitoring/ITOM/AIOps requirement even when implementation or certification is deferred. By Phase-2 exit, no accepted requirement class may remain an architecture-level unowned partial; it must be native-certified, integrated-certified, customer-profile-certifiable, or explicitly deferred to Phase 2.5.
+
+Phase 2.5 SHALL provide the planned native deep-observability expansion:
+- full native APM/RUM/profiling;
+- full native DPI/continuous packet-derived Network Performance Intelligence.
+
+This roadmap outcome does not authorize universal customer SLA promises, customer-specific source forks, or unsupported delivery/compliance claims.

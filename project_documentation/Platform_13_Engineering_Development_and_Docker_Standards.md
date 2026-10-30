@@ -164,3 +164,11 @@ Agent business logic and cross-compilation can run in Docker. Final Windows Serv
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
 Phase-2 enterprise breadth MUST NOT be implemented as customer-specific Core forks, duplicate services or dependency sprawl. Prefer Capability Packs, Integration Packs, versioned schemas and policy/configuration. Every new vendor adapter requires an actual supported API/protocol path, bounded failure behavior, tests, observability and exact-version compatibility evidence. Phase-2.5+ APM/DPI work is not an excuse to introduce its runtime/dependency footprint into Phase 2.
+
+---
+
+## Issue #272 engineering guardrails
+
+Future Phase-2.5 implementation SHALL reuse existing identity/RBAC/tenancy/audit/graph/evidence contracts, avoid customer-specific forks, isolate high-volume trace/profile/packet workloads from control-plane correctness, add dependencies only through explicit admission, include deterministic fixtures for trace/RUM/profile/packet parsing, include privacy/redaction/security tests and preserve offline/air-gap build/test paths where the certified deployment profile requires them.
+
+Generated instrumentation/decoder code or third-party agents may not bypass repository quality/security gates.
