@@ -111,6 +111,7 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
     try:
         if zipfile.is_zipfile(path):
             with zipfile.ZipFile(path) as archive:
+                regular_payloads = 0
                 for info in archive.infolist():
                     member_label = f"{label}!{info.filename}"
                     findings.extend(inspect_bytes(member_label, info.filename.encode("utf-8")))
@@ -119,6 +120,7 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                     if stat.S_ISLNK(info.external_attr >> 16):
                         findings.append(Finding(member_label, "UNSCANNABLE: symbolic-link ZIP member"))
                         continue
+                    regular_payloads += 1
                     if info.filename.lower().endswith(NESTED_ARCHIVES):
                         findings.append(Finding(member_label, "UNSCANNABLE: nested package/archive"))
                     consumed += info.file_size
@@ -127,9 +129,12 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                         continue
                     with archive.open(info) as member:
                         findings.extend(inspect_bytes(member_label, member.read(MAX_MEMBER_BYTES + 1)))
+                if regular_payloads == 0:
+                    findings.append(Finding(label, "UNSCANNABLE: empty or directory-only archive payload"))
             return findings
         if tarfile.is_tarfile(path):
             with tarfile.open(path, mode="r:*") as archive:
+                regular_payloads = 0
                 for info in archive:
                     member_label = f"{label}!{info.name}"
                     findings.extend(inspect_bytes(member_label, info.name.encode("utf-8")))
@@ -140,6 +145,7 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                     if not info.isfile():
                         findings.append(Finding(member_label, "UNSCANNABLE: nonregular archive member"))
                         continue
+                    regular_payloads += 1
                     consumed += info.size
                     if info.size > MAX_MEMBER_BYTES or consumed > MAX_ARTIFACT_BYTES:
                         findings.append(Finding(member_label, "UNSCANNABLE: decompression size limit"))
@@ -150,6 +156,8 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                         continue
                     with member:
                         findings.extend(inspect_bytes(member_label, member.read(MAX_MEMBER_BYTES + 1)))
+                if regular_payloads == 0:
+                    findings.append(Finding(label, "UNSCANNABLE: empty or directory-only archive payload"))
             return findings
     except (OSError, EOFError, RuntimeError, ValueError, zipfile.BadZipFile, tarfile.TarError):
         return [Finding(label, "UNSCANNABLE: corrupt or unreadable archive")]

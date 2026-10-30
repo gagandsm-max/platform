@@ -143,6 +143,43 @@ class BrandHygieneTest(unittest.TestCase):
             path.touch()
             self.assertTrue(any("UNSCANNABLE" in item.problem for item in inspect_archive(path, path.name)))
 
+    def test_valid_empty_zip_archive_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "empty-valid.zip"
+            with zipfile.ZipFile(path, "w"):
+                pass
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("empty or directory-only archive payload" in item.problem for item in findings))
+
+    def test_valid_empty_tar_archive_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "empty-valid.tar"
+            with tarfile.open(path, "w"):
+                pass
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("empty or directory-only archive payload" in item.problem for item in findings))
+
+    def test_directory_only_zip_archive_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "dirs-only.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("release/", b"")
+                archive.writestr("release/assets/", b"")
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("empty or directory-only archive payload" in item.problem for item in findings))
+
+    def test_directory_only_tar_archive_fails_closed(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "dirs-only.tar"
+            with tarfile.open(path, "w") as archive:
+                for name in ("release", "release/assets"):
+                    info = tarfile.TarInfo(name)
+                    info.type = tarfile.DIRTYPE
+                    info.mode = 0o755
+                    archive.addfile(info)
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("empty or directory-only archive payload" in item.problem for item in findings))
+
     def test_empty_artifact_directory_fails_closed(self):
         with tempfile.TemporaryDirectory() as temp:
             repo = Path(temp)
