@@ -382,10 +382,17 @@ source_protocol
 
 ### 5.4 `network_flow`
 
+Logical ClickHouse/analytics fact shape for authorized **per-flow / sampled-frame Flow** evidence. Field semantics are reconciled with `Platform_17` §13.9. This is not a breaking physical schema migration and does not introduce a new database, storage dependency or mandatory physical column set.
+
+**sFlow evidence-class separation (mandatory):** An sFlow **interface/device Counter sample** is **not** an ordinary per-flow `network_flow` fact. Counter samples map to existing typed metric / device-counter evidence paths already owned by SNMP/metric contracts (no new database). Only IPFIX/NetFlow flow records and sFlow **sampled-frame** (flow-sample) evidence that carry qualified flow-tuple semantics may populate this fact shape. Never interpret cumulative sFlow interface counters as per-flow `bytes`/`packets`, and never scale those cumulative counters by the packet sample rate.
+
 ```text
 tenant_id
 exporter_entity_id
 sensor_id
+trusted_ingress_id          # independently verified listener/interface/VRF/routing-domain/authorization context
+exporter_observation_domain_id  # Observation Domain / Source ID where protocol supplies it
+exporter_authority_id        # resolved authorized exporter; never bare UDP source alone
 start_ts
 end_ts
 src_ip
@@ -393,8 +400,13 @@ dst_ip
 src_port
 dst_port
 protocol
-bytes
-packets
+bytes                       # immutable raw exported octet evidence (IPFIX/NetFlow) OR sFlow original/reported frame length ONLY where the protocol supplies a qualified original frame length; sampled header capture length MUST NOT be treated as original frame octets; never silently replaced by an estimate
+packets                     # immutable raw exported packet evidence (IPFIX/NetFlow) OR sFlow sampled-frame packet evidence where protocol-qualified; never silently replaced by an estimate; never derived by treating sFlow interface counters as per-flow packets
+bytes_estimated nullable    # separately identified estimate only when sampling/selection provenance justifies scaling of a qualified flow/sampled-frame observation; never by scaling sFlow interface counters by packet sample rate
+packets_estimated nullable  # separately identified estimate; distinct from raw bytes/packets
+estimation_method nullable  # method/indicator for any estimate; absent when no estimate is emitted
+sampling_selector           # selector/algorithm/interval/probability/scope/validity where available
+flow_evidence_class         # IPFIX_COUNTER | NETFLOW_COUNTER | SFLOW_SAMPLED_FRAME | OTHER_QUALIFIED — SFLOW_COUNTER interface/device samples are out of this fact shape
 ingress_if_id
 egress_if_id
 src_site_id/dst_site_id nullable
@@ -403,8 +415,11 @@ vrf_id nullable
 src_asn/dst_asn nullable
 app_id nullable if exporter supplied
 flow_type
-sequence/template metadata
+sequence/template metadata  # protocol/version, template/options identity, refresh/epoch, gap/duplicate/unknown-template accounting
+quality                     # existing quality vocabulary; quarantined/unmapped traffic MUST NOT become canonical analytics rows
 ```
+
+Quarantined, unauthorized or ambiguously mapped Flow datagrams may produce loss/quality/collector-health evidence only. They must not populate canonical `network_flow` analytics as if tenant/exporter authority were proven. sFlow Counter-sample metrics remain separately qualified typed evidence and must preserve immutable raw source counter values distinct from any separately identified estimates.
 
 ### 5.5 `event_raw`
 
@@ -824,6 +839,8 @@ Capability/Device Packs compile Monitor Definitions into bounded poll groups. Th
 
 The planner consumes Device Pack compatibility metadata, observed response size/RTT/error history and current Sensor capacity. It may reduce bulk repetitions after `tooBig`/fragmentation-risk evidence and may fall back from GETBULK only according to bounded certified policy. It may not create an unbounded retry or adaptive-poll loop.
 
+**Adaptive PDU / GETBULK safety clarification (2026-10-30 Network Sensor audit remediation):** Learn bounded GETBULK/PDU limits per effective device, protocol/security context and relevant table/subtree/poll-plan compatibility profile. Per RFC 3416, a shorter-than-requested, ragged or empty **well-formed** `noError` GETBULK Response-PDU can be a valid completed response when end-of-view (`endOfMibView`) and lexicographic progress / subtree rules remain coherent; do not force such responses into a generic failure class solely because fewer varbinds were returned than requested. Preserve **per-column cursor progress** and subtree/OID-group boundaries across repetitions so one finished column cannot erase sibling progress or walk outside the intended MIB subtree. Detect non-advancing lexicographic loops (repeated OID/value without progress) and terminate that column/group with explicit quality/error evidence rather than spinning. **Do not silently accept as valid completed responses:** malformed ASN.1/BER, wire-truncated or oversize datagrams that fail bounded decode, or lexicographic non-progress / subtree violations—these are protocol/decode failures with typed quality/error evidence. The phrase **inconsistent varbind counts/layouts** applies only to structurally corrupt responses that are **not** well-formed under the RFC 3416 rules above; it must **not** classify RFC 3416-permitted well-formed shorter-than-requested, ragged or empty `noError` GETBULK Response-PDUs as protocol corruption. Provide bounded GETNEXT and/or narrower OID-group fallback only under certified policy. Use differential response-size / `tooBig` / fragmentation evidence when adapting repetitions; a generic timeout caused by reachability, authentication, rate limiting, device load or CoPP must **not** be labelled automatically as PMTU/MTU/PDU-size failure. Any reduction, cautiously governed upward probe, GETNEXT fallback, cache expiry or invalidation must preserve table traversal/progress, OID coverage, worker budgets, freshness and measured error classification. Device firmware/Pack/profile changes must invalidate incompatible learned state. No universal max-repetitions ladder, fixed 24-hour lock, hardcoded timeout/EPS/IOPS/per-class quota claim or unbounded adaptive retry is selected without representative-device certification.
+
 The normal scheduled SNMP operational-metric default is **5 minutes**. That default does **not** require polling every available OID every five minutes; Cap Pack/monitor definitions drive which objects are collected and how often. Availability/liveness remains a separate plane. Configured intervals are durations under the existing policy hierarchy, not a rigid database enum. Exact generic scheduler hash/algorithm details are out of scope here; SNMP spreading must remain deterministic/stable and compatible with later scheduler reconciliation.
 
 ### 12.3 Typed observation contract
@@ -909,6 +926,8 @@ Scheduled jobs carry Credential Profile identity/reference and authorization con
 
 No default `public` community fallback is permitted.
 
+**Secret materialization/crash-safety clarification:** Use the shortest practicable execution lifetime and avoid long-lived, cross-job or cross-tenant plaintext caches. Go strings, garbage collection and best-effort buffer clearing cannot be represented as guaranteed zeroization. Community/auth/privacy material must not reach structured logs, panic/error output, telemetry, support bundles, audit payloads or durable scheduler desired-state / assignment files (Credential Profile references and authorization context only). Production Sensor service policies must reconcile crash-dump and diagnostics policy with **OS-specific dumpability controls** that are validated on the certified Linux packaging/runtime profile (for example process dumpability, ulimit/core-pattern and package/unit hardening where applicable); do not force untested global directives that the target OS/service manager does not honour. Limit filesystem access to any crash/support artifacts and prove negative leakage tests. A safer mutable secret buffer may be used where the approved protocol library permits it; no claim of guaranteed in-memory erasure is made.
+
 ### 12.8 SNMP trap/inform receiver
 
 Authoritative successful Inform path:
@@ -935,7 +954,7 @@ Distinguish:
 1. **pre-ACK bounded storm admission/accounting** — the admission/accounting decision that determines whether the notification is durably accepted (accepted raw event **or** durable bounded storm-aggregation/accounting record) and therefore whether a successful Inform ACK may be sent;
 2. **post-ACK semantic dedup/correlation** — MIB/Capability Pack enrichment, final entity resolution and semantic fingerprinting/correlation that may proceed after ACK from the durably preserved source record.
 
-For v1/v2c UDP traps, source IP/community/enterprise OID are evidence and do not constitute strong cryptographic identity. SNMPv3 notifications validate USM/security configuration where enabled.
+For v1/v2c UDP traps and SNMPv2c Informs, source IP/community/enterprise OID are **weak attribution evidence only** and MUST NOT be described as cryptographically authenticated identity. SNMPv3 notifications validate USM/security configuration where enabled.
 
 **Trap** is unacknowledged protocol behavior.
 
@@ -952,7 +971,18 @@ Only after durable local acceptance/accounting succeeds may Platform send a succ
 
 Inform ACK means `LOCAL RECEIVER ACCEPTED/ACCOUNTED`. It does **not** mean Core completed, Kafka completed, ClickHouse completed, alert generated or incident generated. This boundary is distinct from the Sensor→Core telemetry ACK model.
 
-Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, pre-ACK storm admission/aggregation, failed durable acceptance and enrichment unavailable after durable acceptance.
+**SNMPv3 Inform engine and idempotency clarification (RFC 3414 §2.2.2-aligned):** The Inform receiver maintains a **persistent, unique, authoritative local `snmpEngineID`**. Distinguish **normal restart** from **loss / corruption / rollback** of nonvolatile engine state:
+
+1. **Normal restart with a known, valid persisted `snmpEngineBoots` value:** the authoritative receiver MUST retrieve that value, **monotonically advance** `snmpEngineBoots` by one, **persist** the advanced value to nonvolatile storage, and reinitialize `snmpEngineTime` (reset to zero and resume incrementing) consistent with RFC 3414 §2.2.2 so discovery and authenticated peers observe a coherent engine lifecycle. Never decrement, roll back or invent a boots value when the prior persisted value is known and valid.
+2. **Latest `snmpEngineBoots` cannot be determined** (nonvolatile loss, corruption, rollback or other inability to establish the latest value): per RFC 3414 §2.2.2 the receiver MUST set `snmpEngineBoots` to **2147483647**. That value **latches** and is a **fail-closed** condition: every authenticated message causes a `notInTimeWindow` authentication failure. While latched, the receiver MUST **not** return successful authenticated Inform ACKs. Recovery requires **controlled manual reconfiguration** using either a **new unique `snmpEngineID`**, or **new authentication and privacy protocol secrets** (for protocols actually configured) for **all users known to that authoritative SNMP engine**; never permit partial user rotation. Never recover by guessing, inventing or “advancing past” an unknown engine boot count.
+
+The receiver's local `snmpEngineID` identifies the Platform Inform listener only; it is **not** a unique sender/notifier identifier for received Inform messages. USM discovery / engine-time exchange responses are **distinct** from Inform acknowledgement: discovery traffic must not be treated as durable event acceptance, and Inform ACK must not be returned before qualifying durable local acceptance/accounting. Bounded durable **retry idempotency** for SNMPv3 Informs uses the **ScopedPDU `request-id`**, authenticated securityName / security-level / context identity, and canonical notification payload evidence as the business-notification fingerprint—not the outer SNMPv3 `msgID`, and not USM discovery traffic—but that fingerprint alone does **not** uniquely identify a notifier when multiple devices share the same USM security principal. Durable deduplication MUST be scoped to an **independently qualified tenant/notifier identity** established through governed authentication, admission and source binding. A shared USM `securityName` or an unverified UDP source address MUST NOT be equated with cryptographically unique device identity. Two separately admitted notifiers that produce identical request-id, security context and notification payloads MUST retain **independent durable event evidence**.
+
+**Retransmission versus separately occurring notifications (same qualified notifier):** A **genuine retransmission** of the same Inform occurrence from the same qualified notifier MAY be deduplicated under the bounded durable policy while preserving durable occurrence accounting, source evidence and critical-transition evidence. Separately occurring notifications from the same qualified notifier after **request-id reuse** (or other non-unique occurrence identity) MUST NOT be collapsed solely because the fingerprint matches a prior durable record when available evidence indicates a distinct occurrence, timing window, source observation or critical transition; preserve durable occurrence accounting, source evidence, ambiguity state and distinct critical-transition evidence. Do **not** promise impossible cryptographic differentiation when two **wire-identical** notifications contain no unique occurrence identity beyond the fingerprint already used; in that undecidable case retain fail-closed ambiguity/accounting behaviour rather than inventing an occurrence discriminator the wire does not provide. If notifier identity is ambiguous, never collapse distinct sources into one event and never acknowledge a silently discarded notification; enforce the existing fail-closed attribution and durable-acceptance boundary. For SNMPv2c Informs, retry/dedup may use weak source/community/context plus request-id and payload evidence where configured, but that attribution remains non-cryptographic and remains subject to the same fail-closed ambiguous-identity rule. Distinct critical events must remain distinguishable before semantic enrichment. Never silently discard Informs that have already received a successful durable-acceptance ACK; post-ACK shedding may delay enrichment/forwarding under resource pressure but must retain recoverable durable evidence or surface explicit durable-loss diagnostics. No ACK before qualifying durable local acceptance. Negative acceptance evidence is required for **same-notifier retransmission**, **same-notifier request-id reuse / distinct-occurrence ambiguity**, **wire-identical undecidable duplicate**, and **two-notifier collision** under existing `Platform_14` SNMP Inform ownership (`Protocol/security` engineID/boots/time and `notInTimeWindow` recovery; `Trap/Inform` retransmission/duplicate/durable-acceptance cases—SPECIFIED; no new Platform_14 section or certification-status claim by this clarification).
+
+A bounded group-commit/WAL acceptance mechanism may amortize disk synchronization, but the individual successful Inform ACK must wait until that Inform's accepted event or qualifying bounded aggregation/accounting record is durably committed. An in-memory channel, queued-but-unflushed record, asynchronous best-effort counter or pre-ACK fingerprint drop alone does not satisfy acceptance. When parsing, attribution, spool admission, commit or storage-pressure protection fails, return no false successful Inform ACK; bound and measure outstanding requests, duplicate/retransmitted Inform identities, queue occupancy, admission latency and socket loss. Pre-ACK aggregation must durably account for source, time window, first/last occurrence, count and the evidence needed to avoid hiding distinct critical transitions; post-ACK semantic dedup remains separate. Batch interval, record count, fsync characteristics and sustainable EPS/IOPS are benchmark-selected for the certified Sensor storage profile, not fixed to illustrative auditor numeric claims.
+
+**Workload-class admission and shedding:** Protect authority/control, liveness/availability polling, durable Inform/trap acceptance and critical-event budgets ahead of high-volume Flow/Log enrichment. Shedding and backpressure are class-aware and measured; they must not invent hardcoded EPS, IOPS, timeout or per-class quota guarantees in Mother References. Certification must cover receiver restart, disk/storage pressure, retransmission, duplicate Inform, pre-ACK storm admission/aggregation, failed durable acceptance, enrichment unavailable after durable acceptance, and self-induced polling / path-RTT measurement degradation under concurrent Flow/Inform/SNMP load.
 
 Pre-ACK admission/accounting and post-ACK semantic dedup controls retain first/last seen, occurrence counts and measurable drop/rate-limit interventions so link-flap/event storms cannot create alert floods.
 
@@ -1018,6 +1048,12 @@ Flow LLD must cover NetFlow v5/v9, IPFIX, sFlow and vendor/J-Flow where applicab
 
 Streaming Sensor/Network Sensor receives datagrams/streams and tracks exporter/template state.
 
+**Ingress authority and overlapping addresses:** A bare UDP port/listener is not a trusted isolation boundary. Resolve exporter identity from independently verified ingress context, routing domain and authorization (for example tenant-dedicated Sensor placement or a genuinely segregated listener/interface/VRF/network namespace plus approved exporter mapping). Capture the actual receiving network context and bind it to the authorized exporter, profile and source; a packet's RFC1918 source IP, self-declared attributes or single global UDP socket alone are not authentication. Reject/quarantine ambiguous or unauthorized exporters before canonical tenant attribution or cross-tenant enrichment. Quarantined/unmapped traffic must not produce canonical Flow analytics. **Phase 1** must cover intra-tenant overlapping RFC1918/VRF/routing-domain spaces on independently verified ingress contexts without collision or silent merge. MSP/shared-customer isolation certification of overlapping exporters across tenants remains **Phase 1.5**.
+
+**Template lifecycle:** NetFlow v9/IPFIX template/options state is scoped by trusted ingress and exporter identity, protocol, applicable source/collector transport endpoints, Observation Domain/Source ID and Template ID, with source lifecycle/epoch and last-refresh/expiry evidence where available. Data Templates and Options Templates share one Template ID namespace per Observation Domain/exporter scope; a colliding ID replaces prior meaning only under protocol-valid redefinition rules. Expired, incompatible or exporter-restart-invalid templates must not decode new records. Under UDP, enforce protocol-specific refresh/lifetime and template-redefinition semantics; **ignore UDP Template Withdrawal messages** (do not treat withdrawal as authoritative deletion of live decode state solely because a UDP withdrawal was observed). Cache miss, sequence gap and invalidation are explicit quality/loss events. After collector restart, do **not** decode UDP Data Sets using an unvalidated persisted template: a persistent snapshot may at most be an untrusted restart hint until appropriate **live template validation** / exporter-session continuity is established. A disk cache must never be accepted solely by exporter IP + Template ID or silently turn unknown bytes into plausible flow facts. No BoltDB, SQLite, separate template database or breaking schema migration is selected by this clarification.
+
+**Sampling correctness:** Preserve raw exported packet/octet values and the source's sampling selector/algorithm, interval or probability, option-template scope, observation point, Observation Domain identity and validity window. Distinguish **sFlow sampled-frame** evidence, **sFlow interface/device Counter samples**, and IPFIX/NetFlow flow counters. sFlow Counter samples are typed metric/device-counter evidence—not ordinary per-flow `network_flow` facts—and must not be written into `network_flow.bytes`/`packets` or scaled by packet sample rate as if they were per-flow counts. For sFlow sampled frames, sampled header **capture length** is not automatically original packet/frame octet length; preserve original/reported frame length only where provided and qualified. Do not overload `bytes`/`packets` with estimated values. Emit estimated traffic rates/volumes in separately identified fields only when semantics justify scaling a qualified flow/sampled-frame observation; never multiply every received record by an assumed global rate or scale a value already normalized by the exporter. Missing, changed, conflicting or unverified sampling metadata yields explicit unknown/incomplete source quality and coverage limits. Where an estimate is permitted, record its method and a separate estimation indicator; do not invent a new source-quality enum or exact utilization.
+
 ### 14.2 Enrichment pipeline
 
 ```text
@@ -1041,7 +1077,7 @@ raw flow
 - template-miss counters;
 - backpressure metrics;
 - cardinality detection;
-- dedicated Streaming Sensor recommendation.
+- capacity-driven explicit FLOW/LOG role separation or dedicated Sensor placement when required to protect polling and critical-event budgets; the one Universal Sensor runtime is retained.
 
 No silent drop: every intentional/forced drop must be counted and surfaced.
 
@@ -2973,19 +3009,20 @@ Active path probing is implemented within the Network Sensor runtime. It execute
 ### 90.2 Flow-stable probing technique and path preservation
 
 Traditional traceroute (varying UDP ports or ICMP sequence numbers across successive hops) causes transit Equal-Cost Multi-Path (ECMP) hashes to assign probes to different physical paths, causing artificial route fluttering and false divergence.
-1. **Flow-Preserving Technique:** Sensor active path probing must maintain flow stability across probe hops to track consistent paths across ECMP and load-balanced links. BUILD-040 is responsible for evaluating and selecting an ECMP-aware flow-stable probing technique (such as Paris-traceroute-style techniques with pinned flow identifiers). Exact packet crafting, protocol modes (ICMP/TCP/UDP), probe counts, timing intervals, and TTL limits belong to BUILD-040 design and certification.
+1. **Flow-Preserving Technique (evaluation, not identical-path guarantee):** Sensor active path probing shall evaluate ECMP/multipath-aware flow-stable techniques (such as Paris-traceroute-style methods with pinned flow identifiers) under BUILD-040. Flow-stable probes do **not** guarantee identical physical paths. Per-packet balancing, NAT/middleboxes, MPLS, IPv6 Flow Label behaviour, ICMP CoPP/rate-limiting and return-path asymmetry can still produce incomplete, unpinned or ambiguous observations. Exact packet crafting, protocol modes (ICMP/TCP/UDP), probe counts, timing intervals and TTL limits belong to BUILD-040 design and certification. Preserve schema compatibility with existing `ActivePathObservation` / `PathChangeEvidence` contracts; BUILD-040 retains ownership.
 2. **Path Discovery & Metrics Requirements:**
    - Source/vantage identity, target endpoint, and protocol/port where applicable.
    - Hop sequence acquisition discovering intermediate hops, latencies (min/mean/max where reliable), packet loss, and jitter.
-   - Intermediate state classification: explicit recording of unresponsive hops, hidden hops (routers suppressing TTL expiry), and incomplete hop uncertainty.
-   - Extension parsing: parsing of ICMP extensions / MPLS labels where present.
-   - Protocol support: dual-stack IPv4 and IPv6 support, NAT traversal awareness.
+   - Intermediate state classification: explicit recording of unresponsive hops, hidden hops (routers suppressing TTL expiry), incomplete hop uncertainty and **ambiguous/unpinned** path quality when flow identity cannot be proven stable.
+   - Extension parsing: parsing of ICMP extensions / MPLS labels where present; account for MPLS visibility limits.
+   - Protocol support: dual-stack IPv4 and IPv6 (including Flow Label effects where relevant), NAT traversal awareness, ICMP CoPP/rate-limit effects and return-path asymmetry as quality/uncertainty evidence.
 
 ### 90.3 Path Fingerprinting and Change Detection
 
-1. **Fingerprint Hash:** An opaque, versioned, deterministic path fingerprint (carrying `fingerprint_version` with algorithm selected and implemented by BUILD-040) is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs to identify path geometry. Unresponsive or fluctuating hops must not trigger spurious divergence.
-2. **Divergence Evaluation:** Path changes generate internal `PathChangeEvidence` records capturing the previous fingerprint, new fingerprint, and optional divergence hop index (where topological divergence occurred; null for RTT_SHIFT or LOSS_ANOMALY without topology change).
-3. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (e.g. intermediate ICMP suppression or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability. Multi-vantage contradictions must be preserved.
+1. **Fingerprint Hash:** An opaque, versioned, deterministic path fingerprint (carrying `fingerprint_version` with algorithm selected and implemented by BUILD-040) is computed over the ordered sequence of responsive hop IP addresses and resolved ASNs and may describe an observed **candidate** path. Fingerprint presence alone does **not** assert comparison eligibility. Unresponsive, fluctuating, ambiguous, unpinned, insufficient or unqualified observations must not trigger spurious divergence.
+2. **Identity quality and comparison eligibility:** Each `ActivePathObservation` carries machine-readable `path_identity_quality` (`PINNED` | `AMBIGUOUS` | `UNPINNED` | `INSUFFICIENT` | `UNQUALIFIED`) and `comparison_eligible` as optional additive fields under existing `schema_version` `"1.0"` (`Platform_17` §11.3.1). Absent optional metadata MUST be treated as not comparison-eligible. A fingerprint MUST NOT be used to assert topology or latency/loss change when the observation is ambiguous, unpinned, insufficient or unqualified.
+3. **Divergence Evaluation:** Emit internal `PathChangeEvidence` **only** when **both** baseline and current observations are qualified and comparable (`comparison_eligible = true` and `path_identity_quality = PINNED`) and a qualified topology or latency/loss delta is observed. Capture previous/current fingerprints and optional divergence hop index (null for RTT_SHIFT or LOSS_ANOMALY without topology change). Uncertain multipath / ambiguous / unpinned / insufficient / unqualified observations, or fingerprint deltas without dual qualification, MUST NOT cause false `PATH_DIVERGENCE`, `RTT_SHIFT`, `LOSS_ANOMALY` or `DEVICE_DOWN`; emit quality/uncertainty evidence instead. Do not claim mixed-version change-emission safety for consumers that still create events from fingerprint-only logic.
+4. **Causal Boundary:** Intermediate packet loss or incomplete traceroutes (e.g. intermediate ICMP suppression, CoPP or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP liveness proves reachability. Multi-vantage contradictions and return-path asymmetry must be preserved as evidence, not collapsed into target failure.
 
 ---
 
@@ -3040,8 +3077,8 @@ To prevent telemetry floods, the Linux Agent does NOT stream individual socket e
 
 Ingestion and streaming pipelines transport typed logical evidence:
 - **`ProcessNetworkEvidence`:** Carries tenant ID, agent ID, host ID, entity ID, process and service attribution, remote endpoint (IP/port/entity), protocol, connection counters (active, new, closed, failures; applicable to stateful protocols), traffic metrics (bytes TX/RX, mean RTT, retransmissions when technically available and certified; protocol-dependent fields nullable/optional without fabricated zero values), quality/capability state, and drop/shed counters.
-- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / canonical sensor ID (bounded string), target entity ID / IP, protocol/port, opaque versioned path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), and quality status.
-- **`PathChangeEvidence`:** Carries tenant ID, path ID, source sensor ID (bounded canonical string), previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links.
+- **`ActivePathObservation`:** Carries tenant ID, path ID, source vantage / canonical sensor ID (bounded string), target entity ID / IP, protocol/port, opaque versioned candidate path fingerprint, hop sequence (bounded hop index, nullable hop IP, explicit hop state `RESPONSIVE | UNRESPONSIVE | HIDDEN | UNKNOWN`, hostname, ASN, optional/nullable RTT min/mean/max, loss percentage, jitter, and MPLS labels when observable from supported protocol extensions), probe-completion `status`, and optional additive `path_identity_quality` / `comparison_eligible` metadata (`Platform_17` §11.3.1). Absent quality metadata is not comparison-eligible.
+- **`PathChangeEvidence`:** Carries tenant ID, path ID, source sensor ID (bounded canonical string), previous fingerprint, new fingerprint, optional divergence hop index (nullable when not applicable), timestamp, and corroborating telemetry links. Emission requires dual baseline/current qualification and comparability; fingerprint deltas alone are insufficient.
 
 ### 92.2 Physical storage responsibilities
 
