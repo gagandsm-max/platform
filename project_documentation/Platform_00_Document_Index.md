@@ -656,3 +656,11 @@ Issue #272 extends Issue #269 by requiring explicit closure ownership for remain
 Phase 2 remains Enterprise ITOM/AIOps readiness and continues to use bounded OTel spans, Flow/path/eBPF/triggered packet evidence plus certified external APM/NPM-DPI integrations.
 
 Primary authorities: `Platform_23` (requirements/closure matrix), `Platform_14` (ECRP-P2-v1 and DORP-P2.5-v1), `Platform_12` (decision provenance), and the Build Sequence Register (sequencing only; no new BUILD IDs in this reconciliation).
+
+---
+
+## 2026-10-30 — Infrastructure/Log Sensor audit reconciliation (ARCH-DELEGATED)
+
+The challenged external Infrastructure/Log Sensor audit and auditor clarification produced **bounded contract-only hardening** within the existing v3.3.0/25-file Mother Reference set. Governing disposition and rejected heuristics are in Platform_12 (2026-10-30 audit adjudication); transport/source binding in Platform_10; runtime/typed-evidence and ACK truth in Platform_05/17; end-to-end flow in Platform_06; resource/storage budgets in Platform_11; negative/capacity certification in Platform_14; threat controls in Platform_18; and deployment/runbook controls in Platform_16. Requirements and implementation BUILD owners remain unchanged.
+
+This reconciliation does **not** declare any Infrastructure/Log connector, structured Agent evidence path, MSP overlapping-source Syslog isolation or vendor-scale performance implemented/benchmarked/certified. Phase-1/1.5 boundaries and stronger Sensor→Core **telemetry** versus weaker current **agent-ingress** ACK contracts remain unchanged; there is no new datastore/service, mandatory OSS dependency, `Platform_24` or version advance. An open Network Sensor audit PR and Linux Agent audit PR are independently governed and must be reconciled at final merge.

@@ -987,3 +987,27 @@ Phase-2 closure records SHALL carry source/product/version/collection-mode/prove
 Phase 2.5 SHALL define canonical contracts for trace/span/transaction identity, service/resource/process/runtime identity, profile sample/stack/symbol references, RUM/mobile/session evidence with privacy classification, packet/capture-source/conversation/decoded-transaction identity, packet-to-flow/service/trace correlation references, redaction/privacy classification and retention/evidence-custody metadata.
 
 Raw packet payload and session-replay data SHALL remain separately protected evidence classes rather than generic telemetry attributes.
+
+---
+
+## 2026-10-30 — Infrastructure/Log Sensor edge contracts (architecture target, not implemented truth)
+
+This is additive logical contract guidance under existing REQ-INF/REQ-EMC/REQ-MIA and BUILD-016/062/063/064/098 ownership. **No current v1 wire schema, frozen ACK field, storage engine, new BUILD ID or Phase-1 MSP certification is changed.**
+
+### Logical `LogIngressProfile` and source binding
+
+A versioned server-authoritative ingress configuration declares `profile_id`, owning Sensor/site/tenant binding, transport and bound listener/interface/trusted route, source/client identity allow/rules, optional TLS trust and **verified client-certificate-to-profile mapping**, parser version, redaction/security policy, rate/size/cardinality quotas and an ambiguous-source handling policy. These are *logical fields* for configuration design; exact API keys and backing tables remain an implementation/contract-gate decision. Source-originated hostname, IP, message content or self-declared tenant is never Core tenant authority. Shared listeners are permitted only if mapping to one authorized tenant is deterministic; Phase-1.5 overlapping-private-IP/NAT tests must prove this. Unmatched/ambiguous input is counted and rejected or held as bounded **sanitized metadata only** without tenant-content contamination. A claimed mTLS identity is valid only if chain validation and server-side certificate/profile binding succeed.
+
+Normalized accepted log/evidence records retain trusted tenant/Sensor/profile/source binding, transport/framing, observed/received timestamps, parser/redaction version/outcome, bounded body/attributes, source correlation, and explicit `GOOD|PARTIAL|UNKNOWN` (or compatible) quality. Incomplete, malformed, redacted, sampled or shed records never silently become complete evidence. Separate receiving, durable spool, Sensor→Core ingestion and external SIEM-forwarding outcomes; a TCP socket write is not a durable application-level ACK.
+
+### Typed Agent evidence, compatibility, assembly and ACK truth
+
+Existing scalar `HostCollector → Sample → Observation → CollectionBatch` is **current** and not overloaded with inventory/process tables. BUILD-016 may introduce additive versioned typed evidence families (software inventory snapshots, ProcessNetworkEvidence and EDS references) with size/item/source bounds and provenance. An evidence-kind discriminator, fragmentation/assembly and physical encoding are **TBD implementation choices** under normal schema review; there is no mandated new polymorphic union, Valkey/PG staging table or replacement of frozen wire. If fragmented, fragments share a stable capture identity and are retry/replay-idempotent; only an integrity-checked, fully assembled, complete authoritative FULL snapshot may authorize general absence/removal. Older/partial/truncated/failed/TARGETED snapshots remain non-destructive evidence.
+
+Keep exact existing Platform_17 §10.3 ACK fields and tiers: Agent→Sensor local durability; Sensor→Core telemetry stronger reserve/txn/finalize; Sensor→Core agent-ingress currently Kafka + PG watermark at-least-once with BUILD_003 reservation parity **not implemented**. No document or status API may claim otherwise before verified physical certification.
+
+### OTLP series admission and SIEM export accounting
+
+OTLP receiver budgets apply to exact tenant/source/metric-series identity and decoded resource cost **before spooling**, with deterministic oversize/invalid/overbudget rejection and protocol-correct `partial_success.rejected_data_points` / `rejected_log_records` where supported. Preserve Resource/Scope/attributes, Sum monotonicity, temporality and histogram semantics; **never** make a rejected series into a Gauge, silently merge distinct series after stripping identity dimensions or retain excluded PII in an unindexed raw JSON overflow column. Estimates/sketches may inform a pre-admission budget but cannot prove exact new-series membership by themselves. Accounting separates accepted, rejected, sampled/shed and upstream continuity gaps; no sensitive values appear in reason details/metrics.
+
+An outbound SIEM destination has independently bounded tenant-scoped queue/backlog/retry/dead-letter and terminal delivered-or-expired status, with message/batch identity and acknowledged delivery recorded only when the sink protocol actually supplies it. Destination status does not change primary Core ingest ACK. After expiry/quota exhaustion, expose irreversible export loss and relevant evidence uncertainty; do not claim lossless forwarding, infinite legal-hold quarantine, or "100% unaffected" shared resource operation.

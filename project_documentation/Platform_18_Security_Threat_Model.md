@@ -221,3 +221,18 @@ Phase 2.5 introduces high-sensitivity threats that SHALL be explicitly modeled b
 - covert data egress through external analysis providers.
 
 Required controls include least privilege, explicit enablement, audit, encryption, redaction/masking, tenant isolation, bounded retention, export controls, key custody, rate/cardinality limits and safe parser isolation.
+
+---
+
+## 14. Infrastructure/Log Sensor edge risk controls — 2026-10-30 adversarial audit reconciliation
+
+| Threat / failure | Required prevention and evidence |
+|---|---|
+| Overlapping RFC 1918 Syslog senders, forged hostname/tenant field or shared wildcard listener | Derive tenant from authenticated/server-configured Sensor/site/ingress-profile/source authority, not payload text or IP alone; disambiguate before durable spool/correlation; reject or bounded metadata-only quarantine on ambiguity; Phase-1.5 negative cross-tenant/NAT tests. No unconditional one-VIP-per-tenant prescription. |
+| WinRM/SSH target-side quota exhaustion or session hijack | Bound per-target/credential and Sensor-wide concurrency; version/operation-aware pooling; strict SSH host-key and HTTPS identity checks; revoke/rotate stale sessions; deadlines/cleanup; no generic shell/PowerShell or side-effecting installed-software enumerator. |
+| Cloud/vSphere/DB/storage management-plane amplification | Per-provider/account/region/service/operation fairness and retry budgets; vSphere PropertyCollector resync limits versus PerformanceManager metrics; DB read-only query/connection limits; storage API hung-call isolation; authentic source and partial/unknown quality on management-plane failure, never fabricated resource DOWN. |
+| OTLP metric-series poisoning or sensitive attribute persistence | Bound active series/decoded bytes by tenant/metric; minimize/reject forbidden attributes before spool; preserve series identity/temporality; accurate partial-success/rejection counts; no raw secret-bearing overflow JSON, silent counters-to-gauges conversion, or compulsory approximate-cardinality/HLL dependency. |
+| Syslog malformed framing/multiline decompression and secret leakage | Bounded per-stream AND global record/line/aggregate memory; non-backtracking Go regexp where configured; source-specific framing; pre-spool sensitive-field minimization with failure-closed handling; never log raw failing payloads for debugging. |
+| TCP Syslog backpressure and SIEM sink outage | Source-side asynchronous logging recommendation, finite Sensor queue/horizon/loss counters; independent bounded destination quotas/retries; protected monitoring/authority priority and 80% disk safety. No absolute ZeroWindow, no-loss, 100%-isolation or infinite protected quarantine promise. |
+
+Current Phase-1 single-customer boundary remains; shared MSP Phase-1.5 requires explicit adversarial tenant-isolation certification. None of these controls are marked implemented/certified by their appearance here. PCI DSS 4.0.1 stored PAN unreadability (Requirement 3.5.1) and GDPR Article 32 risk-appropriate controls require assessed end-to-end policies; pre-spool redaction alone is **not** a compliance certification.
