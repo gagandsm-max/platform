@@ -136,6 +136,16 @@ def nested_or_compressed_finding(label: str, name: str, data: bytes | None = Non
     return None
 
 
+def requires_archive_inspection(name: str) -> bool:
+    """Route archive/package paths through bounded archive inspection, not raw byte scans."""
+    lower = name.lower()
+    if lower.endswith(SUPPORTED_ARCHIVES):
+        return True
+    if lower.endswith(UNSUPPORTED_PACKAGES):
+        return True
+    return False
+
+
 def zip_member_kind(info: zipfile.ZipInfo) -> str:
     """Classify ZIP members; preserve ordinary DOS/Windows regular files."""
     if info.is_dir() or info.filename.endswith(("/", "\\")):
@@ -233,8 +243,77 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                                 info.comment if isinstance(info.comment, bytes) else info.comment.encode("utf-8"),
                             )
                         )
+                    if info.extra:
+                        if len(info.extra) > MAX_MEMBER_BYTES:
+                            findings.append(
+                                Finding(f"{member_label}!ZIP_EXTRA", "UNSCANNABLE: content exceeds per-member size limit")
+                            )
+                        else:
+                            findings.extend(inspect_bytes(f"{member_label}!ZIP_EXTRA", info.extra))
                     kind = zip_member_kind(info)
                     if kind == "dir":
+                        # Normal empty directories are allowed (including DEFLATED empty
+                        # markers where compress_size > 0 but file_size/data are empty).
+                        # Nonempty payloads or file_size > 0 on a directory fail closed.
+                        header_claims_payload = info.file_size > 0
+                        data = b""
+                        read_findings: list[Finding] = []
+                        if info.compress_type not in ALLOWED_ZIP_METHODS:
+                            # Unsupported methods cannot be proven empty; fail closed when
+                            # any compressed bytes or claimed size are present.
+                            if header_claims_payload or info.compress_size > 0:
+                                findings.append(
+                                    Finding(
+                                        member_label,
+                                        "UNSCANNABLE: ZIP directory entry has nonempty payload or contradictory metadata",
+                                    )
+                                )
+                                findings.append(
+                                    Finding(
+                                        member_label,
+                                        f"UNSCANNABLE: unsupported ZIP compression method ({info.compress_type})",
+                                    )
+                                )
+                            continue
+                        if info.compress_size > MAX_MEMBER_BYTES or info.file_size > MAX_MEMBER_BYTES:
+                            findings.append(
+                                Finding(
+                                    member_label,
+                                    "UNSCANNABLE: ZIP directory entry has nonempty payload or contradictory metadata",
+                                )
+                            )
+                            findings.append(Finding(member_label, "UNSCANNABLE: decompression size limit"))
+                            continue
+                        if info.compress_size > MAX_ARTIFACT_BYTES - consumed:
+                            findings.append(
+                                Finding(
+                                    member_label,
+                                    "UNSCANNABLE: ZIP directory entry has nonempty payload or contradictory metadata",
+                                )
+                            )
+                            findings.append(Finding(member_label, "UNSCANNABLE: decompression size limit"))
+                            continue
+                        try:
+                            with archive.open(info) as member:
+                                read_findings, data, consumed = _read_bounded(member, member_label, consumed)
+                        except Exception as exc:  # noqa: BLE001
+                            findings.append(
+                                Finding(
+                                    member_label,
+                                    f"UNSCANNABLE: malformed compressed stream ({type(exc).__name__})",
+                                )
+                            )
+                            continue
+                        findings.extend(read_findings)
+                        if header_claims_payload or data:
+                            findings.append(
+                                Finding(
+                                    member_label,
+                                    "UNSCANNABLE: ZIP directory entry has nonempty payload or contradictory metadata",
+                                )
+                            )
+                            if data and not read_findings:
+                                findings.extend(inspect_bytes(member_label, data))
                         continue
                     if kind == "symlink":
                         findings.append(Finding(member_label, "UNSCANNABLE: symbolic-link ZIP member"))
@@ -287,6 +366,20 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
             with tarfile.open(path, mode="r:*") as archive:
                 substantive_payloads = 0
                 member_count = 0
+                for pax_key, pax_value in archive.pax_headers.items():
+                    findings.extend(
+                        inspect_bytes(
+                            f"{label}!PAX_GLOBAL_KEY",
+                            pax_key.encode("utf-8", errors="surrogateescape"),
+                        )
+                    )
+                    if pax_value:
+                        findings.extend(
+                            inspect_bytes(
+                                f"{label}!PAX_GLOBAL_VALUE",
+                                str(pax_value).encode("utf-8", errors="surrogateescape"),
+                            )
+                        )
                 for info in archive:
                     member_count += 1
                     if member_count > MAX_ARCHIVE_MEMBERS:
@@ -301,6 +394,20 @@ def inspect_archive(path: Path, label: str) -> list[Finding]:
                     ):
                         if meta_value:
                             findings.extend(inspect_bytes(meta_label, meta_value.encode("utf-8", errors="surrogateescape")))
+                    for pax_key, pax_value in info.pax_headers.items():
+                        findings.extend(
+                            inspect_bytes(
+                                f"{member_label}!PAX_KEY",
+                                pax_key.encode("utf-8", errors="surrogateescape"),
+                            )
+                        )
+                        if pax_value:
+                            findings.extend(
+                                inspect_bytes(
+                                    f"{member_label}!PAX_VALUE",
+                                    str(pax_value).encode("utf-8", errors="surrogateescape"),
+                                )
+                            )
                     if info.isdir():
                         continue
                     if info.issym() or info.islnk():
@@ -385,7 +492,12 @@ def scan(repo: Path, paths: list[Path], artifacts: list[Path]) -> tuple[list[Fin
             findings.extend(inspect_bytes(label, label.encode("utf-8", errors="surrogateescape")))
             if path.is_dir() and not path.is_symlink():
                 continue
-            findings.extend(inspect_regular_file(path, label))
+            # Supported/unsupported archives in first-party roots must use bounded archive
+            # inspection — never treat compressed archive bytes as ordinary source text.
+            if requires_archive_inspection(path.name):
+                findings.extend(inspect_archive(path, label))
+            else:
+                findings.extend(inspect_regular_file(path, label))
     for root in artifacts:
         if not root.exists() and not root.is_symlink():
             findings.append(Finding(str(root), "UNSCANNABLE: artifact missing"))

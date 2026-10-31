@@ -480,6 +480,157 @@ class BrandHygieneTest(unittest.TestCase):
             with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 self.assertEqual(main(["--repo", temp, "--path", "ui/src", "--artifact", "release.zip"]), 1)
 
+    def test_deflated_zip_in_first_party_source_is_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            path = root / "payload.zip"
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("secret.txt", b"ThoughtData leaked")
+            findings, _count = scan(repo, [root], [])
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+
+    def test_jar_in_first_party_source_is_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            path = root / "lib.jar"
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\n")
+                archive.writestr("com/example/App.class", b"ThoughtData leaked")
+            findings, _count = scan(repo, [root], [])
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+
+    def test_tar_gz_in_first_party_source_is_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            path = root / "bundle.tar.gz"
+            with tarfile.open(path, "w:gz") as archive:
+                data = b"ThoughtData leaked"
+                info = tarfile.TarInfo("secret.txt")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            findings, _count = scan(repo, [root], [])
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+
+    def test_zip_directory_entry_with_nonempty_payload_rejected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "weird.zip"
+            with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("ok.txt", b"AmrudAi")
+                info = zipfile.ZipInfo("sneaky/")
+                info.create_system = 3
+                info.external_attr = (stat.S_IFDIR | 0o755) << 16 | 0x10
+                archive.writestr(info, b"ThoughtData leaked")
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(
+                any("ZIP directory entry has nonempty payload or contradictory metadata" in item.problem for item in findings)
+            )
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+
+    def test_zip_extra_field_metadata_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "extra.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                info = zipfile.ZipInfo("clean.txt")
+                payload = b"ThoughtData leaked"
+                info.extra = struct.pack("<HH", 0x1234, len(payload)) + payload
+                archive.writestr(info, b"AmrudAi clean content")
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+            self.assertTrue(any("ZIP_EXTRA" in item.path for item in findings))
+
+    def test_tar_pax_metadata_value_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "paxval.tar"
+            with tarfile.open(path, "w") as archive:
+                info = tarfile.TarInfo("clean.txt")
+                data = b"AmrudAi"
+                info.size = len(data)
+                info.pax_headers = {"comment": "ThoughtData leaked"}
+                archive.addfile(info, io.BytesIO(data))
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+            self.assertTrue(any("PAX_VALUE" in item.path for item in findings))
+
+    def test_tar_pax_metadata_key_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "paxkey.tar"
+            with tarfile.open(path, "w") as archive:
+                info = tarfile.TarInfo("clean.txt")
+                data = b"AmrudAi"
+                info.size = len(data)
+                info.pax_headers = {"ThoughtData": "x"}
+                archive.addfile(info, io.BytesIO(data))
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+            self.assertTrue(any("PAX_KEY" in item.path for item in findings))
+
+    def test_tar_global_pax_metadata_inspected(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "paxglobal.tar"
+
+            def pax_records(mapping: dict[str, str]) -> bytes:
+                records: list[str] = []
+                for key, value in mapping.items():
+                    body = f"{key}={value}\n"
+                    length = len(body) + 1
+                    while True:
+                        record = f"{length} {body}"
+                        if len(record) == length:
+                            break
+                        length = len(f"{length} {body}")
+                    records.append(record)
+                return "".join(records).encode("utf-8")
+
+            with tarfile.open(path, "w") as archive:
+                global_data = pax_records({"COMMENT": "ThoughtData global", "ThoughtData": "1"})
+                global_info = tarfile.TarInfo("./PaxHeaders.global")
+                global_info.type = tarfile.XGLTYPE
+                global_info.size = len(global_data)
+                archive.addfile(global_info, io.BytesIO(global_data))
+                data = b"AmrudAi"
+                info = tarfile.TarInfo("clean.txt")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            findings = inspect_archive(path, path.name)
+            self.assertTrue(any("THOUGHTDATA" in item.problem for item in findings))
+
+    def test_clean_archives_in_first_party_source_pass(self):
+        with tempfile.TemporaryDirectory() as temp:
+            repo = Path(temp)
+            root = repo / "ui" / "src"
+            root.mkdir(parents=True)
+            (root / "ok.ts").write_text("export const product = 'AmrudAi';", encoding="utf-8")
+            zip_path = root / "assets.zip"
+            with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("manifest.json", b'{"product":"AmrudAi"}')
+                archive.writestr("release/", b"")
+            jar_path = root / "helper.jar"
+            with zipfile.ZipFile(jar_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr("META-INF/MANIFEST.MF", b"Manifest-Version: 1.0\nBuilt-By: AmrudAi\n")
+            tar_path = root / "bundle.tar.gz"
+            with tarfile.open(tar_path, "w:gz") as archive:
+                data = b"AmrudAi"
+                info = tarfile.TarInfo("manifest.txt")
+                info.size = len(data)
+                archive.addfile(info, io.BytesIO(data))
+            findings, count = scan(repo, [root], [])
+            self.assertEqual(findings, [])
+            self.assertEqual(count, 4)
+
+    def test_empty_zip_directory_entries_still_allowed_with_payload(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "dirs-ok.zip"
+            with zipfile.ZipFile(path, "w") as archive:
+                archive.writestr("release/", b"")
+                archive.writestr("release/readme.txt", b"AmrudAi")
+            self.assertEqual(inspect_archive(path, path.name), [])
+
 
 if __name__ == "__main__":
     unittest.main()
