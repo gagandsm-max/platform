@@ -3409,6 +3409,18 @@ No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unre
 - Counter32/Counter64 arithmetic is performed in exact integer range prior to derived floating-point rate; legitimate wraps require evidence against reset/discontinuity and plausibility relative to elapsed time and certified interface capacity. Do not infer every decrease to be a wrap.
 - Where Phase-1 network interfaces expose traffic/utilization, correct derived-rate behaviour is a Phase-1 release gate, not a silent Phase-1.5 deferment. Existing `Platform_14` SNMP/counter gates remain mandatory.
 
-**Implementation gate:** Inspect actual migrations, execution plans, ClickHouse DDL, Valkey call sites and Counter64 runtime before classifying a speculative audit scenario as a confirmed defect. Preserve already-fixed PR #81/#84 semantics and certification-envelope boundaries. See `Platform_12` §28 and `Platform_14` DB-specific evidence gate.
+### 97.6 Design-owned negative-acceptance scenarios (existing quality gate ownership)
+
+These scenarios refine the existing design without modifying the independently owned `Platform_14` quality master. Actual release evidence stays with the existing BUILD, Issue #92 and `Platform_14` gates; this section does not certify tests or mandate speculative schema implementation.
+
+1. **PostgreSQL/query safety:** Compare representative tenant-scoped `EXPLAIN (ANALYZE, BUFFERS)`, p95/p99, write/locking and storage before/after any candidate index, including JSONB, composite and FK paths. Detect redundant PK/UNIQUE indexes and prove online migration, rollback and lock budgets.
+2. **Tenant isolation:** Negatively test absent/wrong/forged tenant context, cross-tenant foreign keys/joins/exports, owner/privileged roles, background jobs, pooled-connection reuse, backup/restore and unauthorized query paths. If RLS or ClickHouse row policies are chosen, test the precise role, `USING`/`WITH CHECK`, transaction-scoping and engine behavior. Phase-1.5 MSP certification remains separate.
+3. **ClickHouse deletion/hold:** Place two tenants and legal-held records in the same time partition; selectively erase one eligible scope without disturbing unrelated/held records. Record query visibility versus verified physical erasure or pending expiry, replica/rollup/archive/backup treatment, bounded mutation load, 80% safety, progress and audit.
+4. **Valkey degradation:** Fault-inject timeout, restart and partition for ordinary cache, session/revocation, admission/rate limits, dedup/leases and HA-sensitive paths. Prove bounded backend fallback solely where safe, fail-closed sensitive operations, no dual Active, observable degradation, no replay/rebuild stampede.
+5. **Counter-rate discontinuity:** Exercise exact raw values above `2^53`, Counter32 wrap and ambiguous Counter64 decrease, stale/out-of-order/duplicate samples, reset/reboot, nonpositive/irregular intervals, Sensor reassignment, restart, eviction and failover. Preserve exact raw facts and return a proven rate or `UNKNOWN`/`DEGRADED`; no fabricated zero/spike.
+
+For each applicable scenario record commit, fixture, workload, measured outputs, failure reproduction and separate SPECIFIED/IMPLEMENTED/TESTED/BENCHMARKED/CERTIFIED status. Do not claim Phase-1.5 MSP or HA certification from standalone Phase-1 testing.
+
+**Implementation gate:** Inspect actual migrations, execution plans, ClickHouse DDL, Valkey call sites and Counter64 runtime before classifying a speculative audit scenario as a confirmed defect. Preserve already-fixed PR #81/#84 semantics and certification-envelope boundaries. See `Platform_12` §28 and §97.6 above; existing `Platform_14` quality gates remain authoritative.
 
 ---

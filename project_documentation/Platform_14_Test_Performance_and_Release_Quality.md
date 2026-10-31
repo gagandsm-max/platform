@@ -252,19 +252,6 @@ Required evidence includes: 2,500-device scenario; deterministic distribution; r
 
 Required evidence includes: source values > 2^53; near UInt64 maximum; reset; reboot; discontinuity; legitimate wrap only where provable; irregular sample interval; Kafka serialization without JSON Number loss; ClickHouse raw exactness.
 
-### 8.3.1 Database audit hardening evidence gate — 2026-10-30
-
-In addition to the existing SNMP/Counter64 and release gates, certify these *only when relevant implementation exists*; absence of a test is not evidence that the claimed runtime defect exists:
-
-1. **PostgreSQL access paths:** compare `EXPLAIN (ANALYZE, BUFFERS)`, query p95/p99, write/lock cost and storage with/without candidate FK/composite/JSONB indexes on representative tenant cardinality. Detect redundant PK/UNIQUE indexes and migration lock/rollback risk; do not require every FK to be separately indexed.
-2. **Tenant isolation:** test missing/wrong tenant context, cross-tenant references, policies, joins, exports, role/owner privilege, transaction rollback, connection-pool reuse, backup/restore and background jobs. If PostgreSQL RLS is selected, test both permissive/restrictive access and `USING`/`WITH CHECK`; if ClickHouse row policies are used, test exact read-only roles/engine version. Tenant-first `ORDER BY` is never accepted as isolation proof. MSP certification remains Phase 1.5.
-3. **Selective erasure and holds:** place two tenants and a held entity in the same ClickHouse time partition; purge one permitted entity/tenant without touching others, verifying visible query state, physical-removal or documented pending state, rollup/replica/archive/backup treatment, legal-hold denial, progress and audit. Measure mutation pressure against ingestion/query SLOs and the 80% safeguard.
-4. **Valkey faults:** inject timeout, crash/restart and network partition separately for cache, session/revocation, security admission/rate limit, dedup/lock and HA-related paths. Prove safe cache bypass with bounded backend load, fail-closed sensitive operations, no dual-active fencing and observable degraded/recovery state. No arbitrary cache-rebuild SLA is assumed.
-5. **Rate-state continuity:** exercise exact `UInt64` values over `2^53`, Counter32 wrap, ambiguous Counter64 decrease, reboot/discontinuity, polling gaps, stale/duplicate/out-of-order input, Sensor restart/reassignment/cache eviction, nonpositive elapsed time and first-sample baseline. The result must be exact raw history plus valid rate or explicit `UNKNOWN`/`DEGRADED`; never a false utilization spike.
-
-Record SPECIFIED/IMPLEMENTED/TESTED/BENCHMARKED/CERTIFIED separately with commit, fixture, workload, tool output and failure evidence. Preserve Phase-1 standalone versus Phase-1.5 MSP/HA scope. These are refinements of existing `REQ-DATA-*`, `PRD-EGC-006` and Counter64 contracts; no new BUILD ID or GA claim.
-
-
 ### 8.4 Two-Core HA
 
 HA certification gates remain explicit and unmet until evidence exists. Do not invent passing evidence. Status remains SPECIFIED / P0 / NOT PRODUCTION CERTIFIED.
