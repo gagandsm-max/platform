@@ -12,6 +12,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -641,41 +642,55 @@ print({json.dumps(source_payload())!r})
             self.assertNotIn("synthetic-credential-canary", output.getvalue())
 
 
-def run_live_source_probe():
-    """Explicit local-only probe, excluded from ordinary offline discovery/CI.
+class CredentialBoundaryTests(unittest.TestCase):
+    """Synthetic regressions, never an authority for running PR code with secrets."""
 
-    Requires installed /usr/bin/gh and a trusted launcher's credential on stdin.
-    No actor certification, repository writes, policy execution or token output.
-    """
-    credential = sys.stdin.buffer.read(4097).strip()
-    if not credential or len(credential) > 4096 or b"\n" in credential or b"\r" in credential:
-        print("LIVE_SOURCE_CREDENTIAL_INPUT_INVALID", file=sys.stderr)
-        return 2
-    class LivePrivateSourceTests(unittest.TestCase):
-        def test_authorized_private_source(self):
-            branch = "feat/issue285-agent-control-v3"
-            payload = json.loads(guard._source_response(branch))
-            self.assertIs(payload["data"]["repository"]["isPrivate"], True)
-            refs = guard.remote_heads(branch)
-            self.assertRegex(refs["main"], r"^[0-9a-f]{40}$")
-            self.assertRegex(refs["branch"], r"^[0-9a-f]{40}$")
-            print("LIVE_PRIVATE_SOURCE " + json.dumps(refs, sort_keys=True))
+    def test_removed_live_mode_rejects_without_consuming_open_stdin(self):
+        # Leave the pipe open with no bytes: a credential reader would block.
+        # The removed mode must reject before reading stdin or running any test.
+        with subprocess.Popen([sys.executable, "-B", "-m",
+                "tests.engineering_orchestrator.test_task_preflight",
+                "--live-source-probe"], cwd=ROOT, stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                env={"PATH": os.defpath, "HOME": "/nonexistent"}) as process:
+            try:
+                self.assertEqual(process.wait(timeout=10), 2)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+            output, error = process.communicate()
+        self.assertIn(b"unrecognized arguments: --live-source-probe", error)
+        self.assertEqual(output, b"")
+        self.assertNotIn(b"LIVE_PRIVATE_SOURCE", error)
 
-        def test_denied_private_source(self):
-            # An intentionally invalid synthetic token overrides stored auth.
-            # Production credential values never enter argv, output or fixtures.
-            with patch.dict(os.environ, {"GH_TOKEN": "invalid-preflight-negative-fixture"}):
-                with self.assertRaisesRegex(guard.PreflightError, "^SOURCE_ACCESS_FAILED$") as caught:
-                    guard.remote_heads("feat/issue285-agent-control-v3")
-            self.assertIsNone(caught.exception.__context__)
-            self.assertIsNone(caught.exception.__cause__)
+    def test_no_real_credential_test_entrypoint(self):
+        self.assertNotIn("run_live_source_probe", globals())
+        # Production source remains callable only through synthetic fixture
+        # replacement in this module, never through a live-auth test class.
+        self.assertNotIn("LivePrivateSourceTests", globals())
 
-    suite = unittest.defaultTestLoader.loadTestsFromTestCase(LivePrivateSourceTests)
-    with patch.dict(os.environ, {"GH_TOKEN": credential.decode("ascii")}):
-        return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+    def test_compose_has_only_disconnected_stdin_closed_test_service(self):
+        compose = (ROOT / "tests/engineering_orchestrator/preflight.compose.yaml").read_text()
+        self.assertEqual(re.findall(r"^  ([\w-]+):", compose, re.MULTILINE), ["preflight-tests"])
+        self.assertIn("    network_mode: none\n", compose)
+        self.assertIn("    stdin_open: false\n", compose)
+        self.assertIn('    entrypoint: [/bin/sh, -c, \'exec "$$@" </dev/null\', --]\n', compose)
+        for forbidden in ("preflight-live-source", "--live-source-probe", "GH_TOKEN",
+                "GITHUB_TOKEN", "GH_CONFIG_DIR", "/usr/bin/gh", "env_file:",
+                "secrets:", "configs:", "extends:", "profiles:", "network_mode: bridge"):
+            with self.subTest(forbidden=forbidden):
+                self.assertNotIn(forbidden, compose)
+
+    def test_documentation_has_no_credential_pipe_recipe(self):
+        documentation = (ROOT / "project_agents/TASK_PREFLIGHT.md").read_text()
+        # The unsafe mechanism remains described as history, not executable advice.
+        commands = re.findall(r"```(?:sh|bash)\n(.*?)```", documentation, re.DOTALL)
+        for command in commands:
+            for forbidden in ("auth token", "preflight-live-source", "--live-source-probe"):
+                with self.subTest(forbidden=forbidden):
+                    self.assertNotIn(forbidden, command)
+        self.assertIn("insufficient for security certification", documentation)
 
 
 if __name__ == "__main__":
-    if sys.argv[1:] == ["--live-source-probe"]:
-        sys.exit(run_live_source_probe())
     unittest.main(verbosity=2)

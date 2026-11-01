@@ -159,29 +159,49 @@ process timeout; they are distinct from actual private-source evidence. `/tmp`
 remains non-executable: fixture scripts run with the trusted Python interpreter.
 The container init reaps fixture descendants; the PID budget stays at 128.
 
-The separate opt-in `live-source` Compose profile verifies actual private access
-and rejected authentication through the production adapter. It uses bridge
-networking, the installed `/usr/bin/gh` mounted read-only, and the same non-root,
-read-only, capability-dropped container restrictions. It is never selected by
-ordinary offline discovery or CI. Do not mount a desktop keyring/DBus socket,
-credential directory, Docker socket or writable repository. From a trusted
-launcher outside the inspected checkout, pipe the existing CLI's credential
-directly to stdin; token bytes are not printed, stored or placed in arguments:
+### Credential-free PR tests (P1-C correction)
 
-```sh
-set -o pipefail
-/usr/bin/gh auth token --hostname github.com 2>/dev/null | \
-  docker compose -p issue285-preflight-a \
-    -f /home/gagan/nms-acp-v3/tests/engineering_orchestrator/preflight.compose.yaml \
-    --profile live-source run --build --rm --no-deps -T preflight-live-source
-```
+PR-controlled tests accept synthetic fixtures only. The real-token stdin reader,
+live-auth test mode and network-enabled Compose service have been removed.
+The sole test service has no network or credential/CLI mounts and closes stdin
+to `/dev/null` before Python starts, even when a caller attaches a pipe. The old
+live-mode argument is rejected without reading stdin. Negative regressions cover
+these boundaries and the absence of an executable credential-pipe recipe.
+Synthetic source success, denial, timeout, malformed/partial responses and
+exception/redaction cases remain active.
 
-The trusted launcher must authorize this local probe and its code; do not run
-arbitrary PR policy with privileged CI credentials. The probe sets the credential
-only for its process lifetime, then tests an intentionally invalid synthetic
-token as the negative case. Both live tests must pass; no network failure or
-missing credential is treated as SKIP/PASS. The output contains only test
-outcomes and repository SHAs, not credential values or caller role claims.
+Never supply real credentials through stdin, environment, files, sockets or
+command arguments to mutable PR tests. Read-only mounts, non-root execution,
+redacted logs and dropped capabilities do not make such code a safe credential
+recipient. Compose configuration and its tests are themselves PR-controlled;
+their passing assertions are not an independent sandbox or protection against
+an operator overriding mounts, entrypoint, environment or network settings.
+
+### Separately trusted external verification
+
+An independently reviewed harness installed outside the checkout may use an
+installed trusted `gh` client to read the fixed canonical repository refs. Its
+code, configuration, dependencies, query, executable paths and installation
+digest must be independently approved and pinned; it must not import, execute,
+source or build code/configuration from the PR while holding credentials. Use
+a separately provisioned least-privilege read-only principal, bounded timeout,
+fixed GitHub host/repository and redacted failure handling. Credential material
+stays entirely in that external trust domain and never reaches the PR process.
+
+Record only sanitized repository identity, queried refs, exact SHAs, observation
+time, harness/CLI identity and success/denial status as external evidence. Treat
+that output as data, not executable instructions or actor/merge authorization.
+An unavailable or denied read remains a failure, never a cached success. PR tests
+can exercise synthetic responses offline; reading actual refs with an external
+client proves source access only, not execution of this proposed adapter.
+
+To test the proposed adapter itself with real credentials, an independent owner
+must first vet and pin its exact code and dependencies, then deploy them into a
+separate trusted installation that cannot load mutable PR code. That deployment,
+credential review and integration execution are NOT_RUN in this correction and
+are not authorized by a writer's green tests. No external harness is introduced
+within this six-file scope; independent Antigravity review and ChatGPT Web own
+the subsequent evidence disposition.
 
 Rollback removes the additive inspection entry point/module/tests/document.
 No schema migration, product behavior or existing state-machine transition
@@ -231,6 +251,13 @@ and require the named downstream owners. No MERGE_READY or COMPLETE claim.
 
 ### P1 correction history (2026-11-01)
 
+**Historical source-access evidence only, insufficient for security certification.**
+The live-probe results below predate P1-C review `5727140670`. The real credential
+was delivered to PR-controlled Python with network access. No theft is established,
+but passing tests and absence of logged secrets cannot exclude exfiltration.
+The credential owner should inspect prior grants and consider rotation, especially
+for write/admin privileges; that assessment/rotation is not performed by this PR.
+
 Review: PR #286 review `5727049673`, head
 `2e41a7c9255fafc1b254d55eccf9d33e160a1a53`; P1-A private GitHub access and
 P1-B incomplete governance protection. Both findings remain in the review history.
@@ -265,3 +292,29 @@ The corrective PR update records final exact-commit full-suite/validator results
 post-push live ref evidence and CI run identity separately. Prior tests are not
 carried forward as evidence for a new SHA. Independent Antigravity review and
 ChatGPT Web final disposition remain pending.
+
+### P1-C correction history (2026-11-01)
+
+Reviewed input head: `4269ba3d09df4baaf8cf700488ed9f7a3e50cf56`.
+Review: https://github.com/gagandsm-max/platform/pull/286#pullrequestreview-5727140670.
+At that historical head the complete orchestrator suite passed 318/318 with no
+failures/errors/skips and both repository validators passed. The post-push live
+probe passed 2/2 and read branch `4269ba3d09df4baaf8cf700488ed9f7a3e50cf56` and
+main `b6b4581207126d59872b97999da8a99907d857fe`. This remains historical access
+evidence, insufficient for security certification and not repeated here.
+
+P1-C removes the credential-bearing test path and retains synthetic regressions.
+The source adapter, whole `project_agents/**` policy, native v2 contracts and
+INSPECTION_ONLY behavior are unchanged. The draft PR records new exact-commit
+tests, negative container probes, validators and CI separately. Prior failed runs
+above remain part of the evidence history. Independent acceptance remains pending.
+
+- First P1-C focused run: 73 executed, 72 PASS / 1 FAIL, 0 errors/skips.
+  The new removed-mode regression used direct script execution, which failed
+  package import (`ModuleNotFoundError: tests`, exit 1) before argument parsing.
+  Diagnostic reproduction confirmed this. Corrected the regression to use the
+  former module invocation with an open, empty stdin pipe; it must reject with
+  exit 2 without waiting for credential input. No production behavior was changed.
+- Synthetic container boundary probe: PASS. Attached stdin was empty in Python;
+  host GH_TOKEN/GITHUB_TOKEN canaries were not inherited; no `/usr/bin/gh` mount;
+  non-root execution and loopback-only interfaces. No real credential was used.

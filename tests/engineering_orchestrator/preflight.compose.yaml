@@ -5,6 +5,10 @@ services:
       context: ../..
       dockerfile: tests/engineering_orchestrator/preflight.Dockerfile
     network_mode: none
+    stdin_open: false
+    # Close even an explicitly attached pipe before PR-controlled Python starts.
+    # $$ escapes Compose interpolation; the shell only forwards positional argv.
+    entrypoint: [/bin/sh, -c, 'exec "$$@" </dev/null', --]
     init: true
     read_only: true
     cap_drop: [ALL]
@@ -17,17 +21,3 @@ services:
     volumes:
       - ../..:/workspace:ro
     command: [python3, tests/engineering_orchestrator/run_tests.py]
-  # Explicit operator-run read-only private-source probe, never default CI.
-  # Mount only the installed CLI. The trusted launcher pipes authentication
-  # through stdin; never mount a desktop keyring, DBus socket or credential file.
-  preflight-live-source:
-    extends: preflight-tests
-    profiles: [live-source]
-    network_mode: bridge
-    user: "${PREFLIGHT_UID:-1000}:${PREFLIGHT_GID:-1000}"
-    environment:
-      HOME: /tmp
-      GH_CONFIG_DIR: /tmp/unconfigured-gh
-    volumes:
-      - /usr/bin/gh:/usr/bin/gh:ro
-    command: [python3, -B, -m, tests.engineering_orchestrator.test_task_preflight, --live-source-probe]
