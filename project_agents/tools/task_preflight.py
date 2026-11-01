@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path, PurePosixPath
@@ -15,9 +16,26 @@ import re
 import stat
 import subprocess
 import sys
+import time
 from typing import Any, Mapping
 
-import control_plane as native
+# File-anchored bootstrap also works as a direct script and under python -P.
+# Register aliases before the CLI calls back through the native entry point.
+for _alias in ("task_preflight", "project_agents.tools.task_preflight"):
+    _existing = sys.modules.get(_alias)
+    if _existing is not None and _existing is not sys.modules[__name__]:
+        raise ImportError("conflicting preflight module identity")
+    sys.modules[_alias] = sys.modules[__name__]
+_native_name = "project_agents.tools.control_plane"
+_native_path = Path(__file__).resolve().with_name("control_plane.py")
+native = sys.modules.get(_native_name)
+if native is None:
+    _spec = importlib.util.spec_from_file_location(_native_name, _native_path)
+    native = importlib.util.module_from_spec(_spec)
+    sys.modules[_native_name] = native
+    _spec.loader.exec_module(native)
+elif Path(native.__file__).resolve() != _native_path:
+    raise ImportError("untrusted control-plane module origin")
 
 REPOSITORY = "gagandsm-max/platform"
 REMOTE = "https://github.com/gagandsm-max/platform.git"
@@ -41,6 +59,12 @@ NATIVE_INPUTS = ("project_agents/tools/control_plane.py", "project_agents/tool_a
     "project_agents/skills/manifest.json", "project_agents/schemas/task_manifest.schema.json",
     "project_agents/schemas/handoff.schema.json")
 MAX_JSON_BYTES = 1_048_576
+MAX_FILE_BYTES = 64 * 1024 * 1024
+MAX_SCAN_BYTES = 256 * 1024 * 1024
+MAX_SCAN_ENTRIES = 100_000
+MAX_SCAN_DEPTH = 64
+MAX_SCAN_SECONDS = 30
+READ_CHUNK_BYTES = 64 * 1024
 GITHUB_CLI = "/usr/bin/gh"
 SOURCE_TIMEOUT_SECONDS = 20
 # A read-only query, never supplied by the task/checkout. Authentication is
@@ -65,21 +89,26 @@ def fail(code: str) -> None:
 def _environment() -> dict[str, str]:
     # Exclude inherited GIT_DIR, alternate object stores, config injection,
     # SSH commands and credential helpers from target inspection.
-    env = {k: v for k, v in os.environ.items()
-           if not k.startswith(("GIT_", "GH_", "GITHUB_"))}
+    env = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
-               GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", LC_ALL="C")
+               GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1",
+               GIT_NO_LAZY_FETCH="1", LC_ALL="C")
     return env
 
 
 def _git(repo: Path | None, *args: str) -> bytes:
-    command = ["git", "--no-optional-locks", "-c", "core.fsmonitor=false",
+    command = ["/usr/bin/git", "--no-optional-locks", "-c", "core.fsmonitor=false",
         "-c", "core.hooksPath=/dev/null", "-c", "core.attributesFile=/dev/null",
-        "-c", "protocol.ext.allow=never", "-c", "diff.ignoreSubmodules=none"]
+        "-c", "protocol.allow=never", "-c", "protocol.ext.allow=never",
+        "-c", "diff.ignoreSubmodules=none"]
     if repo is not None:
         command += ["-C", str(repo)]
+    env = _environment()
+    # Stronger than protocol.allow defaults: local config cannot opt a helper
+    # back in, including a promisor object's attempted lazy fetch.
+    env["GIT_ALLOW_PROTOCOL"] = ""
     try:
-        result = subprocess.run(command + list(args), cwd="/", env=_environment(),
+        result = subprocess.run(command + list(args), cwd="/", env=env,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=20, check=False)
     except (OSError, subprocess.TimeoutExpired):
         raise PreflightError("GIT_UNAVAILABLE_OR_TIMEOUT") from None
@@ -197,19 +226,237 @@ def remote_heads(branch: str) -> dict[str, str | None]:
     return {"main": main, "branch": remote}
 
 
+def _object_format(repo: Path) -> str:
+    algorithm = _text(repo, "rev-parse", "--show-object-format=storage")
+    if algorithm not in {"sha1", "sha256"}:
+        fail("UNSUPPORTED_OBJECT_FORMAT")
+    return algorithm
+
+
+def _entries(repo: Path, revision: str | None, algorithm: str) -> dict[str, tuple[str, str]]:
+    # Object/index metadata only. Never diff a worktree, refresh an index,
+    # hash-object with filters, or ask cat-file to perform conversions.
+    data = _git(repo, "ls-files", "--stage", "-z") if revision is None else _git(
+        repo, "ls-tree", "-r", "-z", revision)
+    if len(data) > MAX_SCAN_ENTRIES * 4096:
+        fail("INVENTORY_LIMIT")
+    if data and not data.endswith(b"\0"):
+        fail("INVALID_GIT_INDEX")
+    result = {}
+    for row in data.split(b"\0"):
+        if not row:
+            continue
+        try:
+            meta, raw = row.split(b"\t", 1)
+            fields = meta.decode("ascii").split()
+            path = _path(raw.decode("utf-8", errors="strict"))
+            if len(fields) != 3:
+                fail("INVALID_GIT_INDEX")
+            mode, oid = fields[0], fields[1] if revision is None else fields[2]
+            if revision is None and fields[2] != "0":
+                fail("UNMERGED_INDEX")
+            if (path in result or mode not in {"100644", "100755", "120000", "160000"}
+                    or not re.fullmatch(r"[0-9a-f]{%d}" % (40 if algorithm == "sha1" else 64), oid)):
+                fail("INVALID_GIT_INDEX")
+            result[path] = (mode, oid)
+            if len(result) > MAX_SCAN_ENTRIES:
+                fail("INVENTORY_LIMIT")
+        except PreflightError:
+            raise
+        except (ValueError, UnicodeError, IndexError):
+            raise PreflightError("INVALID_GIT_INDEX") from None
+    return result
+
+
+def _signature(info: os.stat_result) -> tuple[int, ...]:
+    # Exclude atime: reading may update it. Include ctime to catch writes whose
+    # size/mtime were restored, as well as inode replacement and mode changes.
+    return (info.st_dev, info.st_ino, info.st_mode, info.st_size,
+            info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _small_file(path: Path) -> bytes:
+    # Git metadata pointers must not traverse a symlink, including parents.
+    if not path.is_absolute() or any(p in {".", ".."} for p in path.parts):
+        fail("INVALID_ROOT_GIT_METADATA")
+    parent = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        for part in path.parts[1:-1]:
+            child = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+            os.close(parent)
+            parent = child
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+    finally:
+        os.close(parent)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size > 4096:
+            fail("INVALID_ROOT_GIT_METADATA")
+        data = os.read(fd, 4097)
+        if len(data) > 4096 or _signature(before) != _signature(os.fstat(fd)):
+            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+        return data
+    finally:
+        os.close(fd)
+
+
+def _root_git_entry(repo: Path) -> tuple:
+    entry = repo / ".git"
+    info = entry.lstat()
+    if not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode)):
+        fail("INVALID_ROOT_GIT_METADATA")
+    gitdir = Path(_text(repo, "rev-parse", "--absolute-git-dir"))
+    common = Path(_text(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    if (not gitdir.is_absolute() or gitdir.resolve(strict=True) != gitdir
+            or common.resolve(strict=True) != common):
+        fail("INVALID_ROOT_GIT_METADATA")
+    data = b""
+    if stat.S_ISDIR(info.st_mode):
+        if gitdir != entry or common != entry:
+            fail("INVALID_ROOT_GIT_METADATA")
+    else:
+        # Admit linked worktrees only with a matching gitfile, common directory
+        # and administrative backlink. Arbitrary gitfile redirects are denied.
+        data = _small_file(entry)
+        try:
+            pointer = data.decode("utf-8").rstrip("\n")
+            if not pointer.startswith("gitdir: "):
+                fail("INVALID_ROOT_GIT_METADATA")
+            if (repo / pointer[8:]).resolve(strict=True) != gitdir:
+                fail("INVALID_ROOT_GIT_METADATA")
+            if gitdir.parent != common / "worktrees":
+                fail("INVALID_ROOT_GIT_METADATA")
+            backlink = _small_file(gitdir / "gitdir").decode("utf-8").rstrip("\n")
+            if Path(backlink) != entry:
+                fail("INVALID_ROOT_GIT_METADATA")
+        except UnicodeError:
+            fail("INVALID_ROOT_GIT_METADATA")
+    if _signature(info) != _signature(entry.lstat()):
+        fail("SOURCE_MOVED_DURING_PREFLIGHT")
+    return (_signature(info), data, str(gitdir), str(common))
+
+
+def _physical_snapshot(repo: Path, algorithm: str) -> dict[str, tuple]:
+    """Bounded descriptor-relative traversal; never follow target symlinks."""
+    snapshot = {}
+    budget = [0, 0]  # entries, total file bytes
+    deadline = time.monotonic() + MAX_SCAN_SECONDS
+
+    def check():
+        if (budget[0] > MAX_SCAN_ENTRIES or budget[1] > MAX_SCAN_BYTES
+                or time.monotonic() > deadline):
+            fail("INVENTORY_LIMIT")
+
+    def walk(fd: int, prefix: str, depth: int):
+        if depth > MAX_SCAN_DEPTH:
+            fail("INVENTORY_LIMIT")
+        before = os.fstat(fd)
+        snapshot[prefix] = ("040000", "", _signature(before))
+        with os.scandir(fd) as entries:
+            for entry in entries:
+                budget[0] += 1
+                check()
+                name = entry.name
+                path = name if not prefix else prefix + "/" + name
+                if path == ".git":
+                    continue  # Already positively verified, never traversed.
+                if name == ".git":
+                    fail("NESTED_GIT_METADATA")
+                _path(path)
+                if len(path.encode("utf-8", errors="strict")) > 4096:
+                    fail("INVENTORY_LIMIT")
+                info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+                if stat.S_ISLNK(info.st_mode):
+                    if path != "AGENTS.md":
+                        fail("SYMLINK_PATH")
+                    data = os.fsencode(os.readlink(name, dir_fd=fd))
+                    digest = hashlib.new(algorithm, b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+                    snapshot[path] = ("120000", digest, _signature(info))
+                elif stat.S_ISDIR(info.st_mode):
+                    child = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                    try:
+                        if _signature(info) != _signature(os.fstat(child)):
+                            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+                        walk(child, path, depth + 1)
+                    finally:
+                        os.close(child)
+                elif stat.S_ISREG(info.st_mode):
+                    if info.st_size > MAX_FILE_BYTES:
+                        fail("INVENTORY_LIMIT")
+                    budget[1] += info.st_size
+                    check()
+                    child = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+                    try:
+                        if _signature(info) != _signature(os.fstat(child)):
+                            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+                        digest = hashlib.new(algorithm, b"blob " + str(info.st_size).encode() + b"\0")
+                        remaining = info.st_size
+                        while remaining:
+                            check()
+                            chunk = os.read(child, min(remaining, READ_CHUNK_BYTES))
+                            if not chunk:
+                                fail("SOURCE_MOVED_DURING_PREFLIGHT")
+                            digest.update(chunk)
+                            remaining -= len(chunk)
+                        if os.read(child, 1) or _signature(info) != _signature(os.fstat(child)):
+                            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+                        mode = "100755" if info.st_mode & 0o111 else "100644"
+                        snapshot[path] = (mode, digest.hexdigest(), _signature(info))
+                    finally:
+                        os.close(child)
+                else:
+                    fail("SPECIAL_FILE_PATH")
+                if _signature(info) != _signature(os.stat(name, dir_fd=fd, follow_symlinks=False)):
+                    fail("SOURCE_MOVED_DURING_PREFLIGHT")
+        if _signature(before) != _signature(os.fstat(fd)):
+            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+
+    try:
+        metadata = _root_git_entry(repo)
+        fd = os.open(repo, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            walk(fd, "", 0)
+            if _signature(os.fstat(fd)) != _signature(repo.lstat()):
+                fail("SOURCE_MOVED_DURING_PREFLIGHT")
+        finally:
+            os.close(fd)
+        if metadata != _root_git_entry(repo):
+            fail("SOURCE_MOVED_DURING_PREFLIGHT")
+        snapshot[".git"] = metadata
+    except OSError:
+        raise PreflightError("FILESYSTEM_UNREADABLE_OR_MOVED") from None
+    except UnicodeError:
+        raise PreflightError("INVALID_PATH_ENCODING") from None
+    return snapshot
+
+
+def _inventory(repo: Path, base: str) -> tuple[dict[str, list[str]], tuple]:
+    algorithm = _object_format(repo)
+    if not re.fullmatch(r"[0-9a-f]{%d}" % (40 if algorithm == "sha1" else 64), base):
+        fail("INVALID_SHA")
+    baseline, head, index = (_entries(repo, ref, algorithm) for ref in (base, "HEAD", None))
+    physical = _physical_snapshot(repo, algorithm)
+    files = {p: row[:2] for p, row in physical.items() if p not in {"", ".git"} and row[0] != "040000"}
+    # Empty directories are not represented by Git but still belong to the
+    # physical task inventory. Do not silently grant an out-of-scope empty tree.
+    directories = {p for p, row in physical.items() if p not in {"", ".git"} and row[0] == "040000"}
+    ancestors = set()
+    for p in set(files) | directories | set(index):
+        ancestors.update(str(parent) for parent in PurePosixPath(p).parents if str(parent) != ".")
+    extras = (set(files) - set(index)) | (directories - ancestors)
+    ignored = set(_paths(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard")) & extras
+
+    def diff(left, right):
+        return sorted(p for p in set(left) | set(right) if left.get(p) != right.get(p))
+
+    result = {"committed": diff(baseline, head), "staged": diff(head, index),
+        "unstaged": sorted(p for p in index if index[p] != files.get(p)),
+        "untracked": sorted(extras - ignored), "ignored": sorted(ignored)}
+    return result, (physical, baseline, head, index)
+
+
 def changes(repo: Path, base: str) -> dict[str, list[str]]:
-    _sha(base)
-    # Separate index and worktree diffs: HEAD->worktree alone loses staged
-    # changes that an unstaged edit reverses. Disable rename pairing so BOTH
-    # endpoints must fit scope. Include ignored untracked files deliberately.
-    common = ("diff", "--no-ext-diff", "--no-textconv", "--no-renames", "--name-only", "-z")
-    return {
-        "committed": sorted(set(_paths(repo, *common, base, "HEAD", "--"))),
-        "staged": sorted(set(_paths(repo, *common, "--cached", "HEAD", "--"))),
-        "unstaged": sorted(set(_paths(repo, *common, "--"))),
-        "untracked": sorted(set(_paths(repo, "ls-files", "-z", "--others", "--exclude-standard"))),
-        "ignored": sorted(set(_paths(repo, "ls-files", "-z", "--others", "--ignored", "--exclude-standard"))),
-    }
+    return _inventory(repo, base)[0]
 
 
 def _protected(path: str) -> bool:
@@ -232,24 +479,7 @@ def _no_symlink(repo: Path, path: str) -> None:
 
 
 def _modes(repo: Path, revision: str | None) -> dict[str, str]:
-    data = _git(repo, "ls-files", "--stage", "-z") if revision is None else _git(
-        repo, "ls-tree", "-r", "-z", revision)
-    modes = {}
-    for row in data.split(b"\0"):
-        if not row:
-            continue
-        try:
-            meta, raw = row.split(b"\t", 1)
-            fields = meta.decode("ascii").split()
-            path = raw.decode("utf-8", errors="strict")
-            if revision is None and fields[2] != "0":
-                fail("UNMERGED_INDEX")
-            modes[path] = fields[0]
-        except PreflightError:
-            raise
-        except (ValueError, UnicodeError, IndexError):
-            raise PreflightError("INVALID_GIT_INDEX") from None
-    return modes
+    return {path: row[0] for path, row in _entries(repo, revision, _object_format(repo)).items()}
 
 
 def _verify_native_installation(repo: Path, main: str) -> None:
@@ -262,37 +492,15 @@ def _verify_native_installation(repo: Path, main: str) -> None:
             fail("STALE_NATIVE_POLICY")
 
 
-def _verify_policy_files(repo: Path, main: str) -> None:
+def _verify_policy_files(repo: Path, main: str, observation: tuple) -> None:
     # Direct byte/mode verification defeats assume-unchanged, skip-worktree and
     # stat-cache hiding of policy edits. The canonical root AGENTS symlink is
     # allowed only with its exact baseline target; parent symlinks never are.
-    for row in _git(repo, "ls-tree", "-r", "-z", main).split(b"\0"):
-        if not row:
-            continue
-        metadata, raw_path = row.split(b"\t", 1)
-        try:
-            path = raw_path.decode("utf-8", errors="strict")
-        except UnicodeError:
-            raise PreflightError("INVALID_PATH_ENCODING") from None
+    physical, baseline, _, _ = observation
+    for path, expected in baseline.items():
         if not _protected(path):
             continue
-        mode, _, expected = metadata.decode("ascii").split()
-        target = repo / path
-        _no_symlink(repo, str(PurePosixPath(path).parent))
-        try:
-            actual_mode = target.lstat().st_mode
-            if mode == "120000" and path == "AGENTS.md" and stat.S_ISLNK(actual_mode):
-                data = os.readlink(target).encode()
-            elif mode in {"100644", "100755"} and stat.S_ISREG(actual_mode):
-                if bool(actual_mode & 0o111) != (mode == "100755"):
-                    fail("GOVERNANCE_CHANGE")
-                data = target.read_bytes()
-            else:
-                fail("GOVERNANCE_CHANGE")
-        except OSError:
-            raise PreflightError("GOVERNANCE_CHANGE") from None
-        actual = hashlib.sha1(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
-        if actual != expected:
+        if physical.get(path, ())[:2] != expected:
             fail("GOVERNANCE_CHANGE")
 
 
@@ -355,14 +563,14 @@ def inspect_task(worktree: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
         lane = "PUBLISHED_REVIEW_CANDIDATE"
     else:
         fail("UNSUPPORTED_PREFLIGHT_STATE")
-    inventory = changes(root, main)
+    inventory, observation = _inventory(root, main)
     paths = sorted(set().union(*map(set, inventory.values())))
     scopes = [_path(p.rstrip("/")) for p in manifest["scope"]]
     if not scopes:
         fail("EMPTY_SCOPE")
     if any(_protected(p) for p in paths):
         fail("GOVERNANCE_CHANGE")
-    _verify_policy_files(root, main)
+    _verify_policy_files(root, main, observation)
     _visible_index(root)
     try:
         native.assert_write_paths_in_scope(paths, scopes, status)
@@ -376,7 +584,7 @@ def inspect_task(worktree: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
     if status in REVIEW_STATES and any(inventory[k] for k in inventory if k != "committed"):
         fail("DIRTY_REVIEW_WORKTREE")
     # Detect observable drift during inspection. No claim of atomicity or lease.
-    if (_text(root, "rev-parse", "HEAD") != head or changes(root, main) != inventory
+    if (_text(root, "rev-parse", "HEAD") != head or _inventory(root, main) != (inventory, observation)
             or remote_heads(branch) != observed):
         fail("SOURCE_MOVED_DURING_PREFLIGHT")
     return {"result": "INSPECTION_ONLY", "structuralStatus": "PASS", "taskId": manifest["taskId"],

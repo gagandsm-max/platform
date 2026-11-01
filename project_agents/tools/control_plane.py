@@ -8,11 +8,40 @@ contract documents; this module enforces them without generating those files.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import re
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
+
+# Both legacy bare imports and package imports resolve to this installed module.
+# Never search sys.path (and therefore CWD) for the optional sibling inspector.
+for _alias in ("control_plane", "project_agents.tools.control_plane"):
+    _existing = sys.modules.get(_alias)
+    if _existing is not None and _existing is not sys.modules[__name__]:
+        raise ImportError("conflicting control-plane module identity")
+    sys.modules[_alias] = sys.modules[__name__]
+
+
+def _load_preflight():
+    name = "project_agents.tools.task_preflight"
+    path = Path(__file__).resolve().with_name("task_preflight.py")
+    module = sys.modules.get(name)
+    if module is not None:
+        if Path(module.__file__).resolve() != path:
+            raise ImportError("untrusted preflight module origin")
+        return module
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except BaseException:
+        sys.modules.pop(name, None)
+        raise
+    return module
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_ROOT = REPO_ROOT / "project_agents"
@@ -852,6 +881,4 @@ def inspect_task_preflight(worktree: Path, manifest: Mapping[str, Any]) -> dict[
     The caller must run this installed control plane from a trusted, isolated
     runtime. The inspected worktree is data, never an import source.
     """
-    from task_preflight import inspect_task
-
-    return inspect_task(worktree, manifest)
+    return _load_preflight().inspect_task(worktree, manifest)

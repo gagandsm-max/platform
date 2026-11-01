@@ -29,6 +29,15 @@ PR's code with privileged CI credentials, and do not mount credentials or a
 Docker socket into the test container. Deploying the trusted CI runner belongs
 to Phase B; this PR does not change any workflow or required-check policy.
 
+Sibling modules resolve by their installed `__file__` directory, with one module
+and exception identity shared by direct-script, legacy bare and package imports.
+There is no CWD/sys.path fallback for loading the other module. The documented
+CLI and `python -P` package imports preserve specific PreflightError codes.
+Conflicting preloaded module identities are rejected. Use one independently
+trusted installation per interpreter; interpreter startup, standard library and
+initial package resolution must also be trusted (prefer `-B -P`). This is not a
+sandbox for an already compromised Python process.
+
 The CLI accepts no actor, token, CI result, override, policy path or bypass flag.
 Legal tool-role combinations are **validated declarations**, not authenticated
 caller identities. Exit 0 means structural inspection passed, with all of:
@@ -97,18 +106,47 @@ acceptance is possible here; ancestry is insufficient for published evidence.
 
 ## Filesystem and policy checks
 
-Changes are the union of main→HEAD, HEAD→index, index→worktree, untracked and
-ignored-untracked paths. NUL-delimited Git output prevents quoted-path parsing
-errors. Separate index/worktree diffs catch cancellation. Rename detection is
-disabled so both source and destination must satisfy the allowed scope.
+Changes are the union of main→HEAD, HEAD→index, raw index→filesystem comparison,
+untracked and ignored-untracked paths. NUL-delimited tree/index metadata prevents
+quoted-path parsing errors. Object/mode comparisons preserve both staged and
+unstaged cancellation, and both rename endpoints must satisfy allowed scope.
+No worktree `git diff`, index refresh or conversion-enabled content command is
+used. Git clean/process filters, attributes and local configuration cannot supply
+comparison bytes or executable commands. Local Git runs through `/usr/bin/git`
+with a minimal environment, hooks/fsmonitor disabled, remote protocols denied
+and lazy fetching disabled. Ignore rules only label files already found by raw
+traversal; they never exempt paths from inspection.
 Scope is a literal relative file/directory prefix, never a glob. Traversal,
 absolute paths, `.git`, control characters, non-UTF-8 and ambiguous paths block.
 
-Changed symlinks and symlink parents, tree/index symlink modes, submodule
-gitlinks, special files and unmerged indexes block. Canonical unchanged root
-`AGENTS.md` may remain its existing symlink. Policy bytes/modes are compared
-directly with pinned main, including changes hidden by index flags. Any remaining
-assume-unchanged/skip-worktree flag blocks ordinary source inspection as well.
+Raw traversal uses descriptor-relative `scandir`, no-follow stat/open and directory
+descriptors, including ignored/untracked files and empty directories that Git
+omits. Nested `.git` files, directories and symlinks always block. Only a verified
+root metadata directory or linked-worktree gitfile with matching administrative
+directory/common directory/backlink is excluded. Root metadata symlinks and
+arbitrary gitfile redirects are rejected. No symlink targets are traversed.
+All other symlinks, tree/index symlink changes, submodule gitlinks, special files
+(including FIFO/socket), inaccessible entries and unmerged indexes block. The
+canonical unchanged root `AGENTS.md` symlink is compared as link text against
+pinned main. Policy bytes/modes are checked even if hidden by index flags; any
+remaining assume-unchanged/skip-worktree flag also blocks ordinary inspection.
+
+Each regular file is hashed as the raw Git blob header plus streamed bytes using
+the repository's SHA-1 or SHA-256 object format. Reads are at most 64 KiB, capped
+at 64 MiB per file and 256 MiB total per physical scan; traversal caps are 100,000
+entries, 64 directory levels, 4,096 UTF-8 path bytes and 30 seconds per scan.
+Limit exhaustion fails closed as INVENTORY_LIMIT. V2 task/remote SHA contracts
+remain 40-hex SHA-1; raw SHA-256 inventory is tested, but full SHA-256 task support
+requires separate v2 schema change control and is not claimed here.
+
+Raw bytes deliberately do not apply CRLF/EOL, encoding, clean/smudge or LFS
+normalization. A CRLF working file differing from its LF index blob, or an LFS
+materialized payload differing from its index pointer, is dirty. It blocks review,
+and ordinary scope/governance rules still apply during implementation. Oversized
+LFS payloads fail the byte cap. No normalization/ignore/bypass option is provided.
+Use byte-identical, bounded review fixtures; generated `.env`/bytecode remain
+subject to the same checks. This can intentionally reject otherwise Git-clean
+development checkouts.
 
 Protected surfaces include Mother References, **all `project_agents/**`**, generated
 projections, GitHub workflows and any nested `AGENTS.md`. This includes current
@@ -120,8 +158,11 @@ separate authorized governance review lane and cannot use its own ordinary-task
 preflight to approve itself. There is intentionally no policy-change bypass.
 
 This is a point-in-time check, not an atomic filesystem snapshot, OS sandbox,
-credential boundary, or lease. It rechecks observable head/ref/path inventory
-drift but cannot exclude concurrent byte edits or same-user compromise. These
+credential boundary, or lease. It compares raw digests, file/directory identity,
+size, mode, mtime and ctime before/after streaming and across two inventories,
+plus index/object/ref observations. Detected changes fail closed, including changes
+retaining the same path inventory. It cannot exclude all concurrent edits or
+same-user compromise. These
 limitations must not be converted into enforcement claims.
 
 ## POC disposition
@@ -318,3 +359,35 @@ above remain part of the evidence history. Independent acceptance remains pendin
 - Synthetic container boundary probe: PASS. Attached stdin was empty in Python;
   host GH_TOKEN/GITHUB_TOKEN canaries were not inherited; no `/usr/bin/gh` mount;
   non-root execution and loopback-only interfaces. No real credential was used.
+
+### Independently adjudicated audit corrections (2026-11-01)
+
+Rejected input: `b5425241dae3b75b4584173437eb4bdb680004ff`. Lead adjudication:
+https://github.com/gagandsm-max/platform/pull/286#pullrequestreview-5727320526.
+The complete Antigravity report was read from its retained transcript, step 135:
+`/home/gagan/.gemini/antigravity-cli/brain/90e1c717-dc80-4a97-9450-dd8b01c2d736/.system_generated/logs/transcript_full.jsonl`.
+The report and original Git objects are preserved; this correction does not amend
+their findings or convert the old 322-test/green-CI evidence into security acceptance.
+
+| Original adverse evidence | Rejected-head result | Correction / new regression |
+| --- | --- | --- |
+| P0-01 clean/process conversion commands | Target clean command executed; transformed output concealed out-of-scope bytes in writer/review lanes | Raw streamed index-blob comparison; both driver types tested with marker commands, scope concealment and both lanes |
+| P1-01 circular bare imports | Direct CLI lost WRONG_REPOSITORY; safe-path package import broke; hostile CWD module executed | File-anchored single module identity; real CLI/package subprocesses with/without -P and hostile sibling modules |
+| P1-02 Git-omitted physical paths | Nested governance/outside .git trees and symlinks passed clean review | Bounded descriptor traversal; nested metadata files/directories/symlinks, ignored/unlisted paths, special files, unreadable paths, linked worktrees |
+
+First corrective focused run: 94 executed, 93 PASS / 1 FAIL, zero errors/skips.
+The entry-count resource cap rejected, but emitted INVALID_GIT_INDEX instead of
+INVENTORY_LIMIT. Corrected the error classification without weakening the cap.
+Second focused run: 94 PASS, zero failures/errors/skips. Final exact-commit full
+suite/validator results and CI identity are recorded separately in the draft PR.
+
+Remaining limitations: this implementation requires Linux/POSIX no-follow and
+directory-descriptor filesystem operations. Blocked/remote filesystems can stall
+an individual OS read; the scan deadline is checked between bounded reads, not a
+kernel I/O cancellation guarantee. No atomic snapshot/lease or same-user process
+isolation is claimed. Git/source subprocess output buffering remains the audited
+P2 hardening item; raw file hashing is streamed and capped. Desktop keyring
+availability, ignored build artifacts, image reproducibility and privileged
+self-hosted CI isolation remain separate P2/Phase B/C work; no real credentials
+are passed into PR tests to work around them. Next independent Antigravity audit
+must use an isolated detached exact-SHA checkout, never the writer worktree.

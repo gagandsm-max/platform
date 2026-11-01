@@ -9,11 +9,13 @@ from __future__ import annotations
 
 import contextlib
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -427,15 +429,205 @@ class PhysicalPreflightTests(unittest.TestCase):
             self.blocked("SOURCE_MOVED_DURING_PREFLIGHT")
 
     def test_mutation_during_inventory_rejected(self):
-        original = guard.changes
+        original = guard._inventory
         calls = []
         def mutate(repo, base):
             calls.append(1)
             if len(calls) == 2:
                 self.put("src/late", "late\n")
             return original(repo, base)
-        with patch.object(guard, "changes", side_effect=mutate):
+        with patch.object(guard, "_inventory", side_effect=mutate):
             self.blocked("SOURCE_MOVED_DURING_PREFLIGHT")
+
+    def _malicious_filter(self, kind):
+        self.publish()
+        marker = self.directory / "filter-executed"
+        self.git("config", "filter.hide." + kind,
+            f"printf executed > '{marker}'; printf 'protected by scope\\n'")
+        self.put(".git/info/attributes", "outside.txt filter=hide\n")
+        self.put("outside.txt", "malicious raw bytes outside allowed scope\n")
+        for state in ("IMPLEMENTATION", "SOURCE_REVIEW"):
+            with self.subTest(state=state, filter=kind):
+                self.manifest["status"] = state
+                self.assertIn("outside.txt", guard.changes(self.repo, self.base)["unstaged"])
+                self.blocked("OUTSIDE_SCOPE")
+                self.assertFalse(marker.exists(), "target conversion filter executed")
+
+    def test_clean_filter_never_executes_or_conceals_outside_edit(self):
+        self._malicious_filter("clean")
+
+    def test_process_filter_never_executes_or_conceals_outside_edit(self):
+        self._malicious_filter("process")
+
+    def test_worktree_attributes_cannot_hide_raw_changes_or_execute(self):
+        marker = self.directory / "filter-executed"
+        self.put("src/.gitattributes", "one.txt filter=hide\n")
+        self.git("config", "filter.hide.clean", f"touch '{marker}'; printf 'base\\n'")
+        self.put("src/one.txt", "different raw bytes\n")
+        result = self.inspect()
+        self.assertEqual(result["changes"]["unstaged"], ["src/one.txt"])
+        self.assertFalse(marker.exists())
+
+    def test_raw_mode_check_ignores_core_filemode_setting(self):
+        self.git("config", "core.filemode", "false")
+        (self.repo / "outside.txt").chmod(0o755)
+        self.blocked("OUTSIDE_SCOPE")
+
+    def test_raw_deleted_file_is_detected(self):
+        (self.repo / "outside.txt").unlink()
+        self.blocked("OUTSIDE_SCOPE")
+
+    def test_crlf_normalization_does_not_hide_raw_bytes(self):
+        self.git("config", "core.autocrlf", "true")
+        (self.repo / "outside.txt").write_bytes(b"protected by scope\r\n")
+        self.blocked("OUTSIDE_SCOPE")
+
+    def test_lfs_style_clean_output_does_not_hide_materialized_bytes(self):
+        self.publish()
+        marker = self.directory / "lfs-executed"
+        self.git("config", "filter.lfs.clean", f"touch '{marker}'; printf 'base\\n'")
+        self.put(".git/info/attributes", "src/one.txt filter=lfs\n")
+        self.put("src/one.txt", "materialized payload instead of index blob")
+        self.manifest["status"] = "SOURCE_REVIEW"
+        self.blocked("DIRTY_REVIEW_WORKTREE")
+        self.assertFalse(marker.exists())
+
+    def test_same_changed_path_mutation_during_inspection_is_detected(self):
+        self.put("src/one.txt", "first\n")
+        original = guard._inventory
+        calls = []
+        def mutate(repo, base):
+            calls.append(1)
+            if len(calls) == 2:
+                self.put("src/one.txt", "other\n")
+            return original(repo, base)
+        with patch.object(guard, "_inventory", side_effect=mutate):
+            self.blocked("SOURCE_MOVED_DURING_PREFLIGHT")
+
+    def test_mutation_during_streaming_is_detected(self):
+        original = guard.os.read
+        changed = []
+        def mutate(fd, amount):
+            value = original(fd, amount)
+            if value == b"protected by scope\n" and not changed:
+                changed.append(True)
+                self.put("outside.txt", "changed during read\n")
+            return value
+        with patch.object(guard.os, "read", side_effect=mutate):
+            self.blocked("SOURCE_MOVED_DURING_PREFLIGHT")
+        self.assertTrue(changed)
+
+    def test_nested_git_metadata_rejected_in_writer_and_review(self):
+        self.publish()
+        for state in ("IMPLEMENTATION", "SOURCE_REVIEW"):
+            self.manifest["status"] = state
+            for parent in ("project_agents", "outside", "src"):
+                for kind in ("directory", "file", "symlink"):
+                    with self.subTest(state=state, parent=parent, kind=kind):
+                        path = self.repo / parent / ".git"
+                        path.parent.mkdir(exist_ok=True)
+                        if kind == "directory":
+                            path.mkdir()
+                            (path / "AGENTS.md").write_text("hidden")
+                        elif kind == "file":
+                            path.write_text("not valid metadata")
+                        else:
+                            path.symlink_to(self.directory)
+                        self.blocked("NESTED_GIT_METADATA")
+                        if kind == "directory":
+                            shutil.rmtree(path)  # Only this disposable fixture.
+                        else:
+                            path.unlink()
+
+    def test_git_omitted_ignored_governance_file_is_still_found(self):
+        self.put(".git/info/exclude", "project_agents/hidden/\n")
+        self.put("project_agents/hidden/policy.txt", "hidden")
+        self.blocked("GOVERNANCE_CHANGE")
+
+    def test_inventory_does_not_depend_on_git_untracked_listing(self):
+        self.put("outside/new.txt", "not in git output")
+        with patch.object(guard, "_paths", return_value=[]):
+            self.blocked("OUTSIDE_SCOPE")
+
+    def test_ignored_review_file_and_empty_directory_block(self):
+        self.publish()
+        self.manifest["status"] = "SOURCE_REVIEW"
+        self.put(".git/info/exclude", "src/hidden\n")
+        self.put("src/hidden", "ignored bytes")
+        self.blocked("DIRTY_REVIEW_WORKTREE")
+        (self.repo / "src/hidden").unlink()
+        (self.repo / "src/empty").mkdir()
+        self.blocked("DIRTY_REVIEW_WORKTREE")
+
+    def test_symlinked_directory_not_followed(self):
+        outside = self.directory / "outside-tree"
+        outside.mkdir()
+        (outside / "unchanged").write_text("retain")
+        (self.repo / "src/link").symlink_to(outside, target_is_directory=True)
+        self.blocked("SYMLINK_PATH")
+        self.assertEqual((outside / "unchanged").read_text(), "retain")
+
+    def test_fifo_and_socket_are_rejected_without_opening(self):
+        path = self.repo / "src/special"
+        os.mkfifo(path)
+        self.blocked("SPECIAL_FILE_PATH")
+        path.unlink()
+        with socket.socket(socket.AF_UNIX) as sock:
+            sock.bind(str(path))
+            self.blocked("SPECIAL_FILE_PATH")
+
+    def test_inaccessible_file_and_directory_fail_closed(self):
+        for relative in ("outside.txt", "src"):
+            path = self.repo / relative
+            old = path.stat().st_mode
+            try:
+                path.chmod(0)
+                # Deterministic even if a reviewer invokes the suite as root.
+                original = guard.os.open
+                def denied(name, *args, **kwargs):
+                    if str(name) == relative:
+                        raise PermissionError("synthetic denied")
+                    return original(name, *args, **kwargs)
+                with patch.object(guard.os, "open", side_effect=denied):
+                    self.blocked("FILESYSTEM_UNREADABLE_OR_MOVED")
+            finally:
+                path.chmod(old)
+
+    def test_inventory_resource_limits_fail_closed(self):
+        for limit in ("MAX_FILE_BYTES", "MAX_SCAN_BYTES", "MAX_SCAN_ENTRIES",
+                      "MAX_SCAN_DEPTH", "MAX_SCAN_SECONDS"):
+            with self.subTest(limit=limit), patch.object(guard, limit, 0):
+                self.blocked("INVENTORY_LIMIT")
+
+    def test_linked_worktree_metadata_is_verified(self):
+        self.publish()
+        linked = self.directory / "linked"
+        self.git("worktree", "add", "--detach", str(linked), "HEAD")
+        manifest = dict(self.manifest, worktree=str(linked), status="SOURCE_REVIEW")
+        result = guard.inspect_task(linked, manifest)
+        self.assertEqual(result["result"], "INSPECTION_ONLY")
+        (linked / "src/.git").mkdir()
+        with self.assertRaisesRegex(guard.PreflightError, "NESTED_GIT_METADATA"):
+            guard.inspect_task(linked, manifest)
+
+    def test_root_git_symlink_is_not_a_metadata_exception(self):
+        original = self.repo / ".git"
+        moved = self.directory / "moved-metadata"
+        original.rename(moved)
+        original.symlink_to(moved, target_is_directory=True)
+        with self.assertRaisesRegex(guard.PreflightError, "INVALID_ROOT_GIT_METADATA"):
+            guard.changes(self.repo, self.base)
+
+    def test_linked_writer_and_invalid_metadata_backlink(self):
+        linked = self.directory / "linked-writer"
+        self.git("worktree", "add", "-b", "feat/linked", str(linked), "HEAD")
+        manifest = dict(self.manifest, worktree=str(linked), branch="feat/linked")
+        result = guard.inspect_task(linked, manifest)
+        self.assertEqual(result["lane"], "WRITER_IN_PROGRESS")
+        gitdir = Path((linked / ".git").read_text().strip()[8:])
+        (gitdir / "gitdir").write_text(str(self.directory / "wrong/.git") + "\n")
+        with self.assertRaisesRegex(guard.PreflightError, "INVALID_ROOT_GIT_METADATA"):
+            guard.inspect_task(linked, manifest)
 
     def test_repeated_inspection_leaves_git_and_worktree_unchanged(self):
         self.put("src/one.txt", "unstaged\n")
@@ -445,6 +637,76 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(before, self.git("status", "--porcelain=v1"))
         self.assertEqual(index, (self.repo / ".git/index").read_bytes())
+
+
+class ImportAndObjectFormatTests(unittest.TestCase):
+    def test_cli_and_package_imports_use_single_trusted_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            repo = directory / "repo"
+            repo.mkdir()
+            subprocess.run(["git", "init", "-q", str(repo)], check=True, env=guard._environment())
+            hostile = directory / "hostile"
+            hostile.mkdir()
+            marker = directory / "import-executed"
+            for module in ("task_preflight", "control_plane"):
+                (hostile / (module + ".py")).write_text(f"open({str(marker)!r}, 'w').write('executed')\n")
+            manifest = directory / "manifest.json"
+            manifest.write_text(json.dumps({"worktree": str(repo), "repository": "wrong"}))
+            env = {"PATH": os.defpath, "PYTHONPATH": str(ROOT), "HOME": "/nonexistent"}
+            program = f'''
+from pathlib import Path
+from project_agents.tools import control_plane as cp
+from project_agents.tools import task_preflight as tp
+import control_plane, task_preflight
+assert cp is control_plane and tp is task_preflight
+assert cp._load_preflight() is tp
+assert tp.native is cp
+try:
+    cp.inspect_task_preflight(Path({str(repo)!r}), {{"worktree": {str(repo)!r}, "repository": "wrong"}})
+except tp.PreflightError as error:
+    assert error.code == "WRONG_REPOSITORY", error.code
+else:
+    raise AssertionError("inspection unexpectedly passed")
+raise SystemExit(tp.main(["--worktree", {str(repo)!r}, "--manifest", {str(manifest)!r}]))
+'''
+            for safe in ([], ["-P"]):
+                for invocation in ([str(ROOT / "project_agents/tools/task_preflight.py"),
+                        "--worktree", str(repo), "--manifest", str(manifest)], ["-c", program]):
+                    with self.subTest(safe=safe, entry=invocation[0]):
+                        result = subprocess.run([sys.executable, "-B", *safe, *invocation],
+                            cwd=hostile, env=env, capture_output=True, timeout=10)
+                        self.assertEqual(result.returncode, 2, result.stderr.decode())
+                        self.assertEqual(json.loads(result.stderr)["code"], "WRONG_REPOSITORY")
+                        self.assertFalse(marker.exists())
+
+    def test_sha256_raw_blob_identity_and_stream_bound(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            def git(*args):
+                return subprocess.run(["git", "-C", str(repo), *args], check=True,
+                    env=guard._environment(), capture_output=True).stdout.decode().strip()
+            git("init", "-q", "--object-format=sha256")
+            git("config", "user.name", "Synthetic Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            data = b"x" * (guard.READ_CHUNK_BYTES * 2 + 17)
+            (repo / "file").write_bytes(data)
+            git("add", "file")
+            git("commit", "-qm", "fixture")
+            base = git("rev-parse", "HEAD")
+            self.assertEqual(len(base), 64)
+            self.assertFalse(any(guard.changes(repo, base).values()))
+            expected = hashlib.sha256(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
+            self.assertEqual(guard._entries(repo, None, "sha256")["file"][1], expected)
+            original = guard.os.read
+            sizes = []
+            def bounded(fd, size):
+                sizes.append(size)
+                return original(fd, size)
+            (repo / "file").write_bytes(b"y" + data[1:])
+            with patch.object(guard.os, "read", side_effect=bounded):
+                self.assertEqual(guard.changes(repo, base)["unstaged"], ["file"])
+            self.assertLessEqual(max(sizes), guard.READ_CHUNK_BYTES)
 
 
 class InputAndNativeRegressionTests(unittest.TestCase):
