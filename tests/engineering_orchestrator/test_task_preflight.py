@@ -31,6 +31,13 @@ from tests.engineering_orchestrator.test_control_plane_v2 import _task, _handoff
 
 GOVERNANCE_DOCS = ("CHATGPT_AGENT_ROUTER.md", "AGENT_MATRIX.md", "START_HERE.md",
     "USAGE_PLAYBOOK.md", "TOOL_COMPATIBILITY.md", "TASK_PROMPT_TEMPLATE.md")
+# Exact baseline blobs from lead review 5727599101; fixture expectations only,
+# never a production allowlist. Link text is read from the actual source tree.
+BASELINE_LINKS = {
+    "AGENTS.md": "9ca34d4b9e8c45882042855540100fd2d95faee3",
+    "agent/third_party/github.com/cilium/ebpf/testdata/loader-eb.elf": "298ed8a8003c3e24210da60f74eb566fc9530668",
+    "agent/third_party/github.com/cilium/ebpf/testdata/loader-el.elf": "60604e4b574d3eedf6fade6955daebe08454edc6",
+}
 
 
 class PhysicalPreflightTests(unittest.TestCase):
@@ -255,6 +262,141 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.blocked("SYMLINK_PATH")
         with self.assertRaisesRegex(guard.PreflightError, "SYMLINK_PATH"):
             guard._no_symlink(self.repo, "src/link/anything")
+
+    def baseline_link(self, path="src/baseline-link", target="one.txt"):
+        link = self.repo / path
+        link.symlink_to(target)
+        self.commit()
+        self.base = self.git("rev-parse", "HEAD")
+        self.manifest["authoritativeMain"] = self.base
+        self.git("push", "-q", str(self.remote), "HEAD:refs/heads/main")
+        return link
+
+    def test_unchanged_baseline_link_has_no_filename_whitelist(self):
+        self.baseline_link(target="../outside.txt")
+        for state in ("IMPLEMENTATION", "SOURCE_REVIEW"):
+            with self.subTest(state=state):
+                self.publish()
+                self.manifest["status"] = state
+                self.assertEqual(self.inspect()["result"], "INSPECTION_ONLY")
+
+    def test_dangling_baseline_link_is_not_dereferenced(self):
+        link = self.baseline_link(target="does-not-exist")
+        self.assertFalse(link.exists())
+        self.assertEqual(self.inspect()["result"], "INSPECTION_ONLY")
+
+    def test_baseline_link_target_changes_rejected_in_both_lanes(self):
+        link = self.baseline_link()
+        link.unlink()
+        link.symlink_to("two.txt")
+        for state in ("IMPLEMENTATION", "SOURCE_REVIEW"):
+            with self.subTest(state=state):
+                self.publish()
+                self.manifest["status"] = state
+                self.blocked("SYMLINK_PATH")
+
+    def test_staged_link_change_cannot_be_hidden_by_restored_physical_target(self):
+        link = self.baseline_link()
+        link.unlink()
+        link.symlink_to("two.txt")
+        self.git("add", "src/baseline-link")
+        link.unlink()
+        link.symlink_to("one.txt")
+        self.blocked("SYMLINK_PATH")
+
+    def test_committed_link_change_cannot_be_hidden_by_restored_index_and_disk(self):
+        link = self.baseline_link()
+        link.unlink()
+        link.symlink_to("two.txt")
+        self.commit()
+        link.unlink()
+        link.symlink_to("one.txt")
+        self.git("add", "src/baseline-link")
+        self.blocked("SYMLINK_PATH")
+
+    def test_added_committed_link_has_no_baseline_provenance(self):
+        (self.repo / "src/link").symlink_to("one.txt")
+        self.commit()
+        self.publish()
+        self.manifest["status"] = "SOURCE_REVIEW"
+        self.blocked("SYMLINK_PATH")
+
+    def test_baseline_link_deletion_and_mode_replacements_rejected(self):
+        link = self.baseline_link()
+        link.unlink()
+        self.blocked("SYMLINK_OR_SUBMODULE_CHANGE")
+        link.write_text("one.txt")  # Same blob bytes, different mode.
+        self.blocked("SYMLINK_OR_SUBMODULE_CHANGE")
+        self.git("add", "src/baseline-link")
+        self.blocked("SYMLINK_OR_SUBMODULE_CHANGE")
+        self.commit()
+        self.blocked("SYMLINK_OR_SUBMODULE_CHANGE")
+        link.unlink()
+        link.mkdir()
+        self.blocked("SYMLINK_OR_SUBMODULE_CHANGE")
+
+    def test_regular_file_replaced_by_link_rejected(self):
+        path = self.repo / "src/one.txt"
+        path.unlink()
+        path.symlink_to("two.txt")
+        self.blocked("SYMLINK_PATH")
+
+    def test_untracked_ignored_external_and_directory_links_rejected(self):
+        self.put(".git/info/exclude", "src/ignored-link\n")
+        for path, target in (("src/dangling", "absent"), ("src/ignored-link", "one.txt"),
+                ("outside-link", "src/one.txt"), ("src/external", str(self.directory / "absent")),
+                ("src/directory", str(self.directory)),
+                ("project_agents/hostile-link", "../outside.txt")):
+            with self.subTest(path=path):
+                link = self.repo / path
+                link.symlink_to(target)
+                self.blocked("SYMLINK_PATH")
+                link.unlink()
+
+    def test_baseline_directory_link_cannot_be_used_as_parent(self):
+        outside = self.directory / "external"
+        outside.mkdir()
+        (outside / "sentinel").write_text("unchanged")
+        self.baseline_link(target=str(outside))
+        snapshot = guard._physical_snapshot(self.repo, "sha1")
+        self.assertNotIn("src/baseline-link/sentinel", snapshot)
+        with self.assertRaisesRegex(guard.PreflightError, "^SYMLINK_PATH$"):
+            guard._no_symlink(self.repo, "src/baseline-link/sentinel")
+        # Even a forged index child cannot authorize traversal through the link.
+        oid = self.git("rev-parse", "HEAD:src/one.txt")
+        self.git("update-index", "--force-remove", "src/baseline-link")
+        self.git("update-index", "--add", "--cacheinfo", "100644," + oid + ",src/baseline-link/sentinel")
+        self.blocked("SYMLINK_PATH")
+        self.assertEqual((outside / "sentinel").read_text(), "unchanged")
+
+    def test_root_agents_link_change_has_no_policy_exception(self):
+        link = self.repo / "AGENTS.md"
+        link.unlink()
+        link.symlink_to("outside.txt")
+        self.manifest["scope"] = ["AGENTS.md"]
+        self.blocked("SYMLINK_PATH")
+
+    def test_link_text_counts_towards_resource_budget(self):
+        self.baseline_link(target="absent" * 30)
+        total = sum(p.lstat().st_size for p in self.repo.rglob("*")
+            if ".git" not in p.relative_to(self.repo).parts and (p.is_symlink() or p.is_file()))
+        with patch.object(guard, "MAX_SCAN_BYTES", total - 1):
+            with self.assertRaisesRegex(guard.PreflightError, "^INVENTORY_LIMIT$"):
+                guard._physical_snapshot(self.repo, "sha1")
+
+    def test_link_change_during_read_rejected(self):
+        link = self.baseline_link()
+        readlink = os.readlink
+
+        def changing(name, *, dir_fd=None):
+            result = readlink(name, dir_fd=dir_fd)
+            if name == link.name:
+                link.unlink()
+                link.symlink_to("two.txt")
+            return result
+
+        with patch.object(guard.os, "readlink", side_effect=changing):
+            self.blocked("SOURCE_MOVED_DURING_PREFLIGHT")
 
     def test_staged_symlink_hidden_by_regular_worktree_file_rejected(self):
         target = self.repo / "src/link"
@@ -639,6 +781,53 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.assertEqual(index, (self.repo / ".git/index").read_bytes())
 
 
+class RealTreeSymlinkSmokeTests(unittest.TestCase):
+    def test_clean_amrudai_tree_links_reach_scope_validation(self):
+        # Materialize the real source tree as a disposable clean Git checkout.
+        # Keep actual link text/modes; do not dereference, copy Git configuration,
+        # or mutate the assigned writer/auditor checkout. No credential or network.
+        with tempfile.TemporaryDirectory() as directory:
+            repo = Path(directory) / "clean-amrudai"
+            shutil.copytree(ROOT, repo, symlinks=True,
+                ignore=lambda parent, names: {".git"} if Path(parent) == ROOT else set())
+
+            def git(*args):
+                return subprocess.run(["/usr/bin/git", "-c", "core.hooksPath=/dev/null",
+                    "-C", str(repo), *args], env=guard._environment(), check=True,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout.decode().strip()
+
+            git("init", "-q", "--initial-branch=main")
+            git("config", "user.name", "Synthetic Smoke Fixture")
+            git("config", "user.email", "fixture@example.invalid")
+            git("add", "--all", "--force")
+            git("commit", "-qm", "representative AmrudAi tree")
+            baseline = git("rev-parse", "HEAD")
+            git("switch", "-q", "-c", "feat/smoke")
+            git("remote", "add", "origin", guard.REMOTE)
+            self.assertEqual(git("status", "--porcelain"), "")
+            snapshot = guard._physical_snapshot(repo, "sha1")
+            links = {p: row[:2] for p, row in snapshot.items()
+                if p != ".git" and row[0] == "120000"}
+            self.assertEqual(links, {p: ("120000", oid) for p, oid in BASELINE_LINKS.items()})
+            inventory, observation = guard._inventory(repo, baseline)
+            self.assertFalse(any(inventory.values()), inventory)
+            guard._verify_policy_files(repo, baseline, observation)
+            manifest = _task(writerTool="codex", verifierTool="antigravity",
+                gatekeeper="chatgpt-github", worktree=str(repo), authoritativeMain=baseline,
+                exactHead=baseline, branch="feat/smoke", status="IMPLEMENTATION",
+                scope=["tests/engineering_orchestrator/"])
+            with patch.object(guard, "remote_heads", return_value={"main": baseline, "branch": baseline}):
+                for state in ("IMPLEMENTATION", "SOURCE_REVIEW"):
+                    manifest["status"] = state
+                    result = guard.inspect_task(repo, manifest)
+                    self.assertEqual(result["result"], "INSPECTION_ONLY")
+                    self.assertFalse(result["authorized"])
+                    self.assertFalse(result["mergeReady"])
+                (repo / "outside-scope-probe.txt").write_text("scope must still block\n")
+                with self.assertRaisesRegex(guard.PreflightError, "^OUTSIDE_SCOPE$"):
+                    guard.inspect_task(repo, manifest)
+
+
 class ImportAndObjectFormatTests(unittest.TestCase):
     def test_cli_and_package_imports_use_single_trusted_identity(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -691,11 +880,14 @@ raise SystemExit(tp.main(["--worktree", {str(repo)!r}, "--manifest", {str(manife
             git("config", "user.email", "fixture@example.invalid")
             data = b"x" * (guard.READ_CHUNK_BYTES * 2 + 17)
             (repo / "file").write_bytes(data)
-            git("add", "file")
+            (repo / "baseline-link").symlink_to("file")
+            git("add", "file", "baseline-link")
             git("commit", "-qm", "fixture")
             base = git("rev-parse", "HEAD")
             self.assertEqual(len(base), 64)
             self.assertFalse(any(guard.changes(repo, base).values()))
+            self.assertEqual(guard._physical_snapshot(repo, "sha256")["baseline-link"][:2],
+                ("120000", hashlib.sha256(b"blob 4\0file").hexdigest()))
             expected = hashlib.sha256(b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
             self.assertEqual(guard._entries(repo, None, "sha256")["file"][1], expected)
             original = guard.os.read

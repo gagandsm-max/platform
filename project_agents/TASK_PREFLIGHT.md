@@ -125,10 +125,19 @@ omits. Nested `.git` files, directories and symlinks always block. Only a verifi
 root metadata directory or linked-worktree gitfile with matching administrative
 directory/common directory/backlink is excluded. Root metadata symlinks and
 arbitrary gitfile redirects are rejected. No symlink targets are traversed.
-All other symlinks, tree/index symlink changes, submodule gitlinks, special files
-(including FIFO/socket), inaccessible entries and unmerged indexes block. The
-canonical unchanged root `AGENTS.md` symlink is compared as link text against
-pinned main. Policy bytes/modes are checked even if hidden by index flags; any
+Symlink text is read descriptor-relative without following its destination and
+hashed as a raw Git blob with mode `120000`. `_physical_snapshot` only observes;
+`_inventory` accepts a link only if the same path, mode and blob identity exist
+in all four views: pinned authoritative baseline, HEAD, index and physical scan.
+This provenance rule has no filename whitelist. It permits the canonical vendor
+links and root `AGENTS.md`, including unchanged dangling links, without granting
+permission to access their targets. Link text counts toward the scan byte budget.
+Added/untracked/ignored links, changed targets, deletions, replacements and
+staged/committed changes block, including changes hidden by restored disk bytes.
+Changed-path parent symlink checks remain mandatory; no linked directory is
+traversed. Submodule gitlinks, special files (including FIFO/socket), inaccessible
+entries and unmerged indexes block. Root `AGENTS.md` retains the additional
+governance-policy comparison against pinned main. Policy bytes/modes are checked even if hidden by index flags; any
 remaining assume-unchanged/skip-worktree flag also blocks ordinary inspection.
 
 Each regular file is hashed as the raw Git blob header plus streamed bytes using
@@ -391,3 +400,32 @@ availability, ignored build artifacts, image reproducibility and privileged
 self-hosted CI isolation remain separate P2/Phase B/C work; no real credentials
 are passed into PR tests to work around them. Next independent Antigravity audit
 must use an isolated detached exact-SHA checkout, never the writer worktree.
+
+### P1-03 tracked-symlink operability correction (2026-11-01)
+
+Input: `be68199d22d0b0a8338ee1fbf2c743616afebd3d`; authoritative main:
+`b6b4581207126d59872b97999da8a99907d857fe`. Lead review:
+https://github.com/gagandsm-max/platform/pull/286#pullrequestreview-5727599101.
+Antigravity reproduced SYMLINK_PATH on the two unchanged vendored loader links.
+The prior 344/344 suite, 95/95 preflight cases and successful CI run 41292504105
+remain historical evidence and did not detect this real-checkout blocker.
+
+The correction uses four-view provenance for every symlink, including AGENTS.md.
+Only task_preflight.py, test_task_preflight.py and this document are changed.
+There is no ordinary-policy exemption for this governance-code PR itself.
+
+First focused correction run: **109 PASS**, 0 failures/errors/skips, 28.498s.
+The added real-tree smoke copies the actual AmrudAi source (preserving symlink
+text and modes, excluding root Git metadata) into an offline disposable clean
+Git checkout. It checks the three baseline link blob IDs from the lead review,
+full raw inventory, governance integrity, writer/review INSPECTION_ONLY responses,
+and OUTSIDE_SCOPE for a subsequent unauthorized file. Its remote observations are
+synthetic: this is operability evidence, not GitHub authentication or authority.
+Other regressions cover dangling baseline links, unknown filenames, changed
+targets, staged/committed cancellation, deletions/mode replacement, ignored and
+out-of-scope links, external targets, parent traversal, scan budgets and read-time
+mutation. SHA-256 raw-link hashing is also exercised by the object-format test.
+Exact-commit suite, validators, assigned-checkout smoke and new CI evidence are
+recorded separately in PR #286. All earlier failures and insufficient live-probe
+evidence above remain retained. New Antigravity audit and ChatGPT Web disposition
+remain required; passing writer tests do not establish independent certification.

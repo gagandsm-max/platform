@@ -337,7 +337,7 @@ def _root_git_entry(repo: Path) -> tuple:
 
 
 def _physical_snapshot(repo: Path, algorithm: str) -> dict[str, tuple]:
-    """Bounded descriptor-relative traversal; never follow target symlinks."""
+    """Observe raw objects without following links; _inventory checks provenance."""
     snapshot = {}
     budget = [0, 0]  # entries, total file bytes
     deadline = time.monotonic() + MAX_SCAN_SECONDS
@@ -367,9 +367,13 @@ def _physical_snapshot(repo: Path, algorithm: str) -> dict[str, tuple]:
                     fail("INVENTORY_LIMIT")
                 info = os.stat(name, dir_fd=fd, follow_symlinks=False)
                 if stat.S_ISLNK(info.st_mode):
-                    if path != "AGENTS.md":
-                        fail("SYMLINK_PATH")
+                    if info.st_size > MAX_FILE_BYTES:
+                        fail("INVENTORY_LIMIT")
                     data = os.fsencode(os.readlink(name, dir_fd=fd))
+                    if len(data) > MAX_FILE_BYTES:
+                        fail("INVENTORY_LIMIT")
+                    budget[1] += len(data)
+                    check()
                     digest = hashlib.new(algorithm, b"blob " + str(len(data)).encode() + b"\0" + data).hexdigest()
                     snapshot[path] = ("120000", digest, _signature(info))
                 elif stat.S_ISDIR(info.st_mode):
@@ -437,6 +441,16 @@ def _inventory(repo: Path, base: str) -> tuple[dict[str, list[str]], tuple]:
     baseline, head, index = (_entries(repo, ref, algorithm) for ref in (base, "HEAD", None))
     physical = _physical_snapshot(repo, algorithm)
     files = {p: row[:2] for p, row in physical.items() if p not in {"", ".git"} and row[0] != "040000"}
+    # Exempt only immutable baseline links, never names or link destinations.
+    # Include all four views so deletion, mode replacement and staged/committed
+    # cancellation cannot hide a symlink change behind regular physical bytes.
+    views = (baseline, head, index, files)
+    links = {p for view in views for p, row in view.items() if row[0] == "120000"}
+    for path in sorted(links):
+        expected = baseline.get(path)
+        if expected is None or expected[0] != "120000" or any(view.get(path) != expected for view in views):
+            fail("SYMLINK_PATH" if files.get(path, (None,))[0] == "120000"
+                 else "SYMLINK_OR_SUBMODULE_CHANGE")
     # Empty directories are not represented by Git but still belong to the
     # physical task inventory. Do not silently grant an out-of-scope empty tree.
     directories = {p for p, row in physical.items() if p not in {"", ".git"} and row[0] == "040000"}
