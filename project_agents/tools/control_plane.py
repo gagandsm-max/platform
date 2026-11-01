@@ -844,3 +844,14 @@ def validate_handoff(
 
 def sha256_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def inspect_task_preflight(worktree: Path, manifest: Mapping[str, Any]) -> dict[str, Any]:
+    """Inspect physical task bindings; never authorize a caller or advance a gate.
+
+    The caller must run this installed control plane from a trusted, isolated
+    runtime. The inspected worktree is data, never an import source.
+    """
+    from task_preflight import inspect_task
+
+    return inspect_task(worktree, manifest)
