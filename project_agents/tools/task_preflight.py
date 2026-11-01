@@ -30,8 +30,7 @@ REVIEW_STATES = frozenset({"SOURCE_REVIEW", "ADVERSARIAL_RUNTIME",
 CERTIFY_STATES = native.WRITER_SELF_CERTIFY_FORBIDDEN
 # Deliberate policy changes require a separate governance lane. A task scope
 # cannot grant itself an exception. Also protect nested AGENTS.md anywhere.
-POLICY_PREFIXES = ("project_documentation", "project_agents/tools",
-    "project_agents/schemas", "project_agents/canonical", "project_agents/skills",
+POLICY_PREFIXES = ("project_documentation", "project_agents",
     ".github", ".agents", ".cursor", ".codex", "skills")
 POLICY_FILES = frozenset({"AGENTS.md", "project_agents/tool_authority.json",
     "project_agents/control_plane_state_machine.json", "project_agents/manifest.json"})
@@ -42,6 +41,13 @@ NATIVE_INPUTS = ("project_agents/tools/control_plane.py", "project_agents/tool_a
     "project_agents/skills/manifest.json", "project_agents/schemas/task_manifest.schema.json",
     "project_agents/schemas/handoff.schema.json")
 MAX_JSON_BYTES = 1_048_576
+GITHUB_CLI = "/usr/bin/gh"
+SOURCE_TIMEOUT_SECONDS = 20
+# A read-only query, never supplied by the task/checkout. Authentication is
+# performed by the installed CLI, independently of local Git configuration.
+SOURCE_QUERY = '''query($branch:String!){repository(owner:"gagandsm-max",name:"platform"){
+nameWithOwner isPrivate main:ref(qualifiedName:"refs/heads/main"){name target{__typename oid}}
+branch:ref(qualifiedName:$branch){name target{__typename oid}}}}'''
 
 
 class PreflightError(ValueError):
@@ -59,7 +65,8 @@ def fail(code: str) -> None:
 def _environment() -> dict[str, str]:
     # Exclude inherited GIT_DIR, alternate object stores, config injection,
     # SSH commands and credential helpers from target inspection.
-    env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("GIT_", "GH_", "GITHUB_"))}
     env.update(GIT_CONFIG_NOSYSTEM="1", GIT_CONFIG_GLOBAL=os.devnull,
                GIT_TERMINAL_PROMPT="0", GIT_NO_REPLACE_OBJECTS="1", LC_ALL="C")
     return env
@@ -123,19 +130,71 @@ def _branch(value: Any) -> str:
     return value
 
 
+def _source_environment() -> dict[str, str]:
+    # Only trusted launcher authentication settings reach gh. No GH_DEBUG,
+    # host/URL/proxy/TLS overrides, repo config, extensions or task actor string.
+    # A credential able to read source does NOT attest a writer/verifier role.
+    keys = ("HOME", "XDG_CONFIG_HOME", "GH_CONFIG_DIR", "GH_TOKEN", "GITHUB_TOKEN")
+    env = {key: os.environ[key] for key in keys if key in os.environ}
+    env.update(PATH="/usr/bin:/bin", GH_PROMPT_DISABLED="1", GH_NO_UPDATE_NOTIFIER="1",
+               GH_NO_EXTENSION_UPDATE_NOTIFIER="1", LC_ALL="C", NO_COLOR="1")
+    return env
+
+
+def _source_response(branch: str) -> bytes:
+    command = [GITHUB_CLI, "api", "graphql", "--hostname", "github.com",
+               "-f", "query=" + SOURCE_QUERY, "-f", "branch=refs/heads/" + _branch(branch)]
+    failure = None
+    try:
+        result = subprocess.run(command, cwd="/", env=_source_environment(),
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            timeout=SOURCE_TIMEOUT_SECONDS, check=False)
+    except subprocess.TimeoutExpired:
+        failure = "SOURCE_TIMEOUT"
+    except OSError:
+        failure = "SOURCE_ADAPTER_UNAVAILABLE"
+    # Raise outside the handler: no credential-bearing subprocess exception
+    # survives in __context__ / __cause__, not merely a suppressed traceback.
+    if failure:
+        fail(failure)
+    if result.returncode:
+        fail("SOURCE_ACCESS_FAILED")
+    if len(result.stdout) > MAX_JSON_BYTES:
+        fail("INVALID_REMOTE_RESPONSE")
+    return result.stdout
+
+
 def remote_heads(branch: str) -> dict[str, str | None]:
-    """Query a fixed HTTPS URL outside the target repo (no local URL rewrites)."""
-    ref = "refs/heads/" + _branch(branch)
-    rows = _text(None, "ls-remote", "--refs", REMOTE, "refs/heads/main", ref)
-    refs: dict[str, str] = {}
-    for row in rows.splitlines():
-        fields = row.split("\t")
-        if len(fields) != 2 or fields[1] not in {"refs/heads/main", ref} or fields[1] in refs:
+    """Read private GitHub refs through the trusted installed CLI; no fallback."""
+    branch = _branch(branch)
+    response = _source_response(branch)
+    payload = None
+    try:
+        payload = json.loads(response, object_pairs_hook=_unique_object)
+    except (ValueError, UnicodeError, RecursionError):
+        pass
+    if not isinstance(payload, dict) or payload.get("errors") or not isinstance(payload.get("data"), dict):
+        fail("INVALID_REMOTE_RESPONSE")
+    repository = payload["data"].get("repository")
+    if (not isinstance(repository, dict) or repository.get("nameWithOwner") != REPOSITORY
+            or type(repository.get("isPrivate")) is not bool):
+        fail("INVALID_REMOTE_RESPONSE")
+
+    def oid(value: Any, name: str) -> str:
+        if not isinstance(value, dict) or value.get("name") != name:
             fail("INVALID_REMOTE_RESPONSE")
-        refs[fields[1]] = _sha(fields[0])
-    if "refs/heads/main" not in refs:
-        fail("REMOTE_MAIN_MISSING")
-    return {"main": refs["refs/heads/main"], "branch": refs.get(ref)}
+        target = value.get("target")
+        if not isinstance(target, dict) or target.get("__typename") != "Commit":
+            fail("INVALID_REMOTE_RESPONSE")
+        return _sha(target.get("oid"))
+
+    main = oid(repository.get("main"), "main")
+    # Only an explicitly null ref in a successful repository read means a new
+    # unpublished branch. Permission failures/partial GraphQL data never do.
+    if "branch" not in repository:
+        fail("INVALID_REMOTE_RESPONSE")
+    remote = None if repository["branch"] is None else oid(repository["branch"], branch)
+    return {"main": main, "branch": remote}
 
 
 def changes(repo: Path, base: str) -> dict[str, list[str]]:

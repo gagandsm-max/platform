@@ -8,7 +8,8 @@ Existing task/handoff schemas and transition behavior are unchanged.
 Authority: Issue #285 Phase A; Mother Reference v3.3.0 discovered through
 `Platform_00` sections 5–6; `Platform_12` section 18.1 (writer independence);
 `Platform_13` engineering preflight and Docker standards; `PRD-DEV-001`.
-No new product requirement, dependency, runtime service or certification claim.
+No new product requirement, library dependency, runtime service or certification
+claim. Private-source access uses the operator's already installed GitHub CLI.
 
 ## Invocation and trust boundary
 
@@ -45,6 +46,32 @@ credential binding and lane leases remain required in Phases B/C. There is no
 authorization-granting API in Phase A, even for a caller claiming gatekeeper.
 All rejection paths return exit 2 and a stable code without raw Git stderr.
 
+### Private source adapter (P1-A correction)
+
+The source reader invokes the trusted installed `/usr/bin/gh` with a fixed
+read-only GraphQL query for canonical repository main/task refs, an explicit
+`github.com` host and `cwd=/`. It does not invoke Git credential helpers or
+execute inspected-repository configuration. No executable/query/host override
+is accepted from task data or the CLI. The task branch is a validated query
+variable; the repository identity and returned commit/ref types are checked.
+
+Only the trusted launcher's `HOME`, `XDG_CONFIG_HOME`, `GH_CONFIG_DIR`, `GH_TOKEN`
+and `GITHUB_TOKEN` authentication settings are inherited by this adapter.
+These settings and the installed binary must be outside the untrusted task's
+control. Debug, proxy/TLS/host overrides and inherited Git settings are excluded.
+Credentials are never put in subprocess arguments or results; stderr is discarded.
+Errors/timeouts do not retain credential-bearing exception contexts or causes.
+Local Git inspection does not receive GH/GITHUB credential environment values.
+
+The adapter has a 20-second subprocess deadline, refuses partial GraphQL errors,
+and has no cached/public/anonymous fallback. Missing CLI, unavailable keyring,
+denied authentication and timeouts block inspection. An absent branch is accepted
+only as an explicit null ref in an otherwise successful canonical repository
+read. Source-access authentication does not identify the task actor, approve
+scope or certify independent review. Read-only operations do not establish that
+the operator's credential itself has least-privilege grants; that audit remains
+Phase C. This adapter is not a privileged CI policy deployment.
+
 ## State and source semantics
 
 | Native status | Structural behavior |
@@ -57,8 +84,8 @@ All rejection paths return exit 2 and a stable code without raw Git stderr.
 The authoritative main pin is also the inspection diff base; it must be the
 current remote main and an ancestor of local HEAD. This deliberately rejects
 an out-of-date task base instead of silently choosing a merge base. Live main
-and branch refs are read twice through a fixed canonical HTTPS URL outside the
-target repository, without target URL rewrites or inherited Git configuration.
+and branch refs are read twice through the authenticated fixed GitHub API query
+outside the target repository, without target URL rewrites or Git configuration.
 Network failures never fall back to cached `origin/main`. Origin fetch and push
 URLs, physical worktree path and manifest repository must match. Local commits
 need an updated exactHead in their task input but need not yet be pushed.
@@ -83,9 +110,11 @@ gitlinks, special files and unmerged indexes block. Canonical unchanged root
 directly with pinned main, including changes hidden by index flags. Any remaining
 assume-unchanged/skip-worktree flag blocks ordinary source inspection as well.
 
-Protected surfaces include Mother References, tool authority, native schemas,
-state machine, validator code, manifests, canonical agents/skills, projections,
-GitHub workflows and any nested `AGENTS.md`. Widening task scope cannot exempt
+Protected surfaces include Mother References, **all `project_agents/**`**, generated
+projections, GitHub workflows and any nested `AGENTS.md`. This includes current
+and future router/governance documents, such as `CHATGPT_AGENT_ROUTER.md`,
+`AGENT_MATRIX.md`, `START_HERE.md`, `USAGE_PLAYBOOK.md`, `TOOL_COMPATIBILITY.md`
+and `TASK_PROMPT_TEMPLATE.md`. Widening task scope cannot exempt
 those surfaces. This guard-development PR changes protected code: it needs the
 separate authorized governance review lane and cannot use its own ordinary-task
 preflight to approve itself. There is intentionally no policy-change bypass.
@@ -124,6 +153,35 @@ are read from their local bare remotes. No real GitHub approval/authentication i
 mocked into success. Tests cover positive, negative, adversarial and regression
 paths. Timeout/outage/drift injection is at the Git observation boundary; this
 is not process-crash, HA, Kafka or product durability evidence.
+
+Authentication subprocess fixtures use synthetic credential canaries and a real
+process timeout; they are distinct from actual private-source evidence. `/tmp`
+remains non-executable: fixture scripts run with the trusted Python interpreter.
+The container init reaps fixture descendants; the PID budget stays at 128.
+
+The separate opt-in `live-source` Compose profile verifies actual private access
+and rejected authentication through the production adapter. It uses bridge
+networking, the installed `/usr/bin/gh` mounted read-only, and the same non-root,
+read-only, capability-dropped container restrictions. It is never selected by
+ordinary offline discovery or CI. Do not mount a desktop keyring/DBus socket,
+credential directory, Docker socket or writable repository. From a trusted
+launcher outside the inspected checkout, pipe the existing CLI's credential
+directly to stdin; token bytes are not printed, stored or placed in arguments:
+
+```sh
+set -o pipefail
+/usr/bin/gh auth token --hostname github.com 2>/dev/null | \
+  docker compose -p issue285-preflight-a \
+    -f /home/gagan/nms-acp-v3/tests/engineering_orchestrator/preflight.compose.yaml \
+    --profile live-source run --build --rm --no-deps -T preflight-live-source
+```
+
+The trusted launcher must authorize this local probe and its code; do not run
+arbitrary PR policy with privileged CI credentials. The probe sets the credential
+only for its process lifetime, then tests an intentionally invalid synthetic
+token as the negative case. Both live tests must pass; no network failure or
+missing credential is treated as SKIP/PASS. The output contains only test
+outcomes and repository SHAs, not credential values or caller role claims.
 
 Rollback removes the additive inspection entry point/module/tests/document.
 No schema migration, product behavior or existing state-machine transition
@@ -170,3 +228,40 @@ exact-commit results and any subsequent failures without replacing this history.
 Product runtime/HA/durability tests are NOT_RUN (no product runtime change).
 Authenticated CI/role-spoofing enforcement and independent review are UNVERIFIED
 and require the named downstream owners. No MERGE_READY or COMPLETE claim.
+
+### P1 correction history (2026-11-01)
+
+Review: PR #286 review `5727049673`, head
+`2e41a7c9255fafc1b254d55eccf9d33e160a1a53`; P1-A private GitHub access and
+P1-B incomplete governance protection. Both findings remain in the review history.
+
+- First corrective focused run: 69 executed; 63 PASS, 3 FAIL, 3 ERROR. Synthetic
+  adapter scripts could not execute from noexec tmpfs. Two Git fixture setup
+  failures were initially reported only as nonzero subprocess exits.
+- Diagnostic focused run after invoking fixtures via the trusted interpreter:
+  69 executed; 67 PASS, 2 FAIL. Fixture stderr identified Git thread/fork
+  exhaustion (`Resource temporarily unavailable`). Added container init for
+  descendant reaping without increasing limits; subsequent focused run: 69 PASS,
+  0 FAIL, 0 ERROR, 0 SKIP.
+- Initial live probe using only a mounted hosts configuration: 2 executed;
+  1 PASS (denied), 1 ERROR (authorized access unavailable). The existing login
+  uses the desktop keyring. No desktop bus/keyring was mounted and the failure
+  was not reclassified as a pass.
+- Corrected live probe using trusted host CLI → stdin: 2 PASS, 0 FAIL/ERROR/SKIP.
+  Actual private repository main was `b6b4581207126d59872b97999da8a99907d857fe`;
+  published branch was still `2e41a7c9255fafc1b254d55eccf9d33e160a1a53` before
+  the corrective push. This is live source-access evidence, not CI/actor authority.
+
+Toolchain evidence for these runs: installed GitHub CLI 2.45.0, executable SHA256
+`2fd925d68889746976958342fb749bf102bc7dc8bcba3abfa533a80ad7791673`;
+offline image `sha256:aae176ae3520fbaff24955dfcaf803c87a527603e27ae0ed2025b081913b1253`;
+live image `sha256:f706908ae66e4c3c8c17c9246374894423ed9be6c7700cbc8fbcff50cbee7193`.
+The cached Python basis was
+`python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1`.
+P2 rebuild reproducibility remains limited by the mutable Dockerfile tag/apt
+inputs; these recorded image identities do not claim reproducible future builds.
+
+The corrective PR update records final exact-commit full-suite/validator results,
+post-push live ref evidence and CI run identity separately. Prior tests are not
+carried forward as evidence for a new SHA. Independent Antigravity review and
+ChatGPT Web final disposition remain pending.

@@ -16,6 +16,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import traceback
 import unittest
 from unittest.mock import patch
 
@@ -24,6 +25,9 @@ sys.path.insert(0, str(ROOT / "project_agents/tools"))
 import control_plane as native
 import task_preflight as guard
 from tests.engineering_orchestrator.test_control_plane_v2 import _task, _handoff
+
+GOVERNANCE_DOCS = ("CHATGPT_AGENT_ROUTER.md", "AGENT_MATRIX.md", "START_HERE.md",
+    "USAGE_PLAYBOOK.md", "TOOL_COMPATIBILITY.md", "TASK_PROMPT_TEMPLATE.md")
 
 
 class PhysicalPreflightTests(unittest.TestCase):
@@ -45,6 +49,8 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.put("src/two.txt", "base\n")
         self.put("outside.txt", "protected by scope\n")
         self.put("project_documentation/AGENTS.md", "fixture governance\n")
+        for name in GOVERNANCE_DOCS:
+            self.put("project_agents/" + name, "fixture governance\n")
         (self.repo / "AGENTS.md").symlink_to("project_documentation/AGENTS.md")
         self.commit()
         self.base = self.git("rev-parse", "HEAD")
@@ -60,8 +66,12 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.addCleanup(self.remote_patch.stop)
 
     def git(self, *args):
-        result = subprocess.run(["git", "-C", str(self.repo), *args], check=True,
+        result = subprocess.run(["git", "-C", str(self.repo), *args], check=False,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=guard._environment())
+        if result.returncode:
+            # This helper handles only disposable local fixture Git commands,
+            # never production credentials or the authenticated source adapter.
+            raise AssertionError("fixture Git failed: " + result.stderr.decode(errors="replace"))
         return result.stdout.decode().strip()
 
     def put(self, path, content):
@@ -260,6 +270,57 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.put("project_agents/tool_authority.json", "{}")
         self.blocked("GOVERNANCE_CHANGE")
 
+    def _check_governance_documents(self, mode):
+        self.manifest["scope"] = ["project_agents"]
+        for name in GOVERNANCE_DOCS:
+            with self.subTest(document=name, mode=mode):
+                path = "project_agents/" + name
+                if mode == "hidden":
+                    self.git("update-index", "--assume-unchanged", path)
+                self.put(path, "tampered governance\n")
+                if mode == "staged":
+                    self.git("add", path)
+                elif mode == "committed":
+                    self.commit()
+                self.blocked("GOVERNANCE_CHANGE")
+                if mode == "hidden":
+                    self.git("update-index", "--no-assume-unchanged", path)
+                self.git("reset", "--hard", self.base)  # Disposable fixture only.
+                self.manifest["exactHead"] = self.base
+
+    def test_governance_documents_unstaged_rejected(self):
+        self._check_governance_documents("unstaged")
+
+    def test_governance_documents_staged_rejected(self):
+        self._check_governance_documents("staged")
+
+    def test_governance_documents_committed_rejected(self):
+        self._check_governance_documents("committed")
+
+    def test_governance_documents_hidden_rejected(self):
+        self._check_governance_documents("hidden")
+
+    def test_governance_documents_untracked_rejected(self):
+        for name in GOVERNANCE_DOCS:
+            self.git("rm", "project_agents/" + name)
+        self.commit()
+        self.base = self.manifest["exactHead"]
+        self.manifest["authoritativeMain"] = self.base
+        self.git("push", "-q", str(self.remote), "HEAD:main")
+        self.manifest["scope"] = ["project_agents"]
+        for name in GOVERNANCE_DOCS:
+            with self.subTest(document=name):
+                path = "project_agents/" + name
+                self.put(path, "untracked governance\n")
+                self.assertEqual(guard.changes(self.repo, self.base)["untracked"], [path])
+                self.blocked("GOVERNANCE_CHANGE")
+                (self.repo / path).unlink()
+
+    def test_future_governance_file_rejected_without_enumeration(self):
+        self.manifest["scope"] = ["project_agents"]
+        self.put("project_agents/future/nested/policy.md", "new policy")
+        self.blocked("GOVERNANCE_CHANGE")
+
     def test_governance_staged_only_and_cancelled_edit_rejected(self):
         path = "project_agents/tool_authority.json"
         original = (self.repo / path).read_text()
@@ -403,11 +464,6 @@ class InputAndNativeRegressionTests(unittest.TestCase):
             with self.assertRaisesRegex(guard.PreflightError, "^GIT_COMMAND_FAILED$"):
                 guard._git(None, "ls-remote")
 
-    def test_remote_command_does_not_use_target_config(self):
-        with patch.object(guard, "_text", return_value="a" * 40 + "\trefs/heads/main\n") as call:
-            self.assertIsNone(guard.remote_heads("feat/task")["branch"])
-            self.assertEqual(call.call_args.args[:4], (None, "ls-remote", "--refs", guard.REMOTE))
-
     def test_inherited_git_authority_overrides_removed(self):
         with patch.dict(os.environ, {"GIT_DIR": "/wrong", "GIT_CONFIG_COUNT": "1", "GIT_SSH_COMMAND": "evil"}):
             env = guard._environment()
@@ -454,5 +510,172 @@ class InputAndNativeRegressionTests(unittest.TestCase):
             self.assertNotIn("SECRET", output.getvalue())
 
 
+def source_payload(branch="feat/task"):
+    return {"data": {"repository": {"nameWithOwner": guard.REPOSITORY, "isPrivate": True,
+        "main": {"name": "main", "target": {"__typename": "Commit", "oid": "a" * 40}},
+        "branch": {"name": branch, "target": {"__typename": "Commit", "oid": "b" * 40}}}}}
+
+
+class SourceAdapterTests(unittest.TestCase):
+    """Exercise a real adapter subprocess with synthetic credentials, no network."""
+
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        self.executable = self.root / "gh-fixture"
+        self.executable.write_text(f'''#!{sys.executable}
+import json, os, sys, time
+if os.environ.get("GH_TOKEN") == "synthetic-timeout":
+    print("synthetic-credential-canary", flush=True)
+    time.sleep(30)
+if os.environ.get("GH_TOKEN") != "synthetic-credential-canary":
+    print("denied synthetic-credential-canary", file=sys.stderr)
+    print("denied synthetic-credential-canary")
+    sys.exit(1)
+assert os.getcwd() == "/"
+assert sys.argv[1:5] == ["api", "graphql", "--hostname", "github.com"]
+assert sys.argv[5:] == ["-f", "query=" + {guard.SOURCE_QUERY!r}, "-f", "branch=refs/heads/feat/task"]
+assert not any(k in os.environ for k in ["GH_DEBUG", "GH_HOST", "GIT_DIR", "HTTPS_PROXY", "LD_PRELOAD"])
+print({json.dumps(source_payload())!r})
+''')
+        self.executable.chmod(0o755)
+        real_run = subprocess.run
+        def fixture_process(command, **kwargs):
+            if command[0] == str(self.executable):
+                # /tmp remains noexec. Execute fixture source with the trusted
+                # interpreter; do not relax the container's mount protection.
+                command = [sys.executable, *command]
+            return real_run(command, **kwargs)
+        for mock in (patch.object(guard, "GITHUB_CLI", str(self.executable)),
+                     patch.object(guard.subprocess, "run", side_effect=fixture_process),
+                     patch.dict(os.environ, {"GH_TOKEN": "synthetic-credential-canary",
+                         "GH_DEBUG": "api", "GH_HOST": "evil.invalid", "GIT_DIR": "/untrusted",
+                         "HTTPS_PROXY": "http://evil.invalid"}, clear=True)):
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def test_authenticated_subprocess_success(self):
+        self.assertEqual(guard.remote_heads("feat/task"), {"main": "a" * 40, "branch": "b" * 40})
+
+    def test_denied_authentication_redacted_without_fallback(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "denied"}):
+            with self.assertRaisesRegex(guard.PreflightError, "^SOURCE_ACCESS_FAILED$") as caught:
+                guard.remote_heads("feat/task")
+        self.assertIsNone(caught.exception.__context__)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertNotIn("synthetic-credential-canary", "".join(traceback.format_exception(caught.exception)))
+
+    def test_real_subprocess_timeout_redacts_captured_output(self):
+        with patch.dict(os.environ, {"GH_TOKEN": "synthetic-timeout"}), \
+             patch.object(guard, "SOURCE_TIMEOUT_SECONDS", 0.15):
+            with self.assertRaisesRegex(guard.PreflightError, "^SOURCE_TIMEOUT$") as caught:
+                guard.remote_heads("feat/task")
+        self.assertIsNone(caught.exception.__context__)
+        self.assertIsNone(caught.exception.__cause__)
+        self.assertNotIn("synthetic-credential-canary", "".join(traceback.format_exception(caught.exception)))
+
+    def test_missing_trusted_adapter_is_closed(self):
+        with patch.object(guard, "GITHUB_CLI", str(self.root / "absent")):
+            with self.assertRaisesRegex(guard.PreflightError, "SOURCE_ADAPTER_UNAVAILABLE"):
+                guard.remote_heads("feat/task")
+
+    def test_installed_absolute_cli_and_trusted_auth_configuration(self):
+        result = subprocess.CompletedProcess([], 0, stdout=json.dumps(source_payload()).encode())
+        with patch.object(guard, "GITHUB_CLI", "/usr/bin/gh"), \
+             patch.dict(os.environ, {"HOME": "/trusted-home", "GH_CONFIG_DIR": "/trusted-auth"}), \
+             patch.object(guard.subprocess, "run", return_value=result) as run:
+            guard.remote_heads("feat/task")
+        args, options = run.call_args
+        self.assertEqual(args[0][0], "/usr/bin/gh")
+        self.assertEqual(options["cwd"], "/")
+        self.assertEqual(options["env"]["GH_CONFIG_DIR"], "/trusted-auth")
+        self.assertEqual(options["env"]["GH_TOKEN"], "synthetic-credential-canary")
+        self.assertEqual(options["stderr"], subprocess.DEVNULL)
+        self.assertEqual(options["timeout"], 20)
+        self.assertNotIn("synthetic-credential-canary", " ".join(args[0]))
+
+    def test_null_branch_requires_successful_authenticated_repository_read(self):
+        payload = source_payload()
+        payload["data"]["repository"]["branch"] = None
+        with patch.object(guard, "_source_response", return_value=json.dumps(payload).encode()):
+            self.assertEqual(guard.remote_heads("feat/task"), {"main": "a" * 40, "branch": None})
+
+    def test_partial_errors_wrong_repo_and_invalid_ref_fail_closed(self):
+        payloads = [dict(source_payload(), errors=[{"message": "synthetic-credential-canary"}]),
+                    {"data": {"repository": None}}]
+        for key, value in (("nameWithOwner", "other/repo"), ("isPrivate", "true"),
+                           ("main", None), ("branch", {"name": "wrong"})):
+            payload = source_payload()
+            payload["data"]["repository"][key] = value
+            payloads.append(payload)
+        payload = source_payload()
+        del payload["data"]["repository"]["branch"]
+        payloads.append(payload)
+        for payload in payloads:
+            with self.subTest(payload=payload), patch.object(guard, "_source_response", return_value=json.dumps(payload).encode()):
+                with self.assertRaises(guard.PreflightError):
+                    guard.remote_heads("feat/task")
+
+    def test_malformed_and_duplicate_json_have_no_secret_exception_context(self):
+        for response in (b"synthetic-credential-canary{", b'{"data":1,"data":2}'):
+            with self.subTest(response=response), patch.object(guard, "_source_response", return_value=response):
+                with self.assertRaisesRegex(guard.PreflightError, "INVALID_REMOTE_RESPONSE") as caught:
+                    guard.remote_heads("feat/task")
+                self.assertIsNone(caught.exception.__context__)
+
+    def test_cli_denial_does_not_emit_credentials(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            manifest = Path(tmp) / "manifest.json"
+            manifest.write_text("{}")
+            def probe(*args):
+                return guard.remote_heads("feat/task")
+            output = io.StringIO()
+            with patch.dict(os.environ, {"GH_TOKEN": "denied"}), \
+                 patch.object(native, "inspect_task_preflight", side_effect=probe), \
+                 contextlib.redirect_stderr(output):
+                self.assertEqual(guard.main(["--worktree", tmp, "--manifest", str(manifest)]), 2)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["code"], "SOURCE_ACCESS_FAILED")
+            self.assertFalse(result["authorized"])
+            self.assertNotIn("synthetic-credential-canary", output.getvalue())
+
+
+def run_live_source_probe():
+    """Explicit local-only probe, excluded from ordinary offline discovery/CI.
+
+    Requires installed /usr/bin/gh and a trusted launcher's credential on stdin.
+    No actor certification, repository writes, policy execution or token output.
+    """
+    credential = sys.stdin.buffer.read(4097).strip()
+    if not credential or len(credential) > 4096 or b"\n" in credential or b"\r" in credential:
+        print("LIVE_SOURCE_CREDENTIAL_INPUT_INVALID", file=sys.stderr)
+        return 2
+    class LivePrivateSourceTests(unittest.TestCase):
+        def test_authorized_private_source(self):
+            branch = "feat/issue285-agent-control-v3"
+            payload = json.loads(guard._source_response(branch))
+            self.assertIs(payload["data"]["repository"]["isPrivate"], True)
+            refs = guard.remote_heads(branch)
+            self.assertRegex(refs["main"], r"^[0-9a-f]{40}$")
+            self.assertRegex(refs["branch"], r"^[0-9a-f]{40}$")
+            print("LIVE_PRIVATE_SOURCE " + json.dumps(refs, sort_keys=True))
+
+        def test_denied_private_source(self):
+            # An intentionally invalid synthetic token overrides stored auth.
+            # Production credential values never enter argv, output or fixtures.
+            with patch.dict(os.environ, {"GH_TOKEN": "invalid-preflight-negative-fixture"}):
+                with self.assertRaisesRegex(guard.PreflightError, "^SOURCE_ACCESS_FAILED$") as caught:
+                    guard.remote_heads("feat/issue285-agent-control-v3")
+            self.assertIsNone(caught.exception.__context__)
+            self.assertIsNone(caught.exception.__cause__)
+
+    suite = unittest.defaultTestLoader.loadTestsFromTestCase(LivePrivateSourceTests)
+    with patch.dict(os.environ, {"GH_TOKEN": credential.decode("ascii")}):
+        return 0 if unittest.TextTestRunner(verbosity=2).run(suite).wasSuccessful() else 1
+
+
 if __name__ == "__main__":
+    if sys.argv[1:] == ["--live-source-probe"]:
+        sys.exit(run_live_source_probe())
     unittest.main(verbosity=2)
