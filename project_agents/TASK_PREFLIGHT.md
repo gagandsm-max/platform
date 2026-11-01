@@ -186,13 +186,25 @@ Phase A uses native v2 contracts and new real-Git fixtures for these boundaries.
 
 ## Validation and rollback
 
-Run from the repository root, using a dedicated Compose project:
+Run from the assigned repository root, using a dedicated Compose project. The
+real-tree smoke requires readable Git metadata/object storage; linked worktrees
+need the common Git directory mounted at its actual path. Match the non-root
+container UID/GID to the checkout owner instead of changing object permissions.
+For this assigned checkout (rebaseline the recorded BASE_SHA before reuse):
 
 ```sh
 docker compose -p issue285-preflight-a -f tests/engineering_orchestrator/preflight.compose.yaml build preflight-tests
-docker compose -p issue285-preflight-a -f tests/engineering_orchestrator/preflight.compose.yaml run --rm --no-deps preflight-tests python3 -B -m unittest tests.engineering_orchestrator.test_task_preflight -v
-docker compose -p issue285-preflight-a -f tests/engineering_orchestrator/preflight.compose.yaml run --rm --no-deps preflight-tests python3 -B project_agents/tools/validate_agents.py
-docker compose -p issue285-preflight-a -f tests/engineering_orchestrator/preflight.compose.yaml run --rm --no-deps preflight-tests
+fixture_runner=(docker compose -p issue285-preflight-a -f tests/engineering_orchestrator/preflight.compose.yaml run --rm --no-deps -T
+  --user "$(id -u):$(id -g)"
+  -v /home/gagan/nms/.git:/home/gagan/nms/.git:ro
+  -v "$PWD:$PWD:ro" -w "$PWD"
+  -e BASE_SHA=b6b4581207126d59872b97999da8a99907d857fe
+  -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e "GIT_CONFIG_VALUE_0=$PWD"
+  preflight-tests)
+"${fixture_runner[@]}" python3 -B -m unittest tests.engineering_orchestrator.test_task_preflight -v
+"${fixture_runner[@]}" python3 -B project_agents/tools/validate_agents.py
+"${fixture_runner[@]}" python3 -B project_documentation/tools/validate_mother_references.py
+"${fixture_runner[@]}" python3 -B tests/engineering_orchestrator/run_tests.py
 ```
 
 The one-shot test fixture uses existing Python/Git tooling, a read-only source
@@ -203,6 +215,28 @@ are read from their local bare remotes. No real GitHub approval/authentication i
 mocked into success. Tests cover positive, negative, adversarial and regression
 paths. Timeout/outage/drift injection is at the Git observation boundary; this
 is not process-crash, HA, Kafka or product durability evidence.
+
+The current real-tree smoke pins `HEAD^{tree}` once, enumerates its tracked paths,
+blob IDs, sizes and modes, and reads only raw Git objects. It never scans or opens
+source worktree files. Each blob is length/hash verified; a new private fixture
+receives raw file bytes or symlink text and exact executable modes. Raw
+`hash-object --no-filters` and explicit index records avoid checkout/add/archive
+conversion. The resulting index/commit tree must equal the pinned source tree.
+Source attributes/configuration cannot supply executable filter/hook commands.
+Git runs with a minimal credential-free environment, fixed executable, disabled
+hooks/fsmonitor/lazy fetching and denied protocols. No source config is copied.
+
+The harness rejects unsafe/duplicate paths, symlink-parent conflicts, gitlinks,
+non-blob entries, pre-existing/aliased destinations, object mismatch and missing
+metadata; it has no workspace-copy fallback. Manifest output is capped at 16 MiB,
+files at 64 MiB, total blob bytes at 256 MiB, entries at 100,000, paths at 4,096
+bytes/64 components, commands at 30 seconds and the export loop at 120 seconds
+between operations. These are fixture bounds, not production authorization.
+Linux inotify regressions (with a positive read control) monitor ignored secrets,
+key-named files, untracked content and a sparse oversized build artifact across
+Python and Git child processes. They also check absence from the destination tree
+and object database. Symlink targets are never read, including a tracked link to
+an ignored synthetic `.env`. Synthetic credentials only; no real secrets needed.
 
 Authentication subprocess fixtures use synthetic credential canaries and a real
 process timeout; they are distinct from actual private-source evidence. `/tmp`
@@ -415,7 +449,7 @@ Only task_preflight.py, test_task_preflight.py and this document are changed.
 There is no ordinary-policy exemption for this governance-code PR itself.
 
 First focused correction run: **109 PASS**, 0 failures/errors/skips, 28.498s.
-The added real-tree smoke copies the actual AmrudAi source (preserving symlink
+The historical real-tree smoke copied the actual AmrudAi source (preserving symlink
 text and modes, excluding root Git metadata) into an offline disposable clean
 Git checkout. It checks the three baseline link blob IDs from the lead review,
 full raw inventory, governance integrity, writer/review INSPECTION_ONLY responses,
@@ -429,3 +463,38 @@ Exact-commit suite, validators, assigned-checkout smoke and new CI evidence are
 recorded separately in PR #286. All earlier failures and insufficient live-probe
 evidence above remain retained. New Antigravity audit and ChatGPT Web disposition
 remain required; passing writer tests do not establish independent certification.
+
+### P1-04 tracked-tree fixture correction (2026-11-01)
+
+Input: `6c237172c87e7315646cade14d40636357eabeaf`; main remains
+`b6b4581207126d59872b97999da8a99907d857fe`. Lead reviews:
+https://github.com/gagandsm-max/platform/pull/286#pullrequestreview-5727638463 and
+https://github.com/gagandsm-max/platform/pull/286#pullrequestreview-5727920992.
+Exact-head independent audit: retained transcript step 194 at
+`/home/gagan/.gemini/antigravity-cli/brain/e6e645a8-01f3-4b64-8e11-2a3772e17a4f/.system_generated/logs/transcript_full.jsonl`.
+
+Antigravity confirmed the former whole-workspace copy and force-add incorporated
+synthetic ignored `.env`, `secrets/id_rsa.key` and `build/output.bin` into temporary
+Git history. The prior smoke/358-test passing evidence is insufficient to prove
+safe fixture data handling. No real-credential exposure or exfiltration is
+established. Earlier P0/P1 findings and historical live-probe evidence remain
+retained above. Only the test file and this document change for P1-04; production
+preflight, workflows, runner cleanup and PostgreSQL implementation are unchanged.
+
+First targeted run: **7 executed, 6 PASS / 1 ERROR**, zero failures/skips. The
+exporter failed closed as FIXTURE_GIT_FAILED: Git could not read tree object
+9671a48306aafca3a526773ff9496cb8d81e566b from an owner-only pack under container
+UID 65534. Repeating with checkout-owner non-root UID/GID 1000:1000 and the same
+read-only mounts passed **7/7 in 21.235s**. No object permissions, checks or
+production code were changed. Subsequent SHA-256 and timeout regressions and
+the pre-commit full suite passed **366/366 in 47.246s**, with zero failures,
+errors or skips. Both canonical validators passed. Exact-commit results are
+reported separately in PR #286.
+
+Prior CI run 41298313964 remains failed/incomplete evidence. Review 5727920992
+classifies the reported integration job interruption as runner communication
+failure; PostgreSQL assertion failure and infrastructure root cause remain
+UNVERIFIED. Runner diagnosis/repair is a separate assignment. This correction
+does not inspect runner host logs or alter CI services/containers/volumes.
+New exact-head CI, independent Antigravity audit and ChatGPT Web disposition
+remain required. No merge-readiness or independent certification is asserted.

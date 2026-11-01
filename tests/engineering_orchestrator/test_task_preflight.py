@@ -8,17 +8,20 @@ as achieved by these tests.
 from __future__ import annotations
 
 import contextlib
+import ctypes
 import io
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
+import selectors
 import shutil
 import socket
 import subprocess
 import sys
 import tempfile
+import time
 import traceback
 import unittest
 from unittest.mock import patch
@@ -781,27 +784,288 @@ class PhysicalPreflightTests(unittest.TestCase):
         self.assertEqual(index, (self.repo / ".git/index").read_bytes())
 
 
+def _fixture_git(repo, *args, data=b"", limit=1024 * 1024):
+    """Bounded installed Git plumbing; no inherited credentials or conversions."""
+    env = guard._environment()
+    env["GIT_ALLOW_PROTOCOL"] = ""
+    command = ["/usr/bin/git", "--no-optional-locks", "-c", "safe.directory=" + str(repo),
+        "-c", "core.hooksPath=/dev/null", "-c", "core.fsmonitor=false",
+        "-c", "core.attributesFile=/dev/null", "-c", "protocol.allow=never",
+        "-C", str(repo), *args]
+    # A bounded caller-supplied stdin file avoids pipe deadlock. Only object IDs,
+    # verified tracked blobs or generated index records are ever supplied here.
+    with tempfile.TemporaryFile() as stdin:
+        stdin.write(data)
+        stdin.seek(0)
+        with subprocess.Popen(command, stdin=stdin, stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL, env=env, cwd="/") as process:
+            try:
+                output = bytearray()
+                deadline = time.monotonic() + 30
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ)
+                    while True:
+                        remaining = deadline - time.monotonic()
+                        if remaining <= 0 or not selector.select(remaining):
+                            raise ValueError("FIXTURE_GIT_TIMEOUT")
+                        chunk = os.read(process.stdout.fileno(), min(65536, limit + 1 - len(output)))
+                        if not chunk:
+                            break
+                        output.extend(chunk)
+                        if len(output) > limit:
+                            raise ValueError("FIXTURE_GIT_OUTPUT_LIMIT")
+                if process.wait(timeout=max(0.001, deadline - time.monotonic())):
+                    raise ValueError("FIXTURE_GIT_FAILED")
+                return bytes(output)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.wait()
+
+
+def _materialize_tracked_tree(source, tree, repo):
+    """Export one immutable Git tree; never enumerate/read source worktree files."""
+    algorithm = _fixture_git(source, "rev-parse", "--show-object-format=storage").decode().strip()
+    if algorithm not in {"sha1", "sha256"} or not re.fullmatch(
+            r"[0-9a-f]{%d}" % (40 if algorithm == "sha1" else 64), tree):
+        raise ValueError("FIXTURE_REQUIRES_PINNED_TREE")
+    if _fixture_git(source, "cat-file", "-t", tree) != b"tree\n":
+        raise ValueError("FIXTURE_REQUIRES_PINNED_TREE")
+    raw = _fixture_git(source, "ls-tree", "-r", "-l", "-z", tree, limit=16 * 1024 * 1024)
+    if raw and not raw.endswith(b"\0"):
+        raise ValueError("FIXTURE_INVALID_MANIFEST")
+    entries, total = {}, 0
+    for row in raw.split(b"\0"):
+        if not row:
+            continue
+        meta, path = row.split(b"\t", 1)
+        path = guard._path(path.decode("utf-8", errors="strict"))
+        mode, kind, oid, size = meta.decode("ascii").split()
+        size = int(size)
+        if (kind != "blob" or mode not in {"100644", "100755", "120000"}
+                or not re.fullmatch(r"[0-9a-f]{%d}" % len(tree), oid) or path in entries
+                or len(path.encode()) > 4096 or len(Path(path).parts) > 64):
+            raise ValueError("FIXTURE_INVALID_MANIFEST")
+        total += size
+        if size < 0 or size > guard.MAX_FILE_BYTES or total > guard.MAX_SCAN_BYTES:
+            raise ValueError("FIXTURE_SIZE_LIMIT")
+        entries[path] = (mode, oid, size)
+        if len(entries) > guard.MAX_SCAN_ENTRIES:
+            raise ValueError("FIXTURE_ENTRY_LIMIT")
+    # Validate every parent before creating anything: a leaf (especially a
+    # symlink) can never become a directory through a second manifest entry.
+    for path in entries:
+        if any(str(parent) in entries for parent in Path(path).parents):
+            raise ValueError("FIXTURE_PARENT_CONFLICT")
+    if not repo.parent.is_dir() or repo.parent.resolve() != repo.parent:
+        raise ValueError("FIXTURE_UNSAFE_DESTINATION")
+    repo.mkdir(mode=0o700)  # Exclusive fresh directory inside caller's TemporaryDirectory.
+    _fixture_git(repo, "init", "-q", "--initial-branch=main", "--object-format=" + algorithm,
+        "--template=")
+    index = bytearray()
+    deadline = time.monotonic() + 120
+    for path, (mode, oid, size) in entries.items():
+        if time.monotonic() > deadline:
+            raise ValueError("FIXTURE_EXPORT_TIMEOUT")
+        content = _fixture_git(source, "cat-file", "blob", oid, limit=size)
+        if len(content) != size or hashlib.new(algorithm,
+                b"blob " + str(size).encode() + b"\0" + content).hexdigest() != oid:
+            raise ValueError("FIXTURE_BLOB_MISMATCH")
+        destination = repo / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if mode == "120000":
+            if not content or b"\0" in content:
+                raise ValueError("FIXTURE_INVALID_LINK")
+            destination.symlink_to(os.fsdecode(content))
+        else:
+            with destination.open("xb") as stream:
+                stream.write(content)
+            destination.chmod(0o755 if mode == "100755" else 0o644)
+        # No git add/checkout/archive: raw bytes and manifest modes populate the
+        # object store/index directly, independent of attributes or filter config.
+        stored = _fixture_git(repo, "hash-object", "-w", "--stdin", "--no-filters", data=content)
+        if stored.decode().strip() != oid:
+            raise ValueError("FIXTURE_BLOB_MISMATCH")
+        index.extend(mode.encode() + b" " + oid.encode() + b"\t" + path.encode() + b"\0")
+    _fixture_git(repo, "update-index", "-z", "--index-info", data=index)
+    if _fixture_git(repo, "write-tree").decode().strip() != tree:
+        raise ValueError("FIXTURE_TREE_MISMATCH")
+    _fixture_git(repo, "config", "user.name", "Synthetic Smoke Fixture")
+    _fixture_git(repo, "config", "user.email", "fixture@example.invalid")
+    commit = _fixture_git(repo, "commit-tree", tree, "-m", "pinned tracked tree fixture").decode().strip()
+    _fixture_git(repo, "update-ref", "refs/heads/main", commit)
+    return commit
+
+
+class TrackedTreeFixtureTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.directory = Path(self.temp.name)
+        self.source = self.directory / "source"
+        self.source.mkdir()
+        _fixture_git(self.source, "init", "-q", "--initial-branch=main", "--template=")
+        _fixture_git(self.source, "config", "user.name", "Synthetic Fixture")
+        _fixture_git(self.source, "config", "user.email", "fixture@example.invalid")
+        (self.source / ".gitignore").write_text(".env\nsecrets/\n*.key\n*.pem\nbuild/\n")
+        (self.source / "tracked").write_bytes(b"pinned\r\n\0bytes\n")
+        (self.source / "executable").write_bytes(b"fixture, never execute\n")
+        (self.source / "executable").chmod(0o755)
+        (self.source / "tracked-link").symlink_to(".env")
+        _fixture_git(self.source, "add", ".gitignore", "tracked", "executable", "tracked-link")
+        _fixture_git(self.source, "commit", "-qm", "synthetic tracked baseline")
+        self.tree = _fixture_git(self.source, "rev-parse", "HEAD^{tree}").decode().strip()
+        self.repo = self.directory / "fixture"
+
+    def test_ignored_secrets_builds_and_untracked_links_never_read_or_committed(self):
+        private = (".env", "secrets/token", "identity.key", "certificate.pem", "untracked.txt")
+        watched = []
+        for name in private:
+            path = self.source / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic ignored canary: " + name)
+            watched.append(path)
+        build = self.source / "build/huge.bin"
+        build.parent.mkdir()
+        with build.open("wb") as stream:
+            stream.truncate(guard.MAX_SCAN_BYTES + 1)  # sparse; must never be copied/read
+        (self.source / "untracked-link").symlink_to("secrets/token")
+        (self.source / "dangling-link").symlink_to("absent")
+        (self.source / "outside-directory").symlink_to(self.directory)
+        watched += [build, build.parent, self.source / "secrets"]
+        # Kernel events cover Python AND Git child-process reads; a Python mock
+        # alone would not establish this boundary. This is Linux-only test tooling.
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.inotify_init1.argtypes = [ctypes.c_int]
+        libc.inotify_add_watch.argtypes = [ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32]
+        fd = libc.inotify_init1(os.O_NONBLOCK | os.O_CLOEXEC)
+        self.assertGreaterEqual(fd, 0, "inotify unavailable")
+        self.addCleanup(os.close, fd)
+        for path in watched:
+            self.assertGreaterEqual(libc.inotify_add_watch(fd, os.fsencode(path), 0x21), 0)
+            # IN_ACCESS | IN_OPEN; no filename/content emitted in failures.
+        (self.source / ".env").read_bytes()  # Positive control for the monitor.
+        self.assertTrue(os.read(fd, 65536))
+        with patch.object(shutil, "copytree", side_effect=AssertionError("worktree copying forbidden")), \
+                patch.object(shutil, "copyfile", side_effect=AssertionError("worktree copying forbidden")):
+            _materialize_tracked_tree(self.source, self.tree, self.repo)
+        with self.assertRaises(BlockingIOError):
+            os.read(fd, 65536)  # No ignored/untracked file or directory was opened/read.
+        self.assertEqual(_fixture_git(self.repo, "rev-parse", "HEAD^{tree}").decode().strip(), self.tree)
+        self.assertEqual(set(guard._entries(self.repo, "HEAD", "sha1")),
+            {".gitignore", "tracked", "executable", "tracked-link"})
+        for name in (*private, "build", "secrets", "untracked-link", "dangling-link", "outside-directory"):
+            self.assertFalse(os.path.lexists(self.repo / name))
+        self.assertEqual(os.readlink(self.repo / "tracked-link"), ".env")
+        # The ignored canary blobs are absent even as unreachable Git objects.
+        for name in private:
+            content = ("synthetic ignored canary: " + name).encode()
+            oid = hashlib.sha1(b"blob " + str(len(content)).encode() + b"\0" + content).hexdigest()
+            with self.assertRaisesRegex(ValueError, "^FIXTURE_GIT_FAILED$"):
+                _fixture_git(self.repo, "cat-file", "-e", oid)
+
+    def test_pinned_tree_ignores_modified_staged_deleted_and_new_head_files(self):
+        (self.source / "tracked").write_text("staged change")
+        _fixture_git(self.source, "add", "tracked")
+        _fixture_git(self.source, "commit", "-qm", "later source head")
+        (self.source / "tracked").unlink()
+        _materialize_tracked_tree(self.source, self.tree, self.repo)
+        self.assertEqual((self.repo / "tracked").read_bytes(), b"pinned\r\n\0bytes\n")
+        self.assertEqual((self.repo / "executable").stat().st_mode & 0o777, 0o755)
+        self.assertEqual(os.readlink(self.repo / "tracked-link"), ".env")
+        self.assertFalse(any(guard.changes(self.repo, guard._text(self.repo, "rev-parse", "HEAD")).values()))
+
+    def test_filters_hooks_and_attributes_cannot_transform_or_execute(self):
+        marker = self.directory / "executed"
+        (self.source / ".gitattributes").write_text("tracked filter=attack text eol=lf export-ignore\n")
+        _fixture_git(self.source, "add", ".gitattributes")
+        _fixture_git(self.source, "commit", "-qm", "tracked attributes")
+        self.tree = _fixture_git(self.source, "rev-parse", "HEAD^{tree}").decode().strip()
+        for key in ("filter.attack.clean", "filter.attack.smudge", "filter.attack.process", "core.fsmonitor"):
+            _fixture_git(self.source, "config", key, "touch " + str(marker))
+        hookdir = self.source / ".git/hooks"
+        hookdir.mkdir(exist_ok=True)
+        for name in ("post-checkout", "pre-commit", "post-index-change"):
+            hook = hookdir / name
+            hook.write_text("#!/bin/sh\ntouch " + str(marker) + "\n")
+            hook.chmod(0o755)
+        _materialize_tracked_tree(self.source, self.tree, self.repo)
+        self.assertFalse(marker.exists())
+        self.assertEqual((self.repo / "tracked").read_bytes(), b"pinned\r\n\0bytes\n")
+
+    def test_refs_and_existing_or_symlink_destinations_rejected(self):
+        for ref in ("HEAD", "--help", "0" * 40,
+                _fixture_git(self.source, "rev-parse", "HEAD").decode().strip()):
+            with self.subTest(ref=ref), self.assertRaises(ValueError):
+                _materialize_tracked_tree(self.source, ref, self.repo)
+        self.repo.symlink_to(self.source)
+        with self.assertRaises(FileExistsError):
+            _materialize_tracked_tree(self.source, self.tree, self.repo)
+
+    def test_unsafe_tree_paths_modes_and_symlink_parents_rejected_before_creation(self):
+        original = _fixture_git
+        oid = "1" * 40
+        rows = [f"100644 blob {oid} 1\t../escape\0", f"100644 blob {oid} 1\t.git/config\0",
+            f"160000 commit {oid} 1\tmodule\0",
+            f"120000 blob {oid} 1\tparent\0" + f"100644 blob {oid} 1\tparent/escape\0"]
+        for manifest in rows:
+            def command(repo, *args, **kwargs):
+                return manifest.encode() if args[0] == "ls-tree" else original(repo, *args, **kwargs)
+            with self.subTest(manifest=manifest), patch(__name__ + "._fixture_git", side_effect=command):
+                with self.assertRaises((ValueError, guard.PreflightError)):
+                    _materialize_tracked_tree(self.source, self.tree, self.repo)
+                self.assertFalse(self.repo.exists())
+
+    def test_limits_and_corrupt_blob_fail_closed(self):
+        for name, value in (("MAX_FILE_BYTES", 1), ("MAX_SCAN_BYTES", 1), ("MAX_SCAN_ENTRIES", 1)):
+            with self.subTest(limit=name), patch.object(guard, name, value):
+                with self.assertRaisesRegex(ValueError, "FIXTURE_(SIZE|ENTRY)_LIMIT"):
+                    _materialize_tracked_tree(self.source, self.tree, self.repo)
+                self.assertFalse(self.repo.exists())
+        original = _fixture_git
+        def corrupt(repo, *args, **kwargs):
+            result = original(repo, *args, **kwargs)
+            return b"x" * len(result) if args[:2] == ("cat-file", "blob") else result
+        with patch(__name__ + "._fixture_git", side_effect=corrupt):
+            with self.assertRaisesRegex(ValueError, "^FIXTURE_BLOB_MISMATCH$"):
+                _materialize_tracked_tree(self.source, self.tree, self.repo)
+        with self.assertRaisesRegex(ValueError, "^FIXTURE_GIT_OUTPUT_LIMIT$"):
+            _fixture_git(self.source, "ls-tree", self.tree, limit=1)
+
+    def test_git_timeout_has_no_worktree_fallback(self):
+        with patch.object(selectors.DefaultSelector, "select", return_value=[]):
+            with self.assertRaisesRegex(ValueError, "^FIXTURE_GIT_TIMEOUT$"):
+                _fixture_git(self.source, "ls-tree", self.tree)
+        self.assertFalse(self.repo.exists())
+
+    def test_sha256_tree_modes_and_raw_symlink_text(self):
+        source = self.directory / "sha256"
+        source.mkdir()
+        _fixture_git(source, "init", "-q", "--object-format=sha256", "--template=")
+        (source / "file").write_bytes(b"raw\r\n")
+        (source / "link").symlink_to("../outside-not-read")
+        _fixture_git(source, "add", "file", "link")
+        tree = _fixture_git(source, "write-tree").decode().strip()
+        self.assertEqual(len(tree), 64)
+        commit = _materialize_tracked_tree(source, tree, self.repo)
+        self.assertEqual(_fixture_git(self.repo, "rev-parse", "HEAD^{tree}").decode().strip(), tree)
+        self.assertFalse(any(guard.changes(self.repo, commit).values()))
+        self.assertEqual(os.readlink(self.repo / "link"), "../outside-not-read")
+
+
 class RealTreeSymlinkSmokeTests(unittest.TestCase):
     def test_clean_amrudai_tree_links_reach_scope_validation(self):
-        # Materialize the real source tree as a disposable clean Git checkout.
-        # Keep actual link text/modes; do not dereference, copy Git configuration,
-        # or mutate the assigned writer/auditor checkout. No credential or network.
+        # Pin the current commit's tree once; subsequent source worktree/index/HEAD
+        # changes cannot substitute files. Git metadata must be mounted read-only.
+        tree = _fixture_git(ROOT, "rev-parse", "HEAD^{tree}").decode().strip()
         with tempfile.TemporaryDirectory() as directory:
             repo = Path(directory) / "clean-amrudai"
-            shutil.copytree(ROOT, repo, symlinks=True,
-                ignore=lambda parent, names: {".git"} if Path(parent) == ROOT else set())
+            baseline = _materialize_tracked_tree(ROOT, tree, repo)
 
             def git(*args):
-                return subprocess.run(["/usr/bin/git", "-c", "core.hooksPath=/dev/null",
-                    "-C", str(repo), *args], env=guard._environment(), check=True,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30).stdout.decode().strip()
+                return _fixture_git(repo, *args).decode().strip()
 
-            git("init", "-q", "--initial-branch=main")
-            git("config", "user.name", "Synthetic Smoke Fixture")
-            git("config", "user.email", "fixture@example.invalid")
-            git("add", "--all", "--force")
-            git("commit", "-qm", "representative AmrudAi tree")
-            baseline = git("rev-parse", "HEAD")
+            self.assertEqual(git("rev-parse", "HEAD^{tree}"), tree)
             git("switch", "-q", "-c", "feat/smoke")
             git("remote", "add", "origin", guard.REMOTE)
             self.assertEqual(git("status", "--porcelain"), "")
