@@ -329,12 +329,20 @@ class PollGrantSlotWindowTest {
         long anchor = -123_456_789L;
         long cadence = 60_000L;
         long phase = 14_250L;
-        long expected = BigInteger.valueOf(anchor)
+        BigInteger exact = BigInteger.valueOf(anchor)
                 .add(BigInteger.valueOf(phase))
-                .add(BigInteger.valueOf(slotIndex).multiply(BigInteger.valueOf(cadence)))
-                .longValueExact();
-        assertEquals(expected,
-                PollGrantSlotWindow.occurrenceEpochMillis(anchor, cadence, phase, slotIndex));
+                .add(BigInteger.valueOf(slotIndex).multiply(BigInteger.valueOf(cadence)));
+        boolean representable = exact.compareTo(BigInteger.valueOf(Long.MIN_VALUE)) >= 0
+                && exact.compareTo(BigInteger.valueOf(Long.MAX_VALUE)) <= 0;
+        if (representable) {
+            assertEquals(exact.longValueExact(),
+                    PollGrantSlotWindow.occurrenceEpochMillis(anchor, cadence, phase, slotIndex));
+        } else {
+            // Valid JSON-safe slot index whose T(k) exceeds signed-64 epoch millis.
+            assertThrows(ArithmeticException.class,
+                    () -> PollGrantSlotWindow.occurrenceEpochMillis(
+                            anchor, cadence, phase, slotIndex));
+        }
     }
 
     /**
