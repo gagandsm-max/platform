@@ -650,10 +650,21 @@ class SensorPollGrantIssuerIntegrationTest {
             Instant expectedWindowEnd,
             Instant expectedUpdatedAt) {
         pg.jdbc().query("""
-                SELECT extract(epoch FROM window_start)::numeric AS window_start_epoch,
-                       extract(epoch FROM issued_at)::numeric AS issued_at_epoch,
-                       extract(epoch FROM window_end)::numeric AS window_end_epoch,
-                       extract(epoch FROM updated_at)::numeric AS updated_at_epoch
+                -- Decompose timestamps to avoid direct EXTRACT(EPOCH) rounding
+                -- near PostgreSQL's upper timestamptz boundary.
+                SELECT
+                    EXTRACT(EPOCH FROM DATE_TRUNC('second', window_start))
+                      + MOD(EXTRACT(MICROSECONDS FROM window_start), 1000000) / 1000000
+                      AS window_start_epoch,
+                    EXTRACT(EPOCH FROM DATE_TRUNC('second', issued_at))
+                      + MOD(EXTRACT(MICROSECONDS FROM issued_at), 1000000) / 1000000
+                      AS issued_at_epoch,
+                    EXTRACT(EPOCH FROM DATE_TRUNC('second', window_end))
+                      + MOD(EXTRACT(MICROSECONDS FROM window_end), 1000000) / 1000000
+                      AS window_end_epoch,
+                    EXTRACT(EPOCH FROM DATE_TRUNC('second', updated_at))
+                      + MOD(EXTRACT(MICROSECONDS FROM updated_at), 1000000) / 1000000
+                      AS updated_at_epoch
                   FROM platform.sensor_poll_grant
                  WHERE grant_id = ?
                 """, rs -> {
