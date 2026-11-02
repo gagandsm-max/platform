@@ -1,5 +1,6 @@
 package com.platform.core.persistence;
 
+import com.platform.core.domain.DomainException;
 import com.platform.core.domain.inventory.EntityManagementEndpoint;
 import com.platform.core.domain.inventory.ManagementEndpointAddressType;
 import com.platform.core.domain.inventory.ManagementEndpointSource;
@@ -7,8 +8,13 @@ import com.platform.core.domain.inventory.ManagementEndpointState;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
+import org.springframework.jdbc.datasource.ConnectionHolder;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -117,6 +123,72 @@ public class EntityManagementEndpointRepository {
                 Map.of("tenantId", tenantId, "entityId", entityId, "endpointId", endpointId),
                 MAPPER);
         return rows.stream().findFirst();
+    }
+
+    /**
+     * Read and hold the exact same-tenant/same-entity endpoint with PostgreSQL
+     * {@code FOR SHARE} until the caller commits or rolls back. Missing and
+     * wrong-scope rows are equally empty. Never opens a replacement transaction.
+     * Intended for Core poll-grant issuance snapshotting (Issue #229 G1a).
+     */
+    public Optional<EntityManagementEndpoint> findByTenantEntityAndIdForShare(
+            UUID tenantId, UUID entityId, UUID endpointId) {
+        requireActiveCallerTransaction("findByTenantEntityAndIdForShare");
+        List<EntityManagementEndpoint> rows = jdbc.query("""
+                SELECT * FROM platform.entity_management_endpoint
+                 WHERE tenant_id = :tenantId
+                   AND entity_id = :entityId
+                   AND endpoint_id = :endpointId
+                 FOR SHARE
+                """,
+                Map.of("tenantId", tenantId, "entityId", entityId, "endpointId", endpointId),
+                MAPPER);
+        return rows.stream().findFirst();
+    }
+
+    /**
+     * Fail closed unless this repository's DataSource connection participates in the
+     * caller's active PostgreSQL transaction and is non-autocommit.
+     */
+    private void requireActiveCallerTransaction(String helperName) {
+        if (!TransactionSynchronizationManager.isActualTransactionActive()) {
+            throw transactionRequired(helperName, "unlocked lookup is not held authority");
+        }
+        DataSource dataSource = jdbc.getJdbcTemplate().getDataSource();
+        if (dataSource == null) {
+            throw transactionRequired(helperName, "repository DataSource is unavailable");
+        }
+        Object resource = TransactionSynchronizationManager.getResource(dataSource);
+        if (!(resource instanceof ConnectionHolder holder)) {
+            throw transactionRequired(helperName, "repository connection is not bound to the caller transaction");
+        }
+        if (!holder.isSynchronizedWithTransaction()) {
+            throw transactionRequired(helperName,
+                    "repository connection is not synchronized with the caller transaction");
+        }
+        final Connection connection;
+        try {
+            connection = holder.getConnection();
+        } catch (IllegalStateException e) {
+            throw transactionRequired(helperName, "repository connection is not bound to the caller transaction");
+        }
+        final boolean autoCommit;
+        try {
+            autoCommit = connection.getAutoCommit();
+        } catch (SQLException e) {
+            throw transactionRequired(helperName, "unable to verify caller transaction participation");
+        }
+        if (autoCommit) {
+            throw transactionRequired(helperName, "bound repository connection remains autocommit");
+        }
+    }
+
+    private static DomainException transactionRequired(String helperName, String reason) {
+        // Same stable code family as Sensor held-authority helpers; DomainException avoids
+        // a persistence→sensorcontrol package dependency.
+        return new DomainException(
+                "ERR_SENSOR_STATE_INVALID",
+                "Active PostgreSQL transaction required for " + helperName + "; " + reason);
     }
 
     public Optional<EntityManagementEndpoint> findActivePrimary(UUID tenantId, UUID entityId) {
