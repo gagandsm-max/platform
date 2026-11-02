@@ -354,12 +354,12 @@ class PollGrantSlotWindowTest {
                 .multiply(BigInteger.valueOf(1000L))
                 .add(BigInteger.valueOf(windowEnd.getNano() / 1_000_000));
         if (milliMin.compareTo(milliMax) > 0) {
-            return ReferenceRange.empty();
+            return ReferenceRange.EMPTY;
         }
         BigInteger searchMin = milliMin.max(BigInteger.valueOf(Long.MIN_VALUE));
         BigInteger searchMax = milliMax.min(BigInteger.valueOf(Long.MAX_VALUE));
         if (searchMin.compareTo(searchMax) > 0) {
-            return ReferenceRange.empty();
+            return ReferenceRange.EMPTY;
         }
         BigInteger kMin = ceilDiv(searchMin.subtract(first), cad);
         BigInteger kMax = floorDiv(searchMax.subtract(first), cad);
@@ -367,7 +367,7 @@ class PollGrantSlotWindowTest {
             kMin = BigInteger.ZERO;
         }
         if (kMin.compareTo(kMax) > 0) {
-            return ReferenceRange.empty();
+            return ReferenceRange.EMPTY;
         }
         if (kMin.compareTo(BigInteger.valueOf(PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX)) > 0
                 || kMax.compareTo(BigInteger.valueOf(PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX)) > 0) {
@@ -395,8 +395,7 @@ class PollGrantSlotWindowTest {
     }
 
     private record ReferenceRange(boolean empty, long first, long last) {
-        static ReferenceRange empty() {
-            return new ReferenceRange(true, 0L, -1L);
-        }
+        // Named EMPTY so it is not treated as the boolean empty() record accessor.
+        static final ReferenceRange EMPTY = new ReferenceRange(true, 0L, -1L);
     }
 }
