@@ -10,8 +10,10 @@ import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Timestamp;
+import java.sql.Types;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -19,17 +21,81 @@ import java.util.UUID;
 import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrant.*;
 
 /**
- * Unwired persistence adapter over V015; no issuance or admission authority.
+ * Unwired persistence adapter over V015; no admission or scheduler activation.
  * Callers must supply trusted, already-authorized tenant/Sensor identifiers.
  * Uses the caller's Spring JDBC transaction when present (no independent commit).
  * The conditional UPDATE protects transitions through this adapter; V015 does
  * not prevent every possible direct SQL rewrite of terminal metadata.
+ * Insert is reserved for the internal Core issuer under a held caller transaction.
  */
 public final class SensorPollGrantRepository {
     private final NamedParameterJdbcTemplate jdbc;
 
     public SensorPollGrantRepository(NamedParameterJdbcTemplate jdbc) {
         this.jdbc = Objects.requireNonNull(jdbc, "jdbc");
+    }
+
+    /**
+     * Fail closed unless this repository's DataSource connection participates in the
+     * caller's active PostgreSQL transaction. Used by issuance before acquiring locks.
+     */
+    public void requireHeldCallerTransaction(String operation) {
+        requireActiveCallerTransaction(operation);
+    }
+
+    /**
+     * Persist one ISSUED grant row and return the exact PostgreSQL-persisted
+     * representation via {@code INSERT ... RETURNING}. Requires the caller's held
+     * transaction; does not open a replacement or {@code REQUIRES_NEW} transaction.
+     * Callers must already have proven Sensor/endpoint authority under retained locks.
+     * The returned row remains subject to the owning transaction's later commit/rollback.
+     */
+    public SensorPollGrant insert(SensorPollGrant grant) {
+        Objects.requireNonNull(grant, "grant");
+        requireActiveCallerTransaction("insert");
+        if (grant.status() != Status.ISSUED) {
+            throw new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                    "Only ISSUED grants may be inserted through this adapter");
+        }
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("grantId", grant.grantId())
+                .addValue("tenant", grant.tenantId())
+                .addValue("sensor", grant.sensorId())
+                .addValue("entity", grant.entityId())
+                .addValue("endpoint", grant.endpointId())
+                .addValue("grantGeneration", grant.grantGeneration())
+                .addValue("assignmentGeneration", grant.assignmentGeneration())
+                .addValue("protocol", grant.protocol().name())
+                .addValue("addressType", grant.issuedAddressType().name())
+                .addValue("address", grant.issuedAddress())
+                .addValue("planId", grant.profilePlanId())
+                .addValue("planVersion", grant.profilePlanVersion())
+                .addValue("issuedAt", toUtcOffsetDateTime(grant.issuedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
+                .addValue("windowStart", toUtcOffsetDateTime(grant.windowStart()), Types.TIMESTAMP_WITH_TIMEZONE)
+                .addValue("windowEnd", toUtcOffsetDateTime(grant.windowEnd()), Types.TIMESTAMP_WITH_TIMEZONE)
+                .addValue("issuedBy", grant.issuedBy())
+                .addValue("status", Status.ISSUED.name())
+                .addValue("updatedAt", toUtcOffsetDateTime(grant.updatedAt()), Types.TIMESTAMP_WITH_TIMEZONE);
+        return jdbc.query("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address, profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by, status, updated_at
+                ) VALUES (
+                    :grantId, :tenant, :sensor, :entity, :endpoint,
+                    :grantGeneration, :assignmentGeneration, :protocol,
+                    :addressType, :address, :planId, :planVersion,
+                    :issuedAt, :windowStart, :windowEnd, :issuedBy, :status, :updatedAt
+                )
+                RETURNING grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                       grant_generation, assignment_generation, protocol,
+                       issued_address_type, issued_address, profile_plan_id, profile_plan_version,
+                       issued_at, window_start, window_end, issued_by, status,
+                       revoked_at, revoked_by, revocation_class, revocation_reason, updated_at
+                """, parameters, (rs, row) -> map(rs)).stream().findFirst().orElseThrow(() ->
+                new SensorControlException(SensorControlException.ERR_SENSOR_STATE_INVALID,
+                        "Poll grant insert did not return a persisted row"));
     }
 
     public Optional<SensorPollGrant> find(UUID tenantId, String sensorId, UUID grantId) {
@@ -110,7 +176,7 @@ public final class SensorPollGrantRepository {
         Objects.requireNonNull(terminal, "terminal");
         MapSqlParameterSource parameters = scope(tenantId, sensorId, grantId)
                 .addValue("status", terminal.status().name())
-                .addValue("at", Timestamp.from(terminal.revokedAt()))
+                .addValue("at", toUtcOffsetDateTime(terminal.revokedAt()), Types.TIMESTAMP_WITH_TIMEZONE)
                 .addValue("by", terminal.revokedBy())
                 .addValue("class", terminal.revocationClass().name())
                 .addValue("reason", terminal.revocationReason());
@@ -150,7 +216,6 @@ public final class SensorPollGrantRepository {
 
     private static SensorPollGrant map(ResultSet rs) throws SQLException {
         String revocation = rs.getString("revocation_class");
-        Timestamp revoked = rs.getTimestamp("revoked_at");
         return new SensorPollGrant(
                 rs.getObject("grant_id", UUID.class), rs.getObject("tenant_id", UUID.class),
                 rs.getString("sensor_id"), rs.getObject("entity_id", UUID.class),
@@ -158,10 +223,32 @@ public final class SensorPollGrantRepository {
                 rs.getLong("assignment_generation"), Protocol.valueOf(rs.getString("protocol")),
                 AddressType.valueOf(rs.getString("issued_address_type")), rs.getString("issued_address"),
                 rs.getString("profile_plan_id"), rs.getString("profile_plan_version"),
-                rs.getTimestamp("issued_at").toInstant(), rs.getTimestamp("window_start").toInstant(),
-                rs.getTimestamp("window_end").toInstant(), rs.getString("issued_by"),
-                Status.valueOf(rs.getString("status")), revoked == null ? null : revoked.toInstant(),
+                requireTimestamptzInstant(rs, "issued_at"),
+                requireTimestamptzInstant(rs, "window_start"),
+                requireTimestamptzInstant(rs, "window_end"),
+                rs.getString("issued_by"),
+                Status.valueOf(rs.getString("status")),
+                nullableTimestamptzInstant(rs, "revoked_at"),
                 rs.getString("revoked_by"), revocation == null ? null : RevocationClass.valueOf(revocation),
-                rs.getString("revocation_reason"), rs.getTimestamp("updated_at").toInstant());
+                rs.getString("revocation_reason"),
+                requireTimestamptzInstant(rs, "updated_at"));
+    }
+
+    /** JDBC 4.2 TIMESTAMPTZ bind: OffsetDateTime at UTC — not legacy {@code Timestamp}. */
+    private static OffsetDateTime toUtcOffsetDateTime(Instant instant) {
+        return Objects.requireNonNull(instant, "instant").atOffset(ZoneOffset.UTC);
+    }
+
+    private static Instant requireTimestamptzInstant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        if (value == null) {
+            throw new SQLException("Required timestamptz column " + column + " was null");
+        }
+        return value.toInstant();
+    }
+
+    private static Instant nullableTimestamptzInstant(ResultSet rs, String column) throws SQLException {
+        OffsetDateTime value = rs.getObject(column, OffsetDateTime.class);
+        return value == null ? null : value.toInstant();
     }
 }

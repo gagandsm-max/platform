@@ -34,6 +34,22 @@ public class SensorControlException extends DomainException {
     public static final String ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID =
             "ERR_SENSOR_ENROLLMENT_AUTHORITY_INVALID";
 
+    /**
+     * Poll-grant issuance (Issue #229 G1a). Codes are typed and nondisclosing:
+     * they must not reveal cross-tenant existence or SQL/database internals.
+     */
+    public static final String ERR_POLL_GRANT_ENTITY_OUT_OF_SCOPE = "ERR_POLL_GRANT_ENTITY_OUT_OF_SCOPE";
+    public static final String ERR_POLL_GRANT_ENDPOINT_UNAVAILABLE = "ERR_POLL_GRANT_ENDPOINT_UNAVAILABLE";
+    public static final String ERR_POLL_GRANT_PLAN_INVALID = "ERR_POLL_GRANT_PLAN_INVALID";
+    public static final String ERR_POLL_GRANT_GENERATION_INVALID = "ERR_POLL_GRANT_GENERATION_INVALID";
+    public static final String ERR_POLL_GRANT_WINDOW_INVALID = "ERR_POLL_GRANT_WINDOW_INVALID";
+    public static final String ERR_POLL_GRANT_CONFLICT = "ERR_POLL_GRANT_CONFLICT";
+    /**
+     * Malformed issuance request / actor binding (null/blank/oversized required fields).
+     * Does not disclose SQL details or cross-tenant existence.
+     */
+    public static final String ERR_POLL_GRANT_REQUEST_INVALID = "ERR_POLL_GRANT_REQUEST_INVALID";
+
     public SensorControlException(String code, String message) {
         super(code, message);
     }

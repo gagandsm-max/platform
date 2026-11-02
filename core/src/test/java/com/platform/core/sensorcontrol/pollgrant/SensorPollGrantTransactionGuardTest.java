@@ -10,6 +10,7 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import javax.sql.DataSource;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.time.Instant;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -99,6 +100,31 @@ class SensorPollGrantTransactionGuardTest {
         assertRejected("unable to verify");
         verify(connection).getAutoCommit();
         verifyNoMoreInteractions(connection);
+    }
+
+    @Test
+    void insertRequiresHeldCallerTransactionBeforeAnyWrite() {
+        SensorControlException failure = assertThrows(SensorControlException.class,
+                () -> repo.insert(sampleIssued()));
+        assertEquals(SensorControlException.ERR_SENSOR_STATE_INVALID, failure.getCode());
+        assertTrue(failure.getMessage().contains("insert"));
+        verifyNoInteractions(dataSource, otherDataSource, connection);
+    }
+
+    @Test
+    void insertReturningStillRejectsWithoutHeldCallerTransaction() {
+        // INSERT ... RETURNING must not bypass the same participation guard.
+        assertThrows(SensorControlException.class, () -> repo.insert(sampleIssued()));
+        verifyNoInteractions(dataSource, otherDataSource, connection);
+    }
+
+    private static SensorPollGrant sampleIssued() {
+        UUID id = UUID.randomUUID();
+        Instant at = Instant.parse("2026-10-28T12:00:00Z");
+        return new SensorPollGrant(id, id, "fixture-sensor", id, id, 1L, 0L,
+                SensorPollGrant.Protocol.ICMP, SensorPollGrant.AddressType.IPV4, "192.0.2.1",
+                "planned-profile", "v1", at, at.minusSeconds(1), at.plusSeconds(60),
+                "fixture", SensorPollGrant.Status.ISSUED, null, null, null, null, at);
     }
 
     private void bind(DataSource source, boolean synchronizedWithTransaction) {
