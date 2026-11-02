@@ -190,11 +190,12 @@ class PollGrantSlotWindowTest {
         assertThrows(ArithmeticException.class,
                 () -> PollGrantSlotWindow.occurrenceEpochMillis(Long.MAX_VALUE - 1L, 2L, 0L, 1L));
 
-        // Window demands the unrepresentable T(0)=Long.MAX_VALUE+1 → empty (no representable slot).
-        assertTrue(PollGrantSlotWindow.eligibleSlotRange(
-                Long.MAX_VALUE, 2L, 1L,
-                Instant.ofEpochMilli(Long.MAX_VALUE), Instant.ofEpochMilli(Long.MAX_VALUE).plusSeconds(1)
-        ).isEmpty());
+        // Window demands unrepresentable T(0)=Long.MAX_VALUE+1 and further overflow slots → fail closed.
+        assertThrows(ArithmeticException.class,
+                () -> PollGrantSlotWindow.eligibleSlotRange(
+                        Long.MAX_VALUE, 2L, 1L,
+                        Instant.ofEpochMilli(Long.MAX_VALUE),
+                        Instant.ofEpochMilli(Long.MAX_VALUE).plusSeconds(1)));
 
         // Representable MAX occurrence inside window remains eligible.
         PollGrantSlotWindow.SlotIndexRange maxSlot = PollGrantSlotWindow.eligibleSlotRange(
@@ -202,6 +203,52 @@ class PollGrantSlotWindowTest {
                 Instant.ofEpochMilli(Long.MAX_VALUE), Instant.ofEpochMilli(Long.MAX_VALUE).plusNanos(1));
         assertEquals(0L, maxSlot.firstInclusive());
         assertEquals(0L, maxSlot.lastInclusive());
+    }
+
+    @Test
+    void mixedRepresentableAndOverflowEligibleSlotsFailClosed() {
+        // Issue #289 counterexample: mathematical k∈{0,1,2}; T(0)=MAX is representable,
+        // T(1)=MAX+1 and T(2)=MAX+2 overflow signed long — must not silently return [0,0].
+        long anchor = Long.MAX_VALUE;
+        long cadence = 1L;
+        long phase = 0L;
+        Instant windowStart = Instant.ofEpochMilli(Long.MAX_VALUE);
+        Instant windowEnd = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(2);
+        Instant t0 = Instant.ofEpochMilli(Long.MAX_VALUE);
+        Instant t1 = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(1);
+        Instant t2 = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(2);
+        assertFalse(t0.isBefore(windowStart));
+        assertFalse(t0.isAfter(windowEnd));
+        assertFalse(t1.isBefore(windowStart));
+        assertFalse(t1.isAfter(windowEnd));
+        assertFalse(t2.isBefore(windowStart));
+        assertFalse(t2.isAfter(windowEnd));
+        assertThrows(ArithmeticException.class,
+                () -> PollGrantSlotWindow.eligibleSlotRange(
+                        anchor, cadence, phase, windowStart, windowEnd));
+    }
+
+    @Test
+    void allOverflowEligibleSlotsFailClosedNotFalseEmpty() {
+        // Window starts at Long.MAX_VALUE+1ms: every mathematical eligible occurrence
+        // overflows signed long — must throw, not return false EMPTY.
+        long anchor = Long.MAX_VALUE;
+        long cadence = 1L;
+        long phase = 0L;
+        Instant windowStart = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(1);
+        Instant windowEnd = windowStart.plusMillis(2);
+        Instant t1 = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(1);
+        Instant t2 = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(2);
+        Instant t3 = Instant.ofEpochMilli(Long.MAX_VALUE).plusMillis(3);
+        assertFalse(t1.isBefore(windowStart));
+        assertFalse(t1.isAfter(windowEnd));
+        assertFalse(t2.isBefore(windowStart));
+        assertFalse(t2.isAfter(windowEnd));
+        assertFalse(t3.isBefore(windowStart));
+        assertFalse(t3.isAfter(windowEnd));
+        assertThrows(ArithmeticException.class,
+                () -> PollGrantSlotWindow.eligibleSlotRange(
+                        anchor, cadence, phase, windowStart, windowEnd));
     }
 
     @Test

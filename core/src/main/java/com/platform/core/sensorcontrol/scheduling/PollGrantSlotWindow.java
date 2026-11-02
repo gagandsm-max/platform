@@ -20,8 +20,6 @@ public final class PollGrantSlotWindow {
     /** {@code 2^53 - 1} — JSON-safe nonnegative slot-index ceiling. */
     public static final long MAX_JSON_SAFE_SLOT_INDEX = 9_007_199_254_740_991L;
 
-    private static final BigInteger LONG_MIN = BigInteger.valueOf(Long.MIN_VALUE);
-    private static final BigInteger LONG_MAX = BigInteger.valueOf(Long.MAX_VALUE);
     private static final BigInteger MAX_SAFE = BigInteger.valueOf(MAX_JSON_SAFE_SLOT_INDEX);
     private static final BigInteger THOUSAND = BigInteger.valueOf(1000L);
 
@@ -60,15 +58,11 @@ public final class PollGrantSlotWindow {
             return SlotIndexRange.empty();
         }
 
-        // Only signed-long Instant.ofEpochMilli occurrences are representable results.
-        BigInteger searchMin = milliMin.max(LONG_MIN);
-        BigInteger searchMax = milliMax.min(LONG_MAX);
-        if (searchMin.compareTo(searchMax) > 0) {
-            return SlotIndexRange.empty();
-        }
-
-        BigInteger kMin = ceilDiv(searchMin.subtract(first), cadence);
-        BigInteger kMax = floorDiv(searchMax.subtract(first), cadence);
+        // Full mathematical eligible nonnegative k from milliMin/milliMax before any
+        // signed-long bound intersection. Empty only when no mathematical eligible slot;
+        // unrepresentable in-window endpoints fail closed (no silent clip).
+        BigInteger kMin = ceilDiv(milliMin.subtract(first), cadence);
+        BigInteger kMax = floorDiv(milliMax.subtract(first), cadence);
         if (kMin.signum() < 0) {
             kMin = BigInteger.ZERO;
         }
@@ -81,7 +75,6 @@ public final class PollGrantSlotWindow {
                     "eligible slot index exceeds MAX_JSON_SAFE_SLOT_INDEX");
         }
 
-        // Guaranteed in long range by searchMin/searchMax intersection; fail closed if not.
         first.add(kMin.multiply(cadence)).longValueExact();
         first.add(kMax.multiply(cadence)).longValueExact();
 
