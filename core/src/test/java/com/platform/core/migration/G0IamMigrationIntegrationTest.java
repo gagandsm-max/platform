@@ -98,6 +98,18 @@ class G0IamMigrationIntegrationTest {
                 SELECT COUNT(*) FROM information_schema.tables
                  WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
                 """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
+                   AND column_name='issued_at' AND data_type='timestamp with time zone'
+                   AND is_nullable='NO'
+                """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
+                   AND column_name='recorded_at' AND data_type='timestamp with time zone'
+                   AND is_nullable='NO'
+                """, Integer.class));
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
         assertEquals(0, jdbc.queryForObject(

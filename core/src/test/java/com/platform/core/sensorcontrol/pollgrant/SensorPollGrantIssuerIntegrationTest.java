@@ -191,11 +191,14 @@ class SensorPollGrantIssuerIntegrationTest {
     @Test
     void committedIssuancePersistsExactlyOneAuditIntentInSameTransaction() {
         clearGrants();
+        Timestamp beforeRecord = pg.jdbc().queryForObject("SELECT clock_timestamp()", Timestamp.class);
         SensorPollGrant row = pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP)));
+        Timestamp afterRecord = pg.jdbc().queryForObject("SELECT clock_timestamp()", Timestamp.class);
         assertEquals(FIXED_GRANT, row.grantId());
         assertEquals(1, countGrants());
         assertEquals(1, countAuditIntents(FIXED_GRANT));
         assertAuditIntentMatchesGrant(FIXED_GRANT, tenant, ISSUED);
+        assertAuditIntentRecordedBetween(FIXED_GRANT, beforeRecord, afterRecord);
         assertEquals(1, countAuditIntentsForTenant(tenant));
     }
 
@@ -203,6 +206,8 @@ class SensorPollGrantIssuerIntegrationTest {
     void directSqlGrantInsertCannotBypassAuditIntentCapture() {
         clearGrants();
         UUID directGrant = UUID.fromString("018f0e0a-0000-7000-8000-000000000491");
+        // ISSUED is intentionally historical relative to DB wall clock; recorded_at must not conflate.
+        Timestamp beforeRecord = pg.jdbc().queryForObject("SELECT clock_timestamp()", Timestamp.class);
         pg.tx().executeWithoutResult(tx -> pg.jdbc().update("""
                 INSERT INTO platform.sensor_poll_grant (grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
                     grant_generation, assignment_generation, protocol, issued_address_type, issued_address,
@@ -213,9 +218,11 @@ class SensorPollGrantIssuerIntegrationTest {
                 """, directGrant, tenant, sensor, entity, endpoint,
                 Timestamp.from(ISSUED), Timestamp.from(ISSUED.minusSeconds(1)),
                 Timestamp.from(ISSUED.plusSeconds(60)), Timestamp.from(ISSUED)));
+        Timestamp afterRecord = pg.jdbc().queryForObject("SELECT clock_timestamp()", Timestamp.class);
         assertEquals(1, countGrantRows(directGrant));
         assertEquals(1, countAuditIntents(directGrant));
         assertAuditIntentMatchesGrant(directGrant, tenant, ISSUED);
+        assertAuditIntentRecordedBetween(directGrant, beforeRecord, afterRecord);
     }
 
     @Test
@@ -244,15 +251,22 @@ class SensorPollGrantIssuerIntegrationTest {
                          WHERE grant_id = ?
                         """, otherTenant, row.grantId()));
         assertTrue(flattenThrowableMessage(denyUpdate).contains("trg_spgai_deny_mutation"));
+
+        Exception denyTruncate = assertThrows(Exception.class, () ->
+                pg.jdbc().execute("TRUNCATE platform.sensor_poll_grant_audit_intent"));
+        assertTrue(flattenThrowableMessage(denyTruncate).contains("trg_spgai_deny_mutation"));
+        assertEquals(1, countAuditIntents(row.grantId()),
+                "Failed TRUNCATE must leave surviving audit intent intact");
     }
 
     @Test
     void intentCreationFailurePreventsCommittedGrant() {
         clearGrants();
         pg.tx().executeWithoutResult(tx -> pg.jdbc().update("""
-                INSERT INTO platform.sensor_poll_grant_audit_intent (grant_id, tenant_id, recorded_at)
-                VALUES (?, ?, ?)
-                """, FIXED_GRANT, tenant, Timestamp.from(ISSUED)));
+                INSERT INTO platform.sensor_poll_grant_audit_intent
+                    (grant_id, tenant_id, issued_at, recorded_at)
+                VALUES (?, ?, ?, ?)
+                """, FIXED_GRANT, tenant, Timestamp.from(ISSUED), Timestamp.from(ISSUED.plusSeconds(1))));
         assertEquals(1, countAuditIntents(FIXED_GRANT));
 
         assertThrows(Exception.class, () ->
@@ -1136,10 +1150,33 @@ class SensorPollGrantIssuerIntegrationTest {
     private void assertAuditIntentMatchesGrant(UUID grantId, UUID tenantId, Instant issuedAt) {
         Integer matched = pg.jdbc().queryForObject("""
                 SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent
-                 WHERE grant_id = ? AND tenant_id = ? AND recorded_at = ?
+                 WHERE grant_id = ? AND tenant_id = ? AND issued_at = ?
                 """, Integer.class, grantId, tenantId, Timestamp.from(issuedAt));
         assertEquals(1, matched == null ? 0 : matched,
                 "Audit intent must copy grant_id/tenant_id/issued_at from the validated grant row");
+        if (countGrantRows(grantId) > 0) {
+            Integer aligned = pg.jdbc().queryForObject("""
+                    SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent i
+                      JOIN platform.sensor_poll_grant g ON g.grant_id = i.grant_id
+                     WHERE i.grant_id = ?
+                       AND i.issued_at = g.issued_at
+                       AND i.tenant_id = g.tenant_id
+                    """, Integer.class, grantId);
+            assertEquals(1, aligned == null ? 0 : aligned,
+                    "Audit intent issued_at must exactly match the authoritative grant row");
+        }
+    }
+
+    private void assertAuditIntentRecordedBetween(UUID grantId, Timestamp before, Timestamp after) {
+        Integer matched = pg.jdbc().queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent
+                 WHERE grant_id = ?
+                   AND recorded_at >= ?
+                   AND recorded_at <= ?
+                   AND recorded_at <> issued_at
+                """, Integer.class, grantId, before, after);
+        assertEquals(1, matched == null ? 0 : matched,
+                "recorded_at must be DB clock observation bracketing INSERT, distinct from issued_at");
     }
 
     private static String flattenThrowableMessage(Throwable error) {

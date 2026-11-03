@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -1321,6 +1322,8 @@ class MigrationIntegrationTest {
                         'test', NOW(), 'test', NOW())
                 """, endpointA, tenantA, entityA);
 
+        // Historical issued_at must be preserved as source event time; recorded_at is DB observation time.
+        Timestamp beforeRecord = jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class);
         jdbc.update("""
                 INSERT INTO platform.sensor_poll_grant (
                     grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
@@ -1340,20 +1343,31 @@ class MigrationIntegrationTest {
                     'core-issuer-test',
                     'ISSUED', NULL, NULL, NULL, NULL, NOW())
                 """, grantId, tenantA, sensorId, entityA, endpointA);
+        Timestamp afterRecord = jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class);
 
         Map<String, Object> intent = jdbc.queryForMap("""
-                SELECT grant_id, tenant_id, recorded_at
+                SELECT grant_id, tenant_id, issued_at, recorded_at
                   FROM platform.sensor_poll_grant_audit_intent
                  WHERE grant_id = ?::uuid
                 """, grantId);
         assertEquals(grantId, intent.get("grant_id"));
         assertEquals(tenantA, intent.get("tenant_id"));
         assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent i
+                  JOIN platform.sensor_poll_grant g ON g.grant_id = i.grant_id
+                 WHERE i.grant_id = ?::uuid
+                   AND i.issued_at = g.issued_at
+                   AND i.issued_at = '2026-11-03 10:00:00+00'::timestamptz
+                """, Integer.class, grantId),
+                "issued_at must exactly match the authoritative grant row");
+        assertEquals(1, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent
                  WHERE grant_id = ?::uuid
-                   AND recorded_at = '2026-11-03 10:00:00+00'::timestamptz
-                """, Integer.class, grantId),
-                "recorded_at must copy NEW.issued_at from the validated grant row");
+                   AND recorded_at >= ?
+                   AND recorded_at <= ?
+                   AND recorded_at <> issued_at
+                """, Integer.class, grantId, beforeRecord, afterRecord),
+                "recorded_at must be DB clock observation bracketing INSERT, not historical issued_at");
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
                 Integer.class, grantId));
@@ -1370,10 +1384,21 @@ class MigrationIntegrationTest {
                 """, grantId));
         assertConstraintViolation(denyDelete, "trg_spgai_deny_mutation");
 
+        Exception denyTruncate = assertThrows(Exception.class, () ->
+                jdbc.execute("TRUNCATE platform.sensor_poll_grant_audit_intent"));
+        assertConstraintViolation(denyTruncate, "trg_spgai_deny_mutation");
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                Integer.class, grantId),
+                "Failed TRUNCATE must leave audit intent intact");
+
         // Pre-seeded intent PK conflict must fail the grant INSERT in the same statement/transaction.
         jdbc.update("""
-                INSERT INTO platform.sensor_poll_grant_audit_intent (grant_id, tenant_id, recorded_at)
-                VALUES (?::uuid, ?::uuid, '2026-11-03 12:00:00+00'::timestamptz)
+                INSERT INTO platform.sensor_poll_grant_audit_intent
+                    (grant_id, tenant_id, issued_at, recorded_at)
+                VALUES (?::uuid, ?::uuid,
+                        '2026-11-03 11:00:00+00'::timestamptz,
+                        '2026-11-03 12:00:00+00'::timestamptz)
                 """, blockedGrantId, tenantA);
         Exception intentConflict = assertThrows(Exception.class, () -> jdbc.update("""
                 INSERT INTO platform.sensor_poll_grant (
