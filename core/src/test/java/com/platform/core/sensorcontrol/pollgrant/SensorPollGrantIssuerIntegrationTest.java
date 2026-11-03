@@ -178,12 +178,88 @@ class SensorPollGrantIssuerIntegrationTest {
         assertEquals(ISSUED, row.updatedAt());
         SensorPollGrant reloaded = grants.find(tenant, sensor, FIXED_GRANT).orElseThrow();
         assertEquals(row, reloaded);
+        assertEquals(1, countAuditIntents(FIXED_GRANT));
+        assertAuditIntentMatchesGrant(FIXED_GRANT, tenant, ISSUED);
         assertTrue(auditLog.list.stream().anyMatch(event ->
                 event.getFormattedMessage().contains("sensor.poll_grant.issue")
                         && event.getFormattedMessage().contains("SUCCESS")
                         && !event.getFormattedMessage().contains("2001:db8")
                         && !event.getFormattedMessage().contains("issued_by")
                         && !event.getFormattedMessage().contains("profile_plan")));
+    }
+
+    @Test
+    void committedIssuancePersistsExactlyOneAuditIntentInSameTransaction() {
+        clearGrants();
+        SensorPollGrant row = pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP)));
+        assertEquals(FIXED_GRANT, row.grantId());
+        assertEquals(1, countGrants());
+        assertEquals(1, countAuditIntents(FIXED_GRANT));
+        assertAuditIntentMatchesGrant(FIXED_GRANT, tenant, ISSUED);
+        assertEquals(1, countAuditIntentsForTenant(tenant));
+    }
+
+    @Test
+    void directSqlGrantInsertCannotBypassAuditIntentCapture() {
+        clearGrants();
+        UUID directGrant = UUID.fromString("018f0e0a-0000-7000-8000-000000000491");
+        pg.tx().executeWithoutResult(tx -> pg.jdbc().update("""
+                INSERT INTO platform.sensor_poll_grant (grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol, issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version, issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, 0, 'SNMP', 'IPV6', '2001:db8::aa',
+                    'planned-profile', 'v1', ?, ?, ?, 'direct-sql', 'ISSUED', ?)
+                """, directGrant, tenant, sensor, entity, endpoint,
+                Timestamp.from(ISSUED), Timestamp.from(ISSUED.minusSeconds(1)),
+                Timestamp.from(ISSUED.plusSeconds(60)), Timestamp.from(ISSUED)));
+        assertEquals(1, countGrantRows(directGrant));
+        assertEquals(1, countAuditIntents(directGrant));
+        assertAuditIntentMatchesGrant(directGrant, tenant, ISSUED);
+    }
+
+    @Test
+    void auditIntentSurvivesParentGrantAndTenantOwnedCleanup() {
+        clearGrants();
+        SensorPollGrant row = pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP)));
+        assertEquals(1, countAuditIntents(row.grantId()));
+
+        int deleted = pg.tx().execute(status -> pg.jdbc().update(
+                "DELETE FROM platform.sensor_poll_grant WHERE grant_id = ? AND tenant_id = ?",
+                row.grantId(), tenant));
+        assertEquals(1, deleted);
+        assertEquals(0, countGrantRows(row.grantId()));
+        assertEquals(1, countAuditIntents(row.grantId()),
+                "Audit intent must survive parent grant deletion");
+
+        Exception denyDelete = assertThrows(Exception.class, () ->
+                pg.jdbc().update("DELETE FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?",
+                        row.grantId()));
+        assertTrue(flattenThrowableMessage(denyDelete).contains("trg_spgai_deny_mutation"));
+
+        Exception denyUpdate = assertThrows(Exception.class, () ->
+                pg.jdbc().update("""
+                        UPDATE platform.sensor_poll_grant_audit_intent
+                           SET tenant_id = ?
+                         WHERE grant_id = ?
+                        """, otherTenant, row.grantId()));
+        assertTrue(flattenThrowableMessage(denyUpdate).contains("trg_spgai_deny_mutation"));
+    }
+
+    @Test
+    void intentCreationFailurePreventsCommittedGrant() {
+        clearGrants();
+        pg.tx().executeWithoutResult(tx -> pg.jdbc().update("""
+                INSERT INTO platform.sensor_poll_grant_audit_intent (grant_id, tenant_id, recorded_at)
+                VALUES (?, ?, ?)
+                """, FIXED_GRANT, tenant, Timestamp.from(ISSUED)));
+        assertEquals(1, countAuditIntents(FIXED_GRANT));
+
+        assertThrows(Exception.class, () ->
+                pg.tx().execute(status -> issuer.issue(request(sensor, entity, endpoint, Protocol.SNMP))));
+        assertEquals(0, countGrants(), "Grant INSERT must not commit when audit-intent capture fails");
+        assertEquals(1, countAuditIntents(FIXED_GRANT),
+                "Pre-seeded conflict row remains; no second intent and no grant");
     }
 
     @Test
@@ -780,6 +856,8 @@ class SensorPollGrantIssuerIntegrationTest {
                     SensorControlException.ERR_POLL_GRANT_CONFLICT, "forced-rollback");
         }));
         assertEquals(0, countGrants());
+        assertEquals(0, countAuditIntents(FIXED_GRANT),
+                "Rollback must remove grant and same-transaction audit intent");
         assertTrue(auditLog.list.stream().noneMatch(event ->
                 event.getFormattedMessage().contains("sensor.poll_grant.issue")));
     }
@@ -793,6 +871,8 @@ class SensorPollGrantIssuerIntegrationTest {
             return null;
         });
         assertEquals(0, countGrants());
+        assertEquals(0, countAuditIntents(FIXED_GRANT),
+                "Rollback must remove grant and same-transaction audit intent");
         assertTrue(auditLog.list.stream().noneMatch(event ->
                 event.getFormattedMessage().contains("sensor.poll_grant.issue")));
     }
@@ -1037,6 +1117,41 @@ class SensorPollGrantIssuerIntegrationTest {
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE tenant_id = ?",
                 Integer.class, tenant);
         return count == null ? 0 : count;
+    }
+
+    private int countAuditIntents(UUID grantId) {
+        Integer count = pg.jdbc().queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?",
+                Integer.class, grantId);
+        return count == null ? 0 : count;
+    }
+
+    private int countAuditIntentsForTenant(UUID tenantId) {
+        Integer count = pg.jdbc().queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE tenant_id = ?",
+                Integer.class, tenantId);
+        return count == null ? 0 : count;
+    }
+
+    private void assertAuditIntentMatchesGrant(UUID grantId, UUID tenantId, Instant issuedAt) {
+        Integer matched = pg.jdbc().queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent
+                 WHERE grant_id = ? AND tenant_id = ? AND recorded_at = ?
+                """, Integer.class, grantId, tenantId, Timestamp.from(issuedAt));
+        assertEquals(1, matched == null ? 0 : matched,
+                "Audit intent must copy grant_id/tenant_id/issued_at from the validated grant row");
+    }
+
+    private static String flattenThrowableMessage(Throwable error) {
+        StringBuilder sb = new StringBuilder();
+        Throwable cursor = error;
+        while (cursor != null) {
+            if (cursor.getMessage() != null) {
+                sb.append(cursor.getMessage()).append('\n');
+            }
+            cursor = cursor.getCause();
+        }
+        return sb.toString();
     }
 
     private void clearGrants() {
