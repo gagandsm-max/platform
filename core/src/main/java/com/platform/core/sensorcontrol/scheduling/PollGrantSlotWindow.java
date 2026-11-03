@@ -155,6 +155,24 @@ public final class PollGrantSlotWindow {
      * and never confer eligibility.
      */
     public record SlotIndexRange(long firstInclusive, long lastInclusive) {
+        /**
+         * Compact canonical constructor. Empty ranges ({@code firstInclusive > lastInclusive})
+         * are unrestricted sentinels. Non-empty ranges must satisfy
+         * {@code 0 <= firstInclusive <= lastInclusive <= MAX_JSON_SAFE_SLOT_INDEX}.
+         */
+        public SlotIndexRange {
+            if (firstInclusive <= lastInclusive) {
+                if (firstInclusive < 0L) {
+                    throw new IllegalArgumentException(
+                            "non-empty SlotIndexRange firstInclusive must be >= 0");
+                }
+                if (lastInclusive > MAX_JSON_SAFE_SLOT_INDEX) {
+                    throw new IllegalArgumentException(
+                            "non-empty SlotIndexRange lastInclusive must be <= MAX_JSON_SAFE_SLOT_INDEX");
+                }
+            }
+        }
+
         public static SlotIndexRange empty() {
             return new SlotIndexRange(0L, -1L);
         }

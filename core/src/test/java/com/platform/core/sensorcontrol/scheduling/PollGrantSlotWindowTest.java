@@ -109,6 +109,59 @@ class PollGrantSlotWindowTest {
     }
 
     @Test
+    void negativeEpochFractionalNanosecondWindowBoundariesRemainExact() {
+        long anchor = -10_000L;
+        long cadence = 10_000L;
+        long phase = 0L;
+        Instant occurrence = Instant.ofEpochMilli(-10_000L);
+
+        assertEquals(1L, PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase, occurrence, occurrence.plusNanos(1)).size());
+        assertTrue(PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase,
+                occurrence.plusNanos(1), occurrence.plusMillis(1)).isEmpty());
+
+        assertEquals(1L, PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase, occurrence.minusNanos(1), occurrence).size());
+        assertTrue(PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase,
+                occurrence.minusMillis(1), occurrence.minusNanos(1)).isEmpty());
+
+        Instant microAfter = occurrence.plusNanos(1_000L);
+        assertTrue(PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase, microAfter, microAfter.plusMillis(5)).isEmpty());
+        Instant microBeforeEnd = occurrence.plusMillis(10_000L).minusNanos(1_000L);
+        assertTrue(PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase, occurrence.plusMillis(1), microBeforeEnd).isEmpty());
+        assertEquals(1L, PollGrantSlotWindow.eligibleSlotRange(
+                anchor, cadence, phase,
+                occurrence.plusMillis(1), occurrence.plusMillis(10_000L)).size());
+    }
+
+    @Test
+    void slotIndexRangeConstructorRejectsInvalidNonEmptyAndPreservesEmpty() {
+        assertThrows(IllegalArgumentException.class,
+                () -> new PollGrantSlotWindow.SlotIndexRange(-1L, 0L));
+        assertThrows(IllegalArgumentException.class,
+                () -> new PollGrantSlotWindow.SlotIndexRange(
+                        0L, PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX + 1L));
+
+        PollGrantSlotWindow.SlotIndexRange atMax = new PollGrantSlotWindow.SlotIndexRange(
+                PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX,
+                PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX);
+        assertFalse(atMax.isEmpty());
+        assertEquals(1L, atMax.size());
+        assertEquals(PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX, atMax.firstInclusive());
+        assertEquals(PollGrantSlotWindow.MAX_JSON_SAFE_SLOT_INDEX, atMax.lastInclusive());
+
+        PollGrantSlotWindow.SlotIndexRange empty = PollGrantSlotWindow.SlotIndexRange.empty();
+        assertTrue(empty.isEmpty());
+        assertEquals(0L, empty.size());
+        assertEquals(0L, empty.firstInclusive());
+        assertEquals(-1L, empty.lastInclusive());
+    }
+
+    @Test
     void smallIntervalWithNoEligibleSlotsReturnsExplicitEmpty() {
         PollGrantSlotWindow.SlotIndexRange range = PollGrantSlotWindow.eligibleSlotRange(
                 0L, 60_000L, 0L,
