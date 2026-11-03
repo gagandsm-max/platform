@@ -226,6 +226,9 @@ class PollGrantSlotWindowTest {
         assertThrows(ArithmeticException.class,
                 () -> PollGrantSlotWindow.eligibleSlotRange(
                         anchor, cadence, phase, windowStart, windowEnd));
+        // Independent oracle must also fail closed (no silent clip to [0,0]).
+        assertThrows(ArithmeticException.class,
+                () -> independentRange(anchor, cadence, phase, windowStart, windowEnd));
     }
 
     @Test
@@ -249,6 +252,9 @@ class PollGrantSlotWindowTest {
         assertThrows(ArithmeticException.class,
                 () -> PollGrantSlotWindow.eligibleSlotRange(
                         anchor, cadence, phase, windowStart, windowEnd));
+        // Independent oracle must also fail closed (no false EMPTY from long clipping).
+        assertThrows(ArithmeticException.class,
+                () -> independentRange(anchor, cadence, phase, windowStart, windowEnd));
     }
 
     @Test
@@ -283,6 +289,8 @@ class PollGrantSlotWindowTest {
 
     @Test
     void independentBoundedEnumerationOracleForSmallSchedules() {
+        // Fixtures bound T(k)=anchor+phase+k*cadence so k=0..16 exhausts every
+        // in-window nonnegative occurrence (anchor>=-3, phase>=0, cadence>=1, end<=10ms).
         for (long anchor = -3; anchor <= 3; anchor++) {
             for (long cadence = 1; cadence <= 5; cadence++) {
                 for (long phase = 0; phase < cadence; phase++) {
@@ -290,16 +298,31 @@ class PollGrantSlotWindowTest {
                         for (long endMs = startMs + 1; endMs <= 10; endMs++) {
                             Instant start = Instant.ofEpochMilli(startMs);
                             Instant end = Instant.ofEpochMilli(endMs);
-                            ReferenceRange ref = independentRange(
-                                    anchor, cadence, phase, start, end);
+                            long expectedFirst = -1L;
+                            long expectedLast = -1L;
+                            long expectedCount = 0L;
+                            for (long k = 0L; k <= 16L; k++) {
+                                long occurrenceMs = anchor + phase + k * cadence;
+                                Instant occurrence = Instant.ofEpochMilli(occurrenceMs);
+                                if (!occurrence.isBefore(start) && !occurrence.isAfter(end)) {
+                                    if (expectedCount == 0L) {
+                                        expectedFirst = k;
+                                    }
+                                    expectedLast = k;
+                                    expectedCount++;
+                                }
+                            }
                             PollGrantSlotWindow.SlotIndexRange range =
                                     PollGrantSlotWindow.eligibleSlotRange(
                                             anchor, cadence, phase, start, end);
-                            if (ref.empty) {
+                            if (expectedCount == 0L) {
                                 assertTrue(range.isEmpty());
+                                assertEquals(0L, range.size());
                             } else {
-                                assertEquals(ref.first, range.firstInclusive());
-                                assertEquals(ref.last, range.lastInclusive());
+                                assertEquals(expectedFirst, range.firstInclusive());
+                                assertEquals(expectedLast, range.lastInclusive());
+                                assertEquals(expectedCount, range.size());
+                                assertEquals(expectedLast - expectedFirst + 1L, expectedCount);
                             }
                         }
                     }
@@ -347,6 +370,8 @@ class PollGrantSlotWindowTest {
 
     /**
      * Test-only reference: BigInteger ceil/floor range for milli-aligned Instant membership.
+     * Computes the full mathematical nonnegative slot-index interval first, then fails closed
+     * on JSON-safe index overflow or signed-long-unrepresentable endpoint occurrences.
      * Does not call {@link PollGrantSlotWindow} production helpers.
      */
     private static ReferenceRange independentRange(long anchor, long cadence, long phase,
@@ -364,13 +389,8 @@ class PollGrantSlotWindowTest {
         if (milliMin.compareTo(milliMax) > 0) {
             return ReferenceRange.EMPTY;
         }
-        BigInteger searchMin = milliMin.max(BigInteger.valueOf(Long.MIN_VALUE));
-        BigInteger searchMax = milliMax.min(BigInteger.valueOf(Long.MAX_VALUE));
-        if (searchMin.compareTo(searchMax) > 0) {
-            return ReferenceRange.EMPTY;
-        }
-        BigInteger kMin = ceilDiv(searchMin.subtract(first), cad);
-        BigInteger kMax = floorDiv(searchMax.subtract(first), cad);
+        BigInteger kMin = ceilDiv(milliMin.subtract(first), cad);
+        BigInteger kMax = floorDiv(milliMax.subtract(first), cad);
         if (kMin.signum() < 0) {
             kMin = BigInteger.ZERO;
         }
