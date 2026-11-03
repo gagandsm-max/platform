@@ -18,8 +18,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * Focused G0 + IAM catalogue integration source for Issue #249 Cycle 16.
- * Covers the combined sixteen-migration catalogue and genuine V015→V016 upgrade
+ * Focused G0 + IAM catalogue integration source for Issue #249 Cycle 16 / Issue #294 V017.
+ * Covers the combined seventeen-migration catalogue and genuine V015→V016 upgrade
  * without mixing the PR251 gapped (V015-absent) branch fixture into Production assertions.
  * Execution of these tests is NOT authorized by the source-only dispatch.
  */
@@ -36,7 +36,7 @@ class G0IamMigrationIntegrationTest {
             "tenant_capability_pack", "tenant_capability_pack_activation",
             "sensor_capability_pack_assignment", "sensor_capability_pack_state",
             "entity_management_endpoint", "sensor_enrollment_authority",
-            "sensor_control_state", "sensor_poll_grant",
+            "sensor_control_state", "sensor_poll_grant", "sensor_poll_grant_audit_intent",
             "identity_provider_instance", "platform_subject", "identity_mapping",
             "subject_tenant_scope", "permission_grant", "permission_grant_resource"
     };
@@ -77,24 +77,43 @@ class G0IamMigrationIntegrationTest {
     }
 
     @Test
-    void cleanSixteenMigrationInstall_materializesG0AndIamSchema() {
+    void cleanSeventeenMigrationInstall_materializesG0IamAndAuditIntentSchema() {
         pg.migrate();
         JdbcTemplate jdbc = pg.jdbc();
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version FROM platform.schema_history ORDER BY version");
-        assertEquals(16, history.size());
+        assertEquals(17, history.size());
         assertEquals("V015", history.get(14).get("version"));
         assertEquals("V016", history.get(15).get("version"));
+        assertEquals("V017", history.get(16).get("version"));
 
-        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+        assertEquals(37, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
         assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
         assertEquals(1, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM information_schema.tables
                  WHERE table_schema='platform' AND table_name='sensor_poll_grant'
                 """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.tables
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
+                """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
+                   AND column_name='issued_at' AND data_type='timestamp with time zone'
+                   AND is_nullable='NO'
+                """, Integer.class));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'
+                   AND column_name='recorded_at' AND data_type='timestamp with time zone'
+                   AND is_nullable='NO'
+                """, Integer.class));
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent", Integer.class));
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.identity_provider_instance", Integer.class));
         assertEquals(0, jdbc.queryForObject(
@@ -102,9 +121,9 @@ class G0IamMigrationIntegrationTest {
         assertEquals(12, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
 
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
-        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+        assertEquals(37, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
     }
 
     @Test
@@ -161,15 +180,20 @@ class G0IamMigrationIntegrationTest {
 
         pg.migrate();
 
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
         assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
         assertEquals(12, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class),
                 "V016 must not seed operational poll grants");
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent", Integer.class),
+                "V017 must not seed audit intents");
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.permission_grant", Integer.class),
                 "V016 must not seed permission grants");
@@ -194,21 +218,23 @@ class G0IamMigrationIntegrationTest {
     void combinedCatalogueRepeatAndV016ChecksumMismatch_remainIdempotentAndFailClosed() {
         pg.migrate();
         JdbcTemplate jdbc = pg.jdbc();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V015'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V016'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
         assertEquals("MIGRATION_CHECKSUM_MISMATCH", ex.getCode());
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
                 "Checksum mismatch must not invent additional history rows");
     }
@@ -252,10 +278,12 @@ class G0IamMigrationIntegrationTest {
 
         // Documented forward recovery: re-run the real combined catalogue; do not claim success from the failed probe.
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
         assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
         assertNull(jdbc.queryForObject("SELECT to_regclass('platform.iam_failure_probe')", String.class));
     }
@@ -393,11 +421,13 @@ class G0IamMigrationIntegrationTest {
         assertEquals(0, countZeroArgTrustRetargetFunctions(jdbc));
 
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
-        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
+        assertEquals(37, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
         assertEquals(6, countNamedPlatformTables(jdbc, IAM_TABLES));
         assertEquals(12, countNamedConstraints(jdbc, IAM_CONSTRAINTS));
 
@@ -416,13 +446,15 @@ class G0IamMigrationIntegrationTest {
         assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
         assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.permission_grant", Integer.class));
 
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
-                "Successful repeat must remain idempotent at sixteen history rows");
-        assertEquals(36, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
+                "Successful repeat must remain idempotent at seventeen history rows");
+        assertEquals(37, countNamedPlatformTables(jdbc, COMBINED_PLATFORM_TABLES));
         assertEquals("trigger", queryZeroArgTrustRetargetFunction(jdbc).get("return_type"));
     }
 

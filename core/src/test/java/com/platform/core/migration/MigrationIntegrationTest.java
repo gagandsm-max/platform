@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.sql.Timestamp;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -58,18 +59,18 @@ class MigrationIntegrationTest {
                                      'tenant_capability_pack','tenant_capability_pack_activation',
                                      'sensor_capability_pack_assignment','sensor_capability_pack_state',
                                      'entity_management_endpoint','sensor_enrollment_authority',
-                                     'sensor_control_state','sensor_poll_grant',
+                                     'sensor_control_state','sensor_poll_grant','sensor_poll_grant_audit_intent',
                                      'identity_provider_instance','platform_subject','identity_mapping',
                                      'subject_tenant_scope','permission_grant','permission_grant_resource')
                 """,
                 Integer.class
         );
-        assertEquals(36, tables);
+        assertEquals(37, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(16, history.size());
+        assertEquals(17, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -86,11 +87,12 @@ class MigrationIntegrationTest {
         assertEquals("V014", history.get(13).get("version"));
         assertEquals("V015", history.get(14).get("version"));
         assertEquals("V016", history.get(15).get("version"));
+        assertEquals("V017", history.get(16).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(17, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -200,13 +202,13 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(17, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
-        // 11. V001→V016 combined upgrade must materialize Sensor/Agent Control/Capability Pack,
+        // 11. V001→V017 combined upgrade must materialize Sensor/Agent Control/Capability Pack,
         // replay-reservation, publisher-lease, entity management-endpoint, enrollment-authority,
         // BUILD-004 control-generation safety, Sensor control desired-state, inert poll-grant ledger,
-        // and IAM identity/permission-grant directory tables.
+        // IAM identity/permission-grant directory tables, and inert poll-grant audit intent.
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V004'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
@@ -234,10 +236,15 @@ class MigrationIntegrationTest {
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
         assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name='sensor_control_state'",
                 Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name='sensor_poll_grant'",
+                Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='platform' AND table_name='sensor_poll_grant_audit_intent'",
                 Integer.class));
         Integer iamTables = jdbc.queryForObject(
                 """
@@ -1258,14 +1265,184 @@ class MigrationIntegrationTest {
                 SELECT address FROM platform.entity_management_endpoint WHERE endpoint_id = ?::uuid
                 """, String.class, endpointA1));
 
-        // Full catalogue migrate advances the V015 checkpoint through IAM V016.
+        // Full catalogue migrate advances the V015 checkpoint through IAM V016 and audit-intent V017.
         pg.migrate();
-        assertEquals(16, jdbc.queryForObject(
+        assertEquals(17, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
         assertEquals(2, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.sensor_poll_grant", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent", Integer.class),
+                "V017 must not backfill audit intent for pre-migration grants");
+    }
+
+    @Test
+    void v017AuditIntentCapturesSameTransactionProvenanceAndSurvivesGrantDeletion() {
+        JdbcTemplate jdbc = pg.jdbc();
+        pg.migrate();
+
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.schema_history WHERE version='V017'", Integer.class));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent", Integer.class));
+
+        UUID tenantA = UUID.fromString("018f0e0a-0000-7000-8000-000000000171");
+        UUID entityA = UUID.fromString("018f0e0a-0000-7000-8000-000000000172");
+        UUID endpointA = UUID.fromString("018f0e0a-0000-7000-8000-000000000173");
+        UUID grantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000174");
+        UUID blockedGrantId = UUID.fromString("018f0e0a-0000-7000-8000-000000000175");
+        String sensorId = "sensor-v017-audit-intent";
+
+        jdbc.update("""
+                INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at)
+                VALUES (?::uuid, 'V017 Audit Tenant', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW())
+                """, tenantA);
+        jdbc.update("""
+                INSERT INTO platform.sensor (
+                    sensor_id, tenant_id, site_id, role, status, allow_all_tenant_entities,
+                    created_at, updated_at)
+                VALUES (?, ?::uuid, NULL, 'NETWORK', 'ACTIVE', TRUE, NOW(), NOW())
+                """, sensorId, tenantA);
+        jdbc.update("""
+                INSERT INTO platform.entity (
+                    entity_id, tenant_id, entity_type, display_name, lifecycle_state,
+                    first_seen_at, last_seen_at, created_by, created_at, updated_at)
+                VALUES (?::uuid, ?::uuid, 'NETWORK_DEVICE', 'V017', 'ACTIVE',
+                        NOW(), NOW(), 'test', NOW(), NOW())
+                """, entityA, tenantA);
+        jdbc.update("""
+                INSERT INTO platform.entity_management_endpoint (
+                    endpoint_id, tenant_id, entity_id, address_type, address, state, source,
+                    is_primary, created_by, created_at, updated_by, updated_at)
+                VALUES (?::uuid, ?::uuid, ?::uuid, 'IPV4', '10.0.0.17', 'ACTIVE', 'MANUAL', TRUE,
+                        'test', NOW(), 'test', NOW())
+                """, endpointA, tenantA, entityA);
+
+        // Historical issued_at must be preserved as source event time; recorded_at is DB observation time.
+        Timestamp beforeRecord = jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class);
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, revoked_at, revoked_by, revocation_class, revocation_reason, updated_at)
+                VALUES (
+                    ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    1, 0, 'ICMP',
+                    'IPV4', '10.0.0.17',
+                    'profile.plan.icmp.default', '1.0.0',
+                    '2026-11-03 10:00:00+00'::timestamptz,
+                    '2026-11-03 09:00:00+00'::timestamptz,
+                    '2026-11-03 11:00:00+00'::timestamptz,
+                    'core-issuer-test',
+                    'ISSUED', NULL, NULL, NULL, NULL, NOW())
+                """, grantId, tenantA, sensorId, entityA, endpointA);
+        Timestamp afterRecord = jdbc.queryForObject("SELECT clock_timestamp()", Timestamp.class);
+
+        Map<String, Object> intent = jdbc.queryForMap("""
+                SELECT grant_id, tenant_id, issued_at, recorded_at
+                  FROM platform.sensor_poll_grant_audit_intent
+                 WHERE grant_id = ?::uuid
+                """, grantId);
+        assertEquals(grantId, intent.get("grant_id"));
+        assertEquals(tenantA, intent.get("tenant_id"));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent i
+                  JOIN platform.sensor_poll_grant g ON g.grant_id = i.grant_id
+                 WHERE i.grant_id = ?::uuid
+                   AND i.issued_at = g.issued_at
+                   AND i.issued_at = '2026-11-03 10:00:00+00'::timestamptz
+                """, Integer.class, grantId),
+                "issued_at must exactly match the authoritative grant row");
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent
+                 WHERE grant_id = ?::uuid
+                   AND recorded_at >= ?
+                   AND recorded_at <= ?
+                   AND recorded_at <> issued_at
+                """, Integer.class, grantId, beforeRecord, afterRecord),
+                "recorded_at must be DB clock observation bracketing INSERT, not historical issued_at");
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                Integer.class, grantId));
+
+        Exception denyUpdate = assertThrows(Exception.class, () -> jdbc.update("""
+                UPDATE platform.sensor_poll_grant_audit_intent
+                   SET tenant_id = '018f0e0a-0000-7000-8000-00000000ffff'::uuid
+                 WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(denyUpdate, "trg_spgai_deny_mutation");
+
+        Exception denyDelete = assertThrows(Exception.class, () -> jdbc.update("""
+                DELETE FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid
+                """, grantId));
+        assertConstraintViolation(denyDelete, "trg_spgai_deny_mutation");
+
+        Exception denyTruncate = assertThrows(Exception.class, () ->
+                jdbc.execute("TRUNCATE platform.sensor_poll_grant_audit_intent"));
+        assertConstraintViolation(denyTruncate, "trg_spgai_deny_mutation");
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                Integer.class, grantId),
+                "Failed TRUNCATE must leave audit intent intact");
+
+        // Pre-seeded intent PK conflict must fail the grant INSERT in the same statement/transaction.
+        jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant_audit_intent
+                    (grant_id, tenant_id, issued_at, recorded_at)
+                VALUES (?::uuid, ?::uuid,
+                        '2026-11-03 11:00:00+00'::timestamptz,
+                        '2026-11-03 12:00:00+00'::timestamptz)
+                """, blockedGrantId, tenantA);
+        Exception intentConflict = assertThrows(Exception.class, () -> jdbc.update("""
+                INSERT INTO platform.sensor_poll_grant (
+                    grant_id, tenant_id, sensor_id, entity_id, endpoint_id,
+                    grant_generation, assignment_generation, protocol,
+                    issued_address_type, issued_address,
+                    profile_plan_id, profile_plan_version,
+                    issued_at, window_start, window_end, issued_by,
+                    status, updated_at)
+                VALUES (
+                    ?::uuid, ?::uuid, ?, ?::uuid, ?::uuid,
+                    2, 0, 'ICMP', 'IPV4', '10.0.0.17', 'p', '1',
+                    '2026-11-03 10:00:00+00'::timestamptz,
+                    '2026-11-03 09:00:00+00'::timestamptz,
+                    '2026-11-03 11:00:00+00'::timestamptz,
+                    't', 'ISSUED', NOW())
+                """, blockedGrantId, tenantA, sensorId, entityA, endpointA));
+        assertTrue(flattenThrowableMessage(intentConflict).toLowerCase().contains("duplicate")
+                        || flattenThrowableMessage(intentConflict).contains("sensor_poll_grant_audit_intent"),
+                () -> "Expected audit-intent PK conflict, got: " + flattenThrowableMessage(intentConflict));
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid",
+                Integer.class, blockedGrantId));
+
+        jdbc.update("DELETE FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid", grantId);
+        assertEquals(0, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant WHERE grant_id = ?::uuid",
+                Integer.class, grantId));
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                Integer.class, grantId),
+                "Audit intent must survive parent grant deletion");
+
+        jdbc.update("DELETE FROM platform.entity_management_endpoint WHERE endpoint_id = ?::uuid", endpointA);
+        jdbc.update("DELETE FROM platform.entity WHERE entity_id = ?::uuid", entityA);
+        jdbc.update("DELETE FROM platform.sensor WHERE sensor_id = ?", sensorId);
+        jdbc.update("DELETE FROM platform.tenant WHERE tenant_id = ?::uuid", tenantA);
+        assertEquals(1, jdbc.queryForObject(
+                "SELECT COUNT(*) FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                Integer.class, grantId),
+                "Audit intent must survive test-owned tenant deletion");
+        assertEquals(tenantA, jdbc.queryForObject(
+                "SELECT tenant_id FROM platform.sensor_poll_grant_audit_intent WHERE grant_id = ?::uuid",
+                UUID.class, grantId));
     }
 
     private static void assertLegacyWatermarkConserved(Map<String, Object> before, Map<String, Object> after) {
