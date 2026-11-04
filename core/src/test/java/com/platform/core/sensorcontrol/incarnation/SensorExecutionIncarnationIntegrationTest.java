@@ -18,7 +18,9 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Supplier;
 
 import static com.platform.core.sensorcontrol.incarnation.SensorExecutionIncarnation.Status;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -27,6 +29,7 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Issue #288 G1b-C3: inert Core Sensor execution incarnation persistence.
@@ -397,6 +400,175 @@ class SensorExecutionIncarnationIntegrationTest {
         assertEquals(1, jdbc.queryForObject("""
                 SELECT COUNT(*) FROM platform.sensor_execution_incarnation
                  WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+    }
+
+    /**
+     * Issue #288 G1b-C4-A: UUID mint/null-check must precede any rollover mutation.
+     * Catching the failure inside the caller-owned transaction and committing must
+     * leave the original ACTIVE row byte-identical; a rolled-back transaction would
+     * not reproduce this defect.
+     */
+    @Test
+    void rolloverUuidSupplierThrowCaughtAndCommittedPreservesOriginalActiveRow() {
+        SensorExecutionIncarnation original = pg.tx().execute(tx -> repo.issueInitial(tenant, sensor));
+        SensorExecutionIncarnationRepository failing = repositoryWithIds(() -> {
+            throw new IllegalStateException("incarnation-uuid-unavailable");
+        });
+
+        pg.tx().executeWithoutResult(tx -> {
+            try {
+                failing.rollover(tenant, sensor);
+                fail("expected IllegalStateException from UUID supplier");
+            } catch (IllegalStateException expected) {
+                assertEquals("incarnation-uuid-unavailable", expected.getMessage());
+            }
+        });
+
+        assertPersistedActiveUnchanged(original);
+    }
+
+    @Test
+    void rolloverUuidSupplierNullCaughtAndCommittedPreservesOriginalActiveRow() {
+        SensorExecutionIncarnation original = pg.tx().execute(tx -> repo.issueInitial(tenant, sensor));
+        SensorExecutionIncarnationRepository failing = repositoryWithIds(() -> null);
+
+        pg.tx().executeWithoutResult(tx -> {
+            try {
+                failing.rollover(tenant, sensor);
+                fail("expected NullPointerException from null UUID");
+            } catch (NullPointerException expected) {
+                assertEquals("incarnationId", expected.getMessage());
+            }
+        });
+
+        assertPersistedActiveUnchanged(original);
+    }
+
+    @Test
+    void afterCommittedUuidFailure_validRolloverAdvancesExactlyOneGeneration() {
+        SensorExecutionIncarnation original = pg.tx().execute(tx -> repo.issueInitial(tenant, sensor));
+        SensorExecutionIncarnationRepository failing = repositoryWithIds(() -> {
+            throw new IllegalStateException("incarnation-uuid-unavailable");
+        });
+        pg.tx().executeWithoutResult(tx -> {
+            try {
+                failing.rollover(tenant, sensor);
+                fail("expected IllegalStateException from UUID supplier");
+            } catch (IllegalStateException expected) {
+                assertEquals("incarnation-uuid-unavailable", expected.getMessage());
+            }
+        });
+        assertPersistedActiveUnchanged(original);
+
+        SensorExecutionIncarnation replacement = pg.tx().execute(tx -> repo.rollover(tenant, sensor));
+        assertEquals(2L, replacement.incarnationGeneration());
+        assertEquals(Status.ACTIVE, replacement.status());
+        assertNotEquals(original.incarnationId(), replacement.incarnationId());
+        assertEquals(replacement, repo.findActive(tenant, sensor).orElseThrow());
+
+        SensorExecutionIncarnation prior = repo.find(tenant, sensor, original.incarnationId()).orElseThrow();
+        assertEquals(Status.SUPERSEDED, prior.status());
+        assertNotNull(prior.supersededAt());
+        assertEquals(2, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ? AND status = 'ACTIVE'
+                """, Integer.class, tenant, sensor));
+    }
+
+    @Test
+    void successfulIssuanceInvokesUuidSupplierOnceAndPersistsThatId() {
+        UUID initialId = UUID.fromString("018f0e0a-0000-7000-8000-0000000003a1");
+        UUID rolloverId = UUID.fromString("018f0e0a-0000-7000-8000-0000000003a2");
+        AtomicInteger calls = new AtomicInteger();
+        SensorExecutionIncarnationRepository counting = repositoryWithIds(() -> {
+            int n = calls.incrementAndGet();
+            if (n == 1) {
+                return initialId;
+            }
+            if (n == 2) {
+                return rolloverId;
+            }
+            fail("UUID supplier invoked more than once per successful issuance");
+            return null;
+        });
+
+        SensorExecutionIncarnation initial = pg.tx().execute(tx -> counting.issueInitial(tenant, sensor));
+        assertEquals(1, calls.get());
+        assertEquals(initialId, initial.incarnationId());
+        assertEquals(initialId, repo.findActive(tenant, sensor).orElseThrow().incarnationId());
+
+        SensorExecutionIncarnation rolled = pg.tx().execute(tx -> counting.rollover(tenant, sensor));
+        assertEquals(2, calls.get());
+        assertEquals(rolloverId, rolled.incarnationId());
+        assertEquals(rolloverId, repo.findActive(tenant, sensor).orElseThrow().incarnationId());
+        assertEquals(2L, rolled.incarnationGeneration());
+    }
+
+    @Test
+    void initialIssuanceUuidFailureLeavesNoIncarnation_andLaterValidStartsAtGenerationOne() {
+        SensorExecutionIncarnationRepository throwing = repositoryWithIds(() -> {
+            throw new IllegalStateException("incarnation-uuid-unavailable");
+        });
+        pg.tx().executeWithoutResult(tx -> {
+            try {
+                throwing.issueInitial(tenant, sensor);
+                fail("expected IllegalStateException from UUID supplier");
+            } catch (IllegalStateException expected) {
+                assertEquals("incarnation-uuid-unavailable", expected.getMessage());
+            }
+        });
+        assertTrue(repo.findActive(tenant, sensor).isEmpty());
+        assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+
+        SensorExecutionIncarnationRepository nullIds = repositoryWithIds(() -> null);
+        pg.tx().executeWithoutResult(tx -> {
+            try {
+                nullIds.issueInitial(tenant, sensor);
+                fail("expected NullPointerException from null UUID");
+            } catch (NullPointerException expected) {
+                assertEquals("incarnationId", expected.getMessage());
+            }
+        });
+        assertTrue(repo.findActive(tenant, sensor).isEmpty());
+        assertEquals(0, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+
+        SensorExecutionIncarnation issued = pg.tx().execute(tx -> repo.issueInitial(tenant, sensor));
+        assertEquals(1L, issued.incarnationGeneration());
+        assertEquals(Status.ACTIVE, issued.status());
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+    }
+
+    private SensorExecutionIncarnationRepository repositoryWithIds(Supplier<UUID> incarnationIds) {
+        return new SensorExecutionIncarnationRepository(pg.namedJdbc(), incarnationIds);
+    }
+
+    private void assertPersistedActiveUnchanged(SensorExecutionIncarnation original) {
+        SensorExecutionIncarnation persisted = repo.find(tenant, sensor, original.incarnationId()).orElseThrow();
+        assertEquals(original, persisted);
+        assertEquals(Status.ACTIVE, persisted.status());
+        assertNull(persisted.supersededAt());
+        assertEquals(original, repo.findActive(tenant, sensor).orElseThrow());
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, Integer.class, tenant, sensor));
+        assertEquals(1, jdbc.queryForObject("""
+                SELECT COUNT(*) FROM platform.sensor_execution_incarnation
+                 WHERE tenant_id = ? AND sensor_id = ? AND status = 'ACTIVE'
                 """, Integer.class, tenant, sensor));
     }
 

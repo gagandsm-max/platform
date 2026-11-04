@@ -72,7 +72,8 @@ public final class SensorExecutionIncarnationRepository {
                     SensorControlException.ERR_SENSOR_STATE_INVALID,
                     "Sensor already has an execution incarnation");
         }
-        return insertActive(tenantId, sensorId, 1L);
+        UUID incarnationId = Objects.requireNonNull(incarnationIds.get(), "incarnationId");
+        return insertActive(tenantId, sensorId, 1L, incarnationId);
     }
 
     /**
@@ -94,8 +95,12 @@ public final class SensorExecutionIncarnationRepository {
                 new SensorControlException(
                         SensorControlException.ERR_SENSOR_STATE_INVALID,
                         ControlGenerationLimits.EXHAUSTED_MESSAGE));
+        // Mint/null-validate replacement identity before any state-mutating SQL so a
+        // caller that catches UUID failure and still commits cannot leave SUPERSEDED
+        // without a replacement ACTIVE row (Issue #288 G1b-C4-A).
+        UUID replacementId = Objects.requireNonNull(incarnationIds.get(), "incarnationId");
         supersedeActive(tenantId, sensorId, active.incarnationId());
-        return insertActive(tenantId, sensorId, next);
+        return insertActive(tenantId, sensorId, next, replacementId);
     }
 
     public Optional<SensorExecutionIncarnation> findActive(UUID tenantId, String sensorId) {
@@ -190,10 +195,10 @@ public final class SensorExecutionIncarnationRepository {
         }
     }
 
-    private SensorExecutionIncarnation insertActive(UUID tenantId, String sensorId, long generation) {
-        UUID incarnationId = Objects.requireNonNull(incarnationIds.get(), "incarnationId");
+    private SensorExecutionIncarnation insertActive(
+            UUID tenantId, String sensorId, long generation, UUID incarnationId) {
         MapSqlParameterSource parameters = principal(tenantId, sensorId)
-                .addValue("incarnation", incarnationId)
+                .addValue("incarnation", Objects.requireNonNull(incarnationId, "incarnationId"))
                 .addValue("generation", generation)
                 .addValue("status", Status.ACTIVE.name());
         return jdbc.query("""
