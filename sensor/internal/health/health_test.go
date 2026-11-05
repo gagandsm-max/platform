@@ -38,6 +38,12 @@ type fakeControlStatusProvider struct {
 
 func (f *fakeControlStatusProvider) Snapshot() control.Status { return f.status }
 
+type fakeRuntimeStatusProvider struct {
+	health RuntimeHealth
+}
+
+func (f *fakeRuntimeStatusProvider) Snapshot() RuntimeHealth { return f.health }
+
 type fakeStorageStatusProvider struct {
 	pct float64
 	err error
@@ -319,6 +325,56 @@ func TestReadyzControlStateMatrix(t *testing.T) {
 				}
 			} else if body["reason_code"] != tc.reasonCode {
 				t.Fatalf("reason=%v want=%s", body["reason_code"], tc.reasonCode)
+			}
+		})
+	}
+}
+
+func TestReadyzRuntimeHealthMatrix(t *testing.T) {
+	cases := []struct {
+		name       string
+		runtime    *fakeRuntimeStatusProvider
+		code       int
+		status     string
+		ready      bool
+		reasonCode string
+		dep        string
+	}{
+		{"absent_preserves_legacy", nil, 200, "UP", true, "", ""},
+		{"ready", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "READY"}}, 200, "UP", true, "", "UP"},
+		{"degraded", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "DEGRADED"}}, 503, "DEGRADED", false, reasonRuntimeDegraded, "DEGRADED"},
+		{"failed", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "FAILED"}}, 503, "NOT_READY", false, reasonRuntimeNotReady, "DOWN"},
+		{"stopped", &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "STOPPED"}}, 503, "NOT_READY", false, reasonRuntimeNotReady, "DOWN"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hs := newTestHealth(t, trustedPack())
+			if tc.runtime != nil {
+				hs.SetRuntime(tc.runtime)
+			}
+			rr, body := request(t, hs, "/readyz")
+			if rr.Code != tc.code || body["status"] != tc.status || body["ready"] != tc.ready {
+				t.Fatalf("readyz code=%d body=%v", rr.Code, body)
+			}
+			if tc.reasonCode == "" {
+				if _, ok := body["reason_code"]; ok {
+					t.Fatalf("unexpected reason=%v", body["reason_code"])
+				}
+			} else if body["reason_code"] != tc.reasonCode {
+				t.Fatalf("reason=%v want=%s", body["reason_code"], tc.reasonCode)
+			}
+			rr, body = request(t, hs, "/health")
+			deps, _ := body["dependency_status"].(map[string]any)
+			if tc.dep == "" {
+				if _, ok := deps["runtime"]; ok {
+					t.Fatalf("legacy readiness must omit runtime dependency: %v", deps)
+				}
+			} else if deps["runtime"] != tc.dep {
+				t.Fatalf("runtime dependency=%v want=%s body=%v", deps["runtime"], tc.dep, body)
+			}
+			rr, body = request(t, hs, "/livez")
+			if rr.Code != http.StatusOK || body["status"] != "UP" {
+				t.Fatalf("runtime health must not kill liveness: %d body=%v", rr.Code, body)
 			}
 		})
 	}
@@ -669,5 +725,77 @@ func TestAgentDeliveryConcurrentHealthReads(t *testing.T) {
 	}
 	for i := 0; i < 8; i++ {
 		<-done
+	}
+}
+
+// Simultaneous Agent-delivery block + ICMP/runtime degradation must preserve both
+// dependency surfaces, withhold readiness for runtime only, and recover independently.
+func TestAgentDeliveryAndRuntimeDegradeIndependently(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.agentSpool = &fakeStorageStatusProvider{pct: 10}
+	delivery := &fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateDegraded, Blocked: true, ReasonCode: "ERR_BATCH_TOO_LARGE",
+	}}
+	runtime := &fakeRuntimeStatusProvider{health: RuntimeHealth{State: "DEGRADED"}}
+	hs.SetAgentDelivery(delivery)
+	hs.SetRuntime(runtime)
+
+	rr, body := request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable || body["status"] != "DEGRADED" ||
+		body["ready"] != false || body["reason_code"] != reasonRuntimeDegraded {
+		t.Fatalf("simultaneous must withhold readiness for runtime: %d %v", rr.Code, body)
+	}
+	rr, body = request(t, hs, "/health")
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["agent_delivery"] != "DEGRADED" || deps["runtime"] != "DEGRADED" ||
+		deps["agent_spool"] != "UP" {
+		t.Fatalf("both deps must stay visible: %v", deps)
+	}
+	raw := strings.ToUpper(rr.Body.String())
+	if strings.Contains(raw, "DEVICE_DOWN") {
+		t.Fatalf("false DEVICE_DOWN: %s", rr.Body.String())
+	}
+	rr, body = request(t, hs, "/livez")
+	if rr.Code != http.StatusOK || body["status"] != "UP" {
+		t.Fatalf("liveness must stay up: %d %v", rr.Code, body)
+	}
+
+	// Recover runtime first; Agent delivery remains blocked → ready but DEGRADED.
+	runtime.health = RuntimeHealth{State: "READY"}
+	rr, body = request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["status"] != "DEGRADED" || body["ready"] != true ||
+		body["reason_code"] != reasonAgentDeliveryBlocked {
+		t.Fatalf("runtime recovery with delivery blocked: %d %v", rr.Code, body)
+	}
+	rr, body = request(t, hs, "/health")
+	deps, _ = body["dependency_status"].(map[string]any)
+	if deps["runtime"] != "UP" || deps["agent_delivery"] != "DEGRADED" {
+		t.Fatalf("independent runtime recovery: %v", deps)
+	}
+
+	// Re-block runtime while clearing delivery → not ready from runtime alone.
+	runtime.health = RuntimeHealth{State: "DEGRADED"}
+	delivery.status = agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateUp, DurableAcks: 1, LastSuccessTime: time.Now().UTC(),
+	}
+	rr, body = request(t, hs, "/readyz")
+	if rr.Code != http.StatusServiceUnavailable || body["status"] != "DEGRADED" ||
+		body["ready"] != false || body["reason_code"] != reasonRuntimeDegraded {
+		t.Fatalf("delivery recovery with runtime degraded: %d %v", rr.Code, body)
+	}
+	rr, body = request(t, hs, "/health")
+	deps, _ = body["dependency_status"].(map[string]any)
+	if deps["agent_delivery"] != "UP" || deps["runtime"] != "DEGRADED" {
+		t.Fatalf("independent delivery recovery: %v", deps)
+	}
+
+	// Full recovery.
+	runtime.health = RuntimeHealth{State: "READY"}
+	rr, body = request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["status"] != "UP" || body["ready"] != true {
+		t.Fatalf("full recovery readyz: %d %v", rr.Code, body)
+	}
+	if _, ok := body["reason_code"]; ok {
+		t.Fatalf("reason must clear after full recovery: %v", body["reason_code"])
 	}
 }
