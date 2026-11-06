@@ -473,7 +473,7 @@ quality_score
 
 ### 6.1 Naming/versioning
 
-Topic names are versioned by major schema compatibility. Example:
+Topic names are versioned by major schema compatibility. The names below and §77 are **logical family examples**, not two competing physical topic manifests. Current physical configuration/serialization is bound in `Platform_17` §4.7; BUILD-063 MUST freeze the approved name, key, schema, serializer and compatibility policy before any new family is implemented. Examples:
 
 ```text
 telemetry.numeric.v1
@@ -578,19 +578,20 @@ A Sensor deletes a local segment only after Core returns a durable acceptance ac
 
 Physical HA durability mechanisms remain unselected (`HA_DURABILITY_DESIGN_GATE` / BUILD-120–124).
 
-**CURRENT_IMPLEMENTED_V1 Sensor→Core telemetry ACK boundary:**
+**Current source (`36e1513f`), Sensor→Core telemetry ACK boundary:**
 
 1. Sensor writes batch durably to local spool.
 2. Core validates identity/schema.
 3. Core reserves exact range/checksum in PostgreSQL (`pending` reservation).
-4. Core commits Kafka transaction.
-5. Core finalizes PostgreSQL watermark.
-6. Core returns `accepted_through_sequence` (+ `sensor_identity`).
-7. Sensor marks/deletes acknowledged segments only after validating that ACK.
+4. Core claims the bounded publisher lease and owner/epoch fence for that reservation.
+5. Core commits the Kafka transaction.
+6. Core finalizes the PostgreSQL watermark only for the matching reservation/owner/epoch.
+7. Core returns `accepted_through_sequence` (+ `sensor_identity`).
+8. Sensor marks/deletes acknowledged segments only after validating that ACK.
 
 ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK. CURRENT_IMPLEMENTED_V1 does not by itself certify Phase 1 standalone durability-matrix evidence or Phase 1.5 HA ACK RPO=0.
 
-**CURRENT_IMPLEMENTED_V1 Sensor→Core agent-ingress** remains **at-least-once** (Kafka publish + PostgreSQL ingress watermark; no V009-equivalent pending reservation yet). **BUILD-003** owns reservation/conflict/first-batch hardening.
+**Current source (`36e1513f`), Sensor→Core agent-ingress:** `AgentIngestionService` and `PostgresAgentIngressWatermarkStore` implement pending reservation → bounded publisher lease with owner/epoch → Kafka transaction commit → fenced PostgreSQL finalize → `acceptedThroughIngressSequence` ACK. V012 supplies the Agent-ingress reservation/stream and publisher-lease schema. Both Core ingest paths remain **at-least-once**: PostgreSQL/Kafka are not one XA transaction, and a Kafka-commit/PG-finalize crash can require replay. This source correction does not certify structured Agent evidence, physical ClickHouse deduplication or HA durability. Exact wire and version bounds remain `Platform_17` §10 and `schemas/edge/`.
 
 **CURRENT_IMPLEMENTED_V1 Agent→Sensor:** ACK means authz + contract validation + durable Sensor Agent spool accept + durable replay accounting. Agent advances/deletes only after batch-bound application ACK.
 
@@ -1850,6 +1851,23 @@ Protected control data is excluded.
 
 Every emergency deletion records volume, usage before/after, bytes freed, data class, time range, reason, policy version and monitoring impact.
 
+### 37.6 Capacity assessment and simulation — accepted Issue #292
+
+This is a logical contract within existing BUILD-061/064/074/086/094/097/130 owners, not new DDL, API route or service. `Platform_11` §9 owns the arithmetic and units. Each assessment MUST identify physical volume and owning node/deployment, observation time/source, policy/model versions, capacity/used/free bytes, attributed workload/storage components, protected versus safely reclaimable bytes, growth basis and uncertainty. A replica, archive or backup is attributed to the volume actually holding that copy; shared-volume components are not double-counted.
+
+The calculator MUST use overflow-safe byte arithmetic, a justified uncertainty multiplier of at least 1.20 and an explicitly selected planning utilization below 0.80 (initial recommendation 0.70). It returns conservative demand, rounded required provisioned capacity, shortfall/headroom and the 80% boundary separately. Missing/stale/contradictory measurements remain `UNKNOWN` with reasons; a timestamp is returned only when growth and forecast confidence support it. The same rule applies to data-age, shortage/exhaustion forecasts and the expansion deadline derived from procurement lead time.
+
+Retention, topology and capacity policy changes MUST be simulated against the affected physical volumes before activation. An infeasible proposal cannot receive a positive capacity/sufficiency result. It requires correction or an explicitly authorized, audited exception that preserves non-disableable safety and protected-retention obligations. Forecast calculations do not mutate retention, holds or volumes. Hysteresis, recovery and bounded work budgets prevent repeated purge/alert oscillation or starvation of monitoring.
+
+Acceptance evidence MUST cover 1000→1200 GB uncertainty arithmetic and 70%/80% separation, provisioning-unit upward rounding/overflow, mixed-volume/copy accounting, missing measurements, burst/compression drift exceeding 20%, impossible retention/capacity proposals, 70/75/80 transition/recovery behavior, policy simulation/rollback and protected retention across partitions and backup copies. These are required cases, not tests claimed executed.
+
+### 37.7 Capacity escalation and notification contract
+
+Existing Platform Operations, Notification Center and ITSM/email connectors project the assessment. One tenant-scoped capacity case MUST retain stable correlation/deduplication identity, affected volume/policy, evidence/uncertainty, severity, recommended action and forecast deadline where known. Authorized recipient profiles, configurable procurement lead time, retry/dead-letter custody, actual delivery result, acknowledgement, reopen/close and maintenance behavior are explicit. Example lead times are not fixed product defaults. Notification creation or a successful socket write is not proof of external delivery.
+
+If protected/legal-held data leaves insufficient reclaimable capacity, the volume enters `CRITICAL` with a named operational owner and escalation. No notification or calculator authorizes deletion of protected data, unlimited quarantine or an unbounded durability promise. Sensor emergency shedding remains governed by §37.4, with explicit irreversible-loss accounting. Notification integration is gated on its existing RBAC/audit owners; tenant, unauthorized-recipient, retry/poison-message, delivery-failure and recovery cases require evidence.
+
+
 ---
 
 ## 38. Legal hold LLD
@@ -1866,7 +1884,7 @@ Every emergency deletion records volume, usage before/after, bytes freed, data c
 - start/end;
 - priority/protection level.
 
-Purge planner checks hold index before deletion.
+Purge planner checks hold index before deletion. Hold evaluation MUST cover the affected data classes/time ranges and their retained partitions, archives and backup copies according to the protected-retention policy; a new policy or emergency state cannot silently invalidate a hold. When no eligible reclamation can restore safe headroom, §37.7 requires `CRITICAL` ownership/escalation and authorized resolution. Audit must retain the decision, protected/reclaimable accounting and deletion outcomes; restore/replay must preserve hold and retention authority.
 
 ---
 
@@ -2269,7 +2287,7 @@ Deep links include tenant/scope safely and validate authorization on load.
 
 ## 58. RBAC permission namespace
 
-**Maturity / Issue #92:** Persistent IAM/RBAC production authority remains unimplemented; Discovery authorization integration remains incomplete/fail-closed.
+**Implementation truth (`36e1513f`):** V016 and opt-in JDBC identity/permission directories are implemented behind `platform.security.directories.persistence-enabled` (default `false`). Source authority is `core/src/main/java/com/platform/core/security/http/SecurityDirectoryConfiguration.java`; disabled/unavailable or unauthorized paths remain fail-closed. This does not establish deployed activation, complete IAM/SSO or certification; see `Platform_03` §29.
 
 
 Examples:
@@ -2362,7 +2380,7 @@ At minimum benchmark:
 
 - SNWP-2500-v1 on 8C/32G Core;
 - Sensor 4C/16G normal workload baseline;
-- Sensor 8C/16G density target;
+- Sensor 8C/32G density target (internal recommended 4 GB/vCPU planning ratio; not a customer-install rejection gate, and not a certified device count);
 - SNMPv3 CPU cost;
 - high-interface devices;
 - high RTT/timeouts;
@@ -2659,7 +2677,7 @@ Safe text fields can be trimmed and Unicode/line-ending/BOM normalized with a `N
 
 ## 77. Kafka topic/schema baseline
 
-Topic families remain internal and tenant-aware in payload/partition strategy. Minimum families:
+Topic families remain internal and tenant-aware in payload/partition strategy. The following is a logical coverage checklist with illustrative names, consistent with §6; it does not declare these topics deployed or override the physical manifest owned by BUILD-063:
 
 ```text
 telemetry.metric.numeric.v1
@@ -2679,7 +2697,7 @@ audit.event.v1
 integration.outbound.v1
 ```
 
-Schemas are registered in Apicurio and compatibility-tested in CI. Avro or Protobuf is selected per topic family and then frozen by schema contract; producers may not publish unregistered incompatible payloads.
+Apicurio, Avro and Protobuf remain approved targets (`Platform_07`, OSS-004/005/006: `APPROVED_NOT_IMPLEMENTED`), not an assertion of current registry deployment. Current telemetry uses the JSON serialization/configuration in `Platform_17` §4.7. BUILD-063 MUST bind each admitted physical family to its exact schema, serialization, partition/ordering, retention and compatibility-test artifacts before deployment. If a registry-based family is admitted, producers MUST obey its registered compatibility policy; this paragraph does not silently migrate existing JSON wire or introduce a new mandatory runtime service.
 
 ## 78. ClickHouse data-class tables
 
@@ -2994,7 +3012,7 @@ Recurring desired-state records carry at minimum: tenant, assignment identity, t
 
 ## 89. Redundant identifier index — P2 hygiene note
 
-V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline; never rewrite V001–V009 in place.
+V001 unique constraint `uq_identifier_resolution (tenant_id, namespace, identifier_type, identifier_value)` already creates a unique btree. Secondary index `idx_identifier_lookup` on the same columns is redundant unless current query evidence proves otherwise. Future **P2** forward-only DB hygiene only. **No migration number is reserved** by this baseline. Every applied migration is immutable; corrections use a new forward-only migration with supported-origin, rollback/restore and compatibility evidence. Current migration authority is `core/src/main/resources/db/migrations/manifest.txt` (V001–V018 at `36e1513f`), not a permanent upper bound of V009.
 
 ---
 
@@ -3008,7 +3026,7 @@ Active path probing is implemented within the Network Sensor runtime. It execute
 
 ### 90.2 Flow-stable probing technique and path preservation
 
-Traditional traceroute (varying UDP ports or ICMP sequence numbers across successive hops) causes transit Equal-Cost Multi-Path (ECMP) hashes to assign probes to different physical paths, causing artificial route fluttering and false divergence.
+Traditional traceroute that varies flow-significant fields can cause ECMP hashing to send probes along different physical paths, creating apparent path-change artifacts. A varying fingerprint alone does not distinguish ECMP, real route change or unqualified observation; the comparison-quality rules below govern any change assertion.
 1. **Flow-Preserving Technique (evaluation, not identical-path guarantee):** Sensor active path probing shall evaluate ECMP/multipath-aware flow-stable techniques (such as Paris-traceroute-style methods with pinned flow identifiers) under BUILD-040. Flow-stable probes do **not** guarantee identical physical paths. Per-packet balancing, NAT/middleboxes, MPLS, IPv6 Flow Label behaviour, ICMP CoPP/rate-limiting and return-path asymmetry can still produce incomplete, unpinned or ambiguous observations. Exact packet crafting, protocol modes (ICMP/TCP/UDP), probe counts, timing intervals and TTL limits belong to BUILD-040 design and certification. Preserve schema compatibility with existing `ActivePathObservation` / `PathChangeEvidence` contracts; BUILD-040 retains ownership.
 2. **Path Discovery & Metrics Requirements:**
    - Source/vantage identity, target endpoint, and protocol/port where applicable.
@@ -3086,13 +3104,13 @@ Physical storage and streaming schemas are decoupled from logical contracts:
 1. **Ingestion Gateway (BUILD-062):** Owns ingestion authority, batch validation, accepted logical envelope verification, reserve/finalize/ACK transaction semantics, and handoff to the streaming backbone.
 2. **Kafka Streaming Backbone (BUILD-063):** Owns physical topic naming, partition strategies, schema serialization formats (JSON / Avro / Protobuf), retry/rebalance behavior, and retention configurations for process-network and active-path event streams.
 3. **ClickHouse Fact Storage (BUILD-064):** Owns physical ClickHouse table DDL, storage layout, engine choice (selected and certified according to idempotency, retention, rollups, and query performance without preselection at documentation stage), partitioning schemes, primary sorting keys (`ORDER BY`), codec compression, and lifecycle TTL policies for historical process-network and path-hop facts.
-4. **No Standalone Datastores:** Telemetry is stored strictly within authoritative Platform datastores (PostgreSQL, ClickHouse, Kafka, Valkey). No separate eBPF or path probing database is introduced.
+4. **No Standalone Datastores:** Existing roles remain PostgreSQL transactional/control authority, ClickHouse historical fact storage, Kafka internal durable transport and Valkey reconstructable cache/ephemeral state. No separate eBPF or path probing database is introduced; Kafka retains committed-event custody under the ingestion/replay durability contract; Valkey cannot hold sole durable authority, and neither replaces control or historical fact authority.
 
 ### 92.3 Structured Agent evidence is an additive gated transport, not scalar-label packing
 
 The existing `software_inventory_snapshot`, `ProcessNetworkEvidence` and EDS logical contracts **do not** imply a working physical Agent→Sensor→Core transport. BUILD-016 must evolve versioned typed evidence payloads with bounded item/byte/fragment envelopes and replay-safe per-capture identity while keeping currently implemented scalar metrics wire-compatible. BUILD-062/063/064/098 own ingress validation, physical streaming/storage and authoritative reconciliation; no compulsory Valkey/PG whole-snapshot staging table or new service is selected here. If fragmentation is used, no fragment/partial/truncated capture can assert a complete authoritative FULL inventory or removals; assembly state, missing pieces and terminal outcome must be bounded, explicitly accounted and replay-idempotent.
 
-**Durability distinction:** Agent→Sensor ACK = durable local Sensor spool; current Sensor→Core agent-ingress ACK = at-least-once Kafka + PostgreSQL watermark with BUILD_003 reservation parity still a **TARGET** (Platform_17 §10.3). Do not copy the stronger Sensor→Core telemetry PG-reserve→Kafka-txn→PG-finalize claim onto agent-ingress or call this structured path implemented/certified before exact-head tests.
+**Durability distinction:** Agent→Sensor ACK = durable local Sensor spool. At `36e1513f`, both Sensor→Core telemetry and Agent-ingress use pending reservation, fenced publisher lease, Kafka transaction commit and PostgreSQL finalization before ACK (`Platform_17` §10.3); both remain at-least-once. The implemented Agent-ingress extracts supported scalar numeric observations. Reservation parity does **not** make software-inventory/process-network/EDS structured payloads accepted, persisted or certified; those remain the separately gated BUILD-016/062/063/064/098 path.
 
 ---
 

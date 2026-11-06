@@ -87,7 +87,9 @@ No release promotion with failing P0/P1 tests, unresolved critical/high security
 
 ## 2. Sensor targets
 
-Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/16 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+Planning baseline 4 vCPU/16 GB/150 GB ≈800 normal network devices. Benchmark objective: 8 vCPU/32 GB class approaching 2,000–2,500 comparable normal devices where workload permits. Streaming/Event Sensor benchmarked separately by records/events per second.
+
+These are workload-specific planning/benchmark targets, not certified capacity. The approved internal 4 GB-per-vCPU planning recommendation and nonblocking installer warning/proceed behavior remain governed by Platform_11 and the Issue #206 decision in Platform_12; do not turn a RAM ratio into a new mandatory install rejection.
 
 ## 3. Benchmark dimensions
 
@@ -115,11 +117,11 @@ Core workflows function in Docker test environment; schemas/contracts versioned;
 
 ## 2. Beta/Pilot
 
-Representative protocols/vendors certified; provisioning diagnostics actionable; two-Core failover tested; package install/reboot/upgrade tested; security/tenant isolation passed; SBOM/license gates clean; backup/restore exercised.
+Representative protocols/vendors certified; provisioning diagnostics actionable; package install/reboot/upgrade tested for the claimed OS profiles; security/tenant isolation passed; SBOM/license gates clean; standalone crash/reboot/replay and backup/restore exercised for Phase 1. Two-Core fenced failover is additionally required for the Phase-1.5 HA profile; it is not a Phase-1 standalone prerequisite.
 
 ## 3. Release Candidate
 
-Full regression, performance certification, HA/DR evidence, migration/upgrade matrix, `.deb/.rpm` install tests, Windows MSI/service certification, signed artifacts, vulnerability disposition, documentation and support runbooks complete.
+Full regression, performance certification, phase/profile-applicable recovery and mandatory DR evidence, migration/upgrade matrix, `.deb/.rpm` install tests, Windows MSI/service certification for the approved mandatory Windows Phase-1/first-GA scope, signed artifacts, vulnerability disposition, documentation and support runbooks complete. Phase-1.5 HA claims additionally require BUILD-120–124 fenced failover/replication/rejoin evidence; Phase-1 standalone release does not inherit those HA claims. A bounded Linux candidate/certificate is not full product release acceptance and does not waive the mandatory Windows requirements.
 
 ## 4. GA blockers
 
@@ -130,13 +132,13 @@ Full regression, performance certification, HA/DR evidence, migration/upgrade ma
 - broken reboot auto-start or supervised crash recovery for any mandatory runtime service;
 - package upgrade that loses configuration/data;
 - missing SBOM/notices/provenance;
-- HA failover violating agreed <60s target under certified test profile;
+- HA failover violating the agreed <60s target when the Phase-1.5 HA profile is claimed; standalone recovery/DR and durable replay remain mandatory Phase-1 gates;
 - unsupported silent data loss in certified normal failure scenarios;
 - unresolved RED OSS dependency.
 
 ## 5. Evidence
 
-Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, HA/DR results and known limitations.
+Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, applicable standalone recovery and mandatory DR results, additional HA results when that profile is claimed, and known limitations. Evidence must name exact source/artifacts, OS/domain profile, workload and failure envelope; another profile’s passing result is not transferable certification.
 
 ## 6. v3.2.2 specialized-master quality supplements
 
@@ -363,7 +365,7 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
 12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED subject to provider capability, cost, and rate limits; they are not a mandatory Phase-1 dependency.
 13. **SLO and error budget evidence:** Where BUILD-095 applies, error budget burn rates and compliance scorecards calculate deterministically from qualified evidence ledgers.
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
-15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
+15. **Core and Sensor interruption and replay:** Phase-1 standalone process/host interruption and Sensor disconnection verify safe bounded restart, no duplicate authority, durable acceptance/ACK behavior and idempotent replay of buffered Sensor spools on reconnection. Backup/restore and DR have their own mandatory evidence and declared limits; catastrophic destruction of a standalone Core does not acquire an unproved zero-loss promise. For the Phase-1.5 HA profile, additionally prove fenced stateful failover within the <60s certified target and BUILD-120–124 replication/rejoin/ACK invariants.
 16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.
 
 ---
@@ -591,3 +593,44 @@ A Phase-2.5 native deep-observability completion claim is prohibited until repre
 12. upgrade/rollback and decoder compatibility.
 
 The gate SHALL include scale/load/soak, failure/recovery, security, privacy, tenant-negative, retention, migration/upgrade and operator-workflow evidence.
+
+## P0 documentation semantic acceptance — 2026-11-06
+
+The six capability definitions are in `Platform_13_Engineering_Development_and_Docker_Standards.md` under “P0 documentation and execution acceptance — 2026-11-06”. Overall state remains `DOC_P0_BLOCKED` until TRD, JOURNEYS, UI_UX, DATA_CONTRACTS, BUILD_PLAN and MODULE_PLANS **all** pass exact-candidate independent semantic review. No partial acceptance or structural-validator-only clearance is allowed. A source-backed correction can be accepted as a bounded patch while this overall gate remains blocked; it must not be announced as complete P0 documentation closure.
+
+For each gate record requirement IDs, exact section anchors, source allocations, state/error/permission behavior, test definitions, unresolved issues and reviewer verdict. Every failure must have a concrete owner and closure criterion. Check plan satisfiability across OS and phase profiles and preserve scoped historical certificates. Existing structural validation remains required; its result is a distinct field from semantic review, runtime execution and release certification.
+
+### Phase and profile applicability
+
+| Profile | Mandatory recovery and durability evidence | Gates not implied by this profile |
+|---|---|---|
+| Phase 1 standalone one Core | Durable local acceptance and deletion-authorizing ACK under the declared recoverable-failure matrix; Sensor spool replay; crash/reboot and dependency recovery; backup integrity, restore and mandatory DR with declared limits; no false readiness or silent loss. | No two-node promotion, permanent-peer-loss replication, split-brain/failover or catastrophic standalone loss RPO=0 certification. |
+| Phase 1.5 exactly two Core nodes | All applicable base evidence plus BUILD-120–124 authority/fencing, storage replication, partition/peer failure, safe rejoin, under-60s certified failover and acknowledged-for-deletion telemetry RPO=0 for the declared single-Core HA failure matrix. | No third Core/witness or site/DR RPO promise invented by a local failover test. |
+| Linux, Windows and domain-specific slices | Exact OS/kernel/protocol/vendor/role, workload and feature evidence for the scope claimed; later integration/whole-BUILD acceptance remains separate. | A Linux certificate does not certify Windows; a parser or collector certificate does not certify end-to-end delivery, persistence, UI or the whole domain. |
+
+Exact contractual DR RPO/RTO remain governed decisions; this matrix does not choose them. Optional AI/GNN/local LLM cannot block first-GA deterministic monitoring/RCA unless later promoted through change control.
+
+Phase/profile scoping permits staged engineering and evidence collection. It does not narrow the approved complete Phase-1/first-GA product scope: all mandatory requirements, including the assigned Windows Agent/service/collector/diagnostic/MSI gates, must pass before full product acceptance. A Linux profile certificate can precede Windows implementation while whole-product GA remains blocked.
+
+### Current CI evidence boundary
+
+At baseline main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`, `.github/workflows/platform-ci.yml` defines four Linux self-hosted jobs: `static-contracts`, `unit`, `ui-build`, and `integration-security`. Their actual commands are in that workflow, `Makefile` and `tests/`; they include source contracts, containerized unit/integration checks, UI tests/build, guarded storage and security smoke checks. Exact-main run `41821813865` was retrieved as four successful jobs during the handoff audit. This is bounded run evidence, not native Windows/MSI, all-domain journey, signed-release, HA/DR, estate-scale or long-soak certification.
+
+The release evidence ledger must pair each requirement with an actual executed check/artifact, or label its acceptance definition pending. Approved ORT/Syft/Trivy/ScanCode catalog entries are not proof those tools execute in current CI. `compose.yaml` contains all six `dev/test/ha/scale/security/dr` profile names; a profile name is not a failure drill, load-generator workload or certification result.
+
+## Storage assurance A+B+C acceptance — Issue #292
+
+Authority: [Issue #292](https://github.com/gagandsm-max/platform/issues/292) and [source-to-implementation adjudication](https://github.com/gagandsm-max/platform/issues/292#issuecomment-6576078417). This is bounded specification/acceptance reconciliation only: SPECIFIED, not implemented/tested/certified. Preserve current Sensor spool protection; do not claim a Core-wide capacity estimator or legal-hold controller from `sensor/internal/spool/spool.go`. Reuse BUILD-061/064/074/086/094/097/130 and existing Storage Lifecycle/Operations/Notification owners; no new service, queue, database or BUILD ID.
+
+The exact owner contracts are Platform_11 §§9.1–9.4 (per-volume sizing and uncertainty), Platform_05 §§37.6–37.7/38 (capacity-risk, lifecycle and hold behavior), existing Platform_04 §§4.20/4.21 (Storage Lifecycle/Platform Operations), Platform_08 REQ-DATA-011 and Platform_12 §29. Arithmetic uses physical allocation units and round-up after unit conversion; it must not round a threshold boundary down into a purported safe-below result.
+
+| Gate | Required deterministic/failure evidence |
+|---|---|
+| Per-volume arithmetic | Independently verify baseline used × max(1.20, justified higher uncertainty multiplier); planned provision at initial adjustable 70% utilization; fixed 80% emergency boundary. For decimal 1000 GB baseline: 1200 conservative; planned target 1714.285714… GB before physical allocation rounding; 1500 GB is exactly 80%, not safe-below; against 800 GB provisioned, pre-rounding target shortfall 914.285714… GB. State units, overflow and round-up rules. Uncertainty uplift and operational free-space reserve are separate. |
+| Physical provenance and accounting | Per node/mount/volume and data class: allocation, used/free, protected/reclaimable bytes, ingest/retention/merge/compaction, PG/CH/Kafka/Valkey/OS/service/spill, Sensor spool, actual HA copies and backup/archive. Do not pool unlike volumes or double-count replicas/backups/reserve. Identify the authoritative measurement owner. |
+| Uncertainty and impossible retention | Missing/stale/incorrect measurements, source-clock gaps, burst growth beyond 20%, compression drift and retention debt produce uncertainty/UNKNOWN rather than a guaranteed forecast. An infeasible customer 180-day/800-GB profile blocks contractual acceptance/activation or requires an explicit authorized exception; no silent retention shortening or overwrite. 180/365 days are customer profiles, not global defaults. |
+| Threshold/hold safety | Existing 70% warning, 75% pre-emergency and non-disableable 80% emergency behavior plus declared hysteresis; eligible old-data cleanup with class accounting and audit. Prove held/protected records survive overlapping partitions and archive/backup custody. If nothing eligible is reclaimable, expose CRITICAL, responsible owner/escalation and explicit degradation/fail-safe response; no implicit legal/contract override or unlimited durability promise. |
+| Recovery and change | Restart/reboot/restore/DR and Kafka/ClickHouse replay state preservation; queue/lag/drop/spool-horizon visibility; before/after retention-policy changes, upgrade, rollback and backfill; actual retrieval/restore and failure evidence for claims. |
+| Notification custody and authorization | BUILD-086 and tenant/RBAC/audit prerequisites; authorized recipient/resource and tested connector; one deterministic deduplicated case, durable retry/poison custody, observable actual delivery, reopen/close/ack/maintenance policy. Cover 429/5xx/outage, duplicate delivery, unconfigured connector, stale/wrong tenant authorization, secret leakage, rate limit and inconsistent ticket closure. Procurement lead times are configurable; 60/30/14/7 days are examples only. |
+
+Implementation progression remains contract/owner mapping → inert pure calculator → reliable measured input/forecast → authorized existing notification delivery → retention/hold certification. This document defines tests and safe sequencing; it does not authorize code, infer current measurements, assert customer tender compliance or override ingestion/replay blockers.

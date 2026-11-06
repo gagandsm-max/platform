@@ -570,6 +570,16 @@ sequenceDiagram
 
 Normal Agent telemetry remains Agent→assigned Sensor→Core. Enrollment/bootstrap does not authorize a direct normal Agent→Core telemetry bypass.
 
+### DF-ONB-006 — Recurring Discovery operator and execution profile
+
+This profile binds `PRD-ONB-021` / `REQ-ONB-020` to the existing Core scheduler (`Platform_06` DF-SCHED-001/002), not a new scheduler service. The authorized operator opens Inventory → Provisioning & Discovery at the existing `/provisioning` destination, selects the discovery profile/scope/credential references/placement and a supported mode, previews the resolved schedule and resource limits, then saves with the expected revision. Core validates current scope and the complete §3.1A contract, persists the reusable definition/generation and next execution instant, and returns the accepted revision/next-run result. An unconfirmed or failed save is not displayed as scheduled.
+
+At each admitted occurrence, current Core authority and generation gate bounded Sensor work; results enter DF-ONB-001 review. The run-history row distinguishes queued/running/completed/failed/cancel-requested/cancelled/obsolete outcome as applicable to the authoritative contract, with planned/resolved/start/end times, source Sensor, scope, reason and correlation/audit reference. A missed run is shown as skipped/coalesced with reason, not silently presented as a successful scan. Policy-approved auto-approval remains separately authorized after result validation.
+
+Pause creates no catch-up queue; resume previews the next future occurrence. Edit/cancel advances generation, prevents queued obsolete work and visibly tracks best-effort in-flight cancellation. An old-generation late result cannot update current schedule authority or trigger trusted auto-approval; preserve it only as labelled auditable evidence under §3.1A. Revision conflict, expired credential, no eligible Sensor, capacity refusal and notification delivery failure are actionable outcomes; retries must not create duplicate schedules or silently widen scope.
+
+**Source boundary at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`:** `DiscoveryOccurrenceCalculator` provides pure calendar calculation. `DiscoveryController`/`DiscoveryDtos` provide request create/read/cancel and candidate/evidence reads, without schedule CRUD/recurrence fields. This profile is specified behavior, not proof of a durable scheduling API, dispatch integration or finished UI. The exact persistence/API/action contracts remain required implementation-entry bindings; do not invent supported endpoint paths.
+
 ---
 
 ## 8. UI/UX requirements
@@ -650,6 +660,14 @@ Sensor Pool administration shows pool scope, eligible Sensor roles/capabilities,
 
 Sensor/Agent bootstrap workflows accept only the minimum bootstrap information needed to reach the trusted Platform endpoint plus a short-lived scoped enrollment token/authority. The UI/installer never asks customers to paste implementation-internal service URLs when the stable Core endpoint can be supplied.
 
+### 8.6 Discovery schedule editor and history
+
+Within the existing `/provisioning` destination, display Run Now / Run Once / Daily / Weekly / Monthly as explicit modes. The editor shows the authorized profile/scope/exclusions, protocol set, Credential Profile reference (never the secret), placement, requested local date/time, named IANA timezone, effective date, weekday(s) or month day as applicable, enabled/paused state and approved duration/rate/concurrency limits. Do not offer unrestricted cron or an alternative month-end policy.
+
+Before save, show the resolved next-run instant in the execution timezone and UTC, and the original Run Once input where applicable. Explain LAST_VALID_DAY for months lacking the chosen day, first-valid-instant DST gaps and earlier-instant DST folds; preview is not execution authorization. Display timezone preference may change rendering only. A saved Run Once instant is not silently recalculated after a timezone-database update.
+
+Schedule list/detail shows current revision/generation, next/last run, paused/enabled state, placement and failure/skip/coalesce reason; history is separate from the reusable definition. Save/Run Now/pause/resume/edit/cancel remain unavailable until their authoritative action contracts exist and current permission permits them. Confirmation displays scope and effective timing; a revision conflict requires refresh/review, not last-write-wins. Cancellation feedback distinguishes request acceptance, actual stop and a late obsolete result. Preserve the operator's filters/context when opening results or returning from review.
+
 ---
 
 ## 9. Protocol, enrollment and security requirements
@@ -720,6 +738,11 @@ Mandatory regression coverage includes:
 21. Certificate validation remains enabled for DNS and IP/VIP bootstrap forms; missing/mismatched SAN/trust fails closed.
 22. Security-negative tests prove no production plaintext Sensor↔Core or Agent↔Sensor path exists and legacy monitored-device plaintext protocols cannot downgrade Platform-owned transport.
 23. Capacity/placement tests prove Core prefers healthy eligible pools and bounded workload/data-path controls before declaring larger hardware necessary, without violating freshness/durability.
+24. Recurrence preview and execution agree for Daily/Weekly/Monthly modes, named timezones, short months/leap years, DST gaps (first valid instant) and folds (earlier instant only); Run Once persists its resolved instant across restart/timezone-database change.
+25. Missed recurring runs coalesce to at most one bounded recovery execution; pause accumulates no catch-up work, resume chooses a strictly future occurrence, and Run Now remains an explicit independent request.
+26. Edit/cancel revision conflict and generation fencing prevent obsolete queued work and trusted activation from late obsolete results; in-flight cancellation is displayed as best-effort until confirmed.
+27. Schedule save/permission/credential/placement/capacity failures preserve actionable field or execution evidence without claiming scheduling success; idempotent retry does not duplicate a schedule/run. Notification generation and successful delivery are separately visible.
+28. UI route/context, keyboard/focus, next-run preview, history and negative states are verified against the approved schedule/API contracts. Pure calendar unit tests alone do not certify persistence, ownership, dispatch, failover or UI integration.
 
 A tenant-isolation leak through onboarding/notifications, approval bypass, or identity collision/merge that can bind one customer's endpoint incorrectly is a release blocker under existing tenant/security/data-integrity gates.
 
@@ -779,7 +802,7 @@ Operational self-monitoring includes candidate queue depth/age, review backlog, 
 | `REQ-ONB-017` | Agent bootstrap and normal Agent→Sensor→Core assignment semantics | `PRD-ONB-018` | §§4–7 | §§8.5–12 |
 | `REQ-ONB-018` | Platform-owned Sensor/Core and Agent/Sensor channels remain encrypted/authenticated; no approved plaintext production mode | `PRD-ONB-019` | §§4–7 | §§9–11 |
 | `REQ-ONB-019` | Provisioning/placement efficiency and capacity-aware pool selection without hardware-first scaling | `PRD-ONB-020` | §§4–7 | §§8.5,11,12 |
-| `REQ-ONB-020` | Governed recurring Discovery schedules with explicit timezone, bounds, placement, history, skip/coalesce and deterministic spread | `PRD-ONB-021` | §§3.1A,4–7 | §§8,11,12 |
+| `REQ-ONB-020` | Governed recurring Discovery schedules with explicit timezone, bounds, placement, history, skip/coalesce and deterministic spread | `PRD-ONB-021` | §§3.1A,4–7; DF-ONB-006 | §8.6; §11 cases 24–28; §12 |
 
 ### 13.1 Definition of done
 

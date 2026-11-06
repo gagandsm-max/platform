@@ -172,3 +172,44 @@ Phase-2 enterprise breadth MUST NOT be implemented as customer-specific Core for
 Future Phase-2.5 implementation SHALL reuse existing identity/RBAC/tenancy/audit/graph/evidence contracts, avoid customer-specific forks, isolate high-volume trace/profile/packet workloads from control-plane correctness, add dependencies only through explicit admission, include deterministic fixtures for trace/RUM/profile/packet parsing, include privacy/redaction/security tests and preserve offline/air-gap build/test paths where the certified deployment profile requires them.
 
 Generated instrumentation/decoder code or third-party agents may not bypass repository quality/security gates.
+
+## P0 documentation and execution acceptance — 2026-11-06
+
+Founder priority for the current handoff is complete Mother Reference correction before product implementation dispatch. The subsequent product order remains Linux → Network+Flow → Infrastructure → Syslog, subject to real shared runtime, data, authority and security dependencies. This instruction supersedes earlier immediate dispatch wording; it does not rewrite historical certifications or release dates. Mother Reference set v3.3.0, existing BUILD IDs and the existing canonical owners remain in force.
+
+The governing acceptance crosswalk is Platform_00 §10.1, Platform_08 §§4.1–4.3 and Platform_12 §29, together with AGENTS. The implementation-plan requirements below operationalize that same gate; they do not create a second acceptance authority. Formal independent audit remains required; collaborative writer/subagent cross-review is supporting review, not its substitute.
+
+### One all-six-capability gate
+
+`DOC_P0_BLOCKED` is the aggregate documentation state until **all six** capabilities below pass independent semantic review of the exact candidate source. Partial coverage, a template, a requirement count, a structural validator PASS, or a successful CI run cannot clear it. Each review result records reviewer, candidate SHA/tree, exact owner sections, unresolved defects and disposition. Documentation acceptance is separate from implementation, runtime testing, production certification and deployment.
+
+| Gate | Required reviewable result | Existing owning references |
+|---|---|---|
+| TRD | Concrete technical requirements with inputs/outputs, authority, states/errors, budgets or explicitly blocked budget decisions, compatibility and finite acceptance. | Platform_02/03/04/05/10/11/17/18 and specialized owners; global index Platform_08. |
+| JOURNEYS | Complete normal, permission-denied, invalid/stale input, failure/retry/cancel, recovery and audit flows from user/system entry through persistence and visible outcome. | Platform_06, applicable Platform_02/09/17/20/21/22 sections. |
+| UI_UX | Implementation-level screen/workspace/component behavior, source/query/mutation, role/resource scope, form validation and loading/empty/no-data/error/denied/recovery states, plus accessibility/acceptance. | Platform_09/17 and Platform_14 UI quality gates. |
+| DATA_CONTRACTS | Exact applicable DB/API/event/schema ownership, tenant identity, validation, error/idempotency/replay semantics, migration/compatibility/rollback and security/failure tests. | Platform_05/17/18 plus current source and migration manifest. |
+| BUILD_PLAN | Existing BUILD IDs have phase/profile applicability, current evidence, design/implementation/certification predecessors, source allocation, sequencing and integration gates. | Root `Platform_Master_Build_Sequence_Register_v1.0.md`; Platform_12 decision provenance. |
+| MODULE_PLANS | Filled executable plan records for every in-scope module/slice, including source boundaries, contract, dependencies, acceptance, rollout/rollback and evidence; unclosed records remain explicit blockers. | Build Register execution-plan ledger and the owning design/contract sections. |
+
+### Executable module plan record
+
+Before a writer is dispatched, its existing BUILD/slice/profile record SHALL identify:
+
+1. Stable REQ/PRD and exact owning design, normal/failure flow, UI and DB/API/event sections; phase and OS/domain profile; accepted decision provenance.
+2. Actual source paths, bounded target-file/module allocation and exclusions; current source presence, default activation, runtime evidence and certified scope as separate fields.
+3. Concrete inputs, outputs, schemas/endpoints/events and authoritative state transitions; tenant/entity/credential/fencing authority; validation/error behavior; idempotency, replay/dedupe, retry/cancellation, time and resource bounds as applicable.
+4. Separate **design**, **implementation** and **certification** predecessors. A Linux slice may depend on an accepted shared Windows-compatible contract without requiring the Windows runtime to be finished; its certificate must then remain Linux-scoped. Whole cross-platform BUILD acceptance retains all required profiles.
+5. Finite positive, negative, failure, security/tenant, migration/upgrade, capacity/non-interference and UI acceptance definitions, reproducible fixture identities and existing test entry points. No numeric performance target or vendor behavior may be invented to fill a table.
+6. Configuration, monitoring/logs/support evidence, installation, rollout, rollback and runbook impact; destructive actions and recovery verification explicitly identified. Commands must exist and be applicable to the declared profile.
+7. Current exact source/tree/CI/artifact evidence and unresolved gates; independent reviewer scope; safe integration order and downstream impact. Source or test presence is not a passing test result.
+
+A family-level allocation or the thirty logical intelligence responsibilities in Platform_22 does not by itself meet this record. A design-blocked module must name the missing decision and its owner; it is not eligible for speculative implementation. No new BUILD ID or duplicate master is required to record the gap.
+
+### Structural checks and semantic proof
+
+`project_documentation/tools/validate_mother_references.py` explicitly provides structural protection. Its owner checks establish canonical filename, nonempty locator and formal-ID occurrence in the owner, not semantic completeness of that section. Keep the existing validator and existing documentation tests; this correction adds no validator, runner or CI code. Review must also trace requirement → design/journey/UI/contract → BUILD/source → acceptance definition → evidence status and test dependency counterexamples (standalone before HA; Linux before Windows; AI disabled; missing/partial telemetry; failed downstream dependency). The six-gate review in Platform_14 records the result.
+
+### Evidence and workspace discipline
+
+The 6 November operator terminal transcript establishes reported executable paths and Git states only. A clean status is not source review, test evidence, package signing or runtime health. Preserve untracked files, worktrees and stashes. Do not use environment resets, dependency installs or service operations to complete a documentation task. Current `Makefile` can create `.env` while parsing, and `scripts/generate-dev-certs.sh` rewrites development CA/key files; neither `make help` nor `make certs` is a preservation-safe read-only diagnostic. Use source inspection for this correction.

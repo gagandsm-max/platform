@@ -276,12 +276,14 @@ sequenceDiagram
   S-->>D: Candidate entities + identity/topology evidence
   D->>D: Deduplicate/reconcile
   D-->>UI: Discovery Review Queue
-  U->>UI: Provision / unmanaged / ignore / exclude
-  UI->>D: Approved actions
+  U->>UI: Approve / Leave Unmanaged / Reject / Exclude Permanently + reason
+  UI->>D: Current-authorized review actions with expected revision
   D->>D: Invoke normal provisioning pipeline for approved targets
 ```
 
 Discovery does not automatically consume monitoring licences unless policy explicitly allows auto-approval.
+
+Review semantics are owned by `Platform_20` §3/§8: Reject is not a permanent exclusion; Exclude Permanently suppresses matching candidate recreation until a separate authorized, audited removal. Bulk review returns a result for each candidate, including conflict, denied and capacity/licence-blocked outcomes; a partial batch is not whole-batch success. Approval invokes provisioning only after current identity, entitlement, capacity and policy checks.
 
 ### 9.1 LLDP/CDP evidence to temporal graph and deterministic RCA
 
@@ -1196,16 +1198,19 @@ Large tables use server-side pagination; oversized exports become background job
 ## 46. Flow DF-043 — Report execution
 
 ```mermaid
-flowchart LR
+flowchart TD
   DEF[Report Definition + Schedule] --> JOB[Async Report Job]
-  JOB --> AUTH[Scope/RBAC snapshot]
+  JOB --> AUTH[Re-authorize current tenant and resource scope]
   AUTH --> Q[Query Service]
   Q --> DATA[ClickHouse/PostgreSQL Aggregates]
   DATA --> CALC[Safe formula/CEL calculations]
-  CALC --> RENDER[PDFBox/POI/CSV/JSON renderer]
-  RENDER --> DELIV[Download / Email / Integration]
+  CALC --> RENDER[PDF or CSV artifact renderer]
+  RENDER --> ACCESS[Re-authorize artifact retrieval and permitted delivery]
+  ACCESS --> DELIV[Download / Email / Integration]
   DELIV --> HIST[Execution history / audit]
 ```
+
+Measurement scope/policy snapshots support reproducible periods; they do not preserve revoked access. Execution, artifact download and recipient/delivery access use current authorization. PDF uses the effective licensed commercial logo (default AmrudAi); CSV remains data-only. JSON API responses are not an additional report export format. No rendering library or new dependency is selected by this flow; PRD §27 and DF-SLA-001 remain authoritative.
 
 ---
 
@@ -1646,12 +1651,12 @@ Customer-approved runbook remains authoritative; AI summary cannot modify execut
 
 ---
 
-## 69. Flow DF-066 — Future controlled remediation
+## 69. Flow DF-066 — Controlled remediation within the approved action envelope
 
-Future/Phase 2 only:
+This is the shared controlled-action lifecycle, not blanket authority to execute every recommendation. Phase 1 retains its approved low-risk/read-only diagnostics and audited manual actions. Governed privileged NCM automation is Phase 1.5 under PRD §24/§58.4 and DF-ACP-005; broader remediation maturity remains a later, separately accepted capability. Each action must declare its approved phase, target/parameter limits and supported executor before enablement.
 
 ```mermaid
-flowchart LR
+flowchart TD
   RCA[Evidence-backed RCA] --> REC[Recommended action]
   REC --> PRE[Preconditions / blast radius]
   PRE --> APP[Approval / policy gate]
@@ -1662,7 +1667,7 @@ flowchart LR
   RB --> AUD[Audit / escalation]
 ```
 
-No direct LLM-to-device execution.
+No direct LLM-to-device execution. Recheck current authorization, exact action/plan version, target/config hashes and approved window immediately before execution; stale approvals require reapproval. Persist idempotent execution and cancellation state, expose partial/failed validation, and distinguish a requested cancellation from confirmed stop. Rollback is attempted only where the certified action contract supports it; otherwise retain evidence and escalate.
 
 ---
 
@@ -2269,7 +2274,7 @@ Rules:
 
 ---
 
-## 112. Flow DF-OTEL-002 — OpenTelemetry trace reference boundary and Phase-1.5 deferral flow
+## 112. Flow DF-OTEL-002 — OpenTelemetry trace references and the bounded Phase-1.5 span extension
 
 > **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Governed by `REQ-INF-010` and `DEC-ARCH-044`.
 
@@ -2280,14 +2285,15 @@ flowchart LR
   OIC -->|Structured Logs| LOG[Kafka: telemetry.logs.v1 -> ClickHouse]
   OIC -->|Extract W3C trace_id / span_id| REF[Correlate Reference Attributes on Logs & Events]
   REF -->|Reference Context| INV[Investigation Sessions & RCA Evidence]
-  OIC -.->|Phase 1.5: Bounded Trace & Dependency Evidence| DEF[Phase 1.5 Trace / Dependency Summaries: Separately Certified]
+  OIC -.->|Phase 1.5: Budgeted sampled spans| DEF[Existing storage: bounded history and waterfall after certification]
 ```
 
 Rules:
 - OpenTelemetry metrics and structured logs are fully ingested and stored in ClickHouse in Phase 1.
 - Trace context (`trace_id`, `span_id`) is extracted as reference metadata and attached to corresponding logs, events, and investigation evidence.
-- Phase 1.5 may add bounded customer-provided trace/dependency evidence (e.g. trace_id, span_id, service identity, dependency edge, latency/error summary, selected exemplar) under separate implementation and certification.
-- Full distributed trace span payloads, span storage backends, and full distributed waterfall reconstructions are not part of Phase 1 or 1.5 and require future explicit architecture change control. No trace database is operated in Phase 1.
+- Phase 1 stores trace/span correlation references with metrics/logs/events; it does not retain distributed spans or offer trace search/waterfall.
+- Phase 1.5 may add bounded, sampled, short-retention span history, trace search/waterfall and provenance-labelled dependency evidence under PRD §58.3 and DF-ACP-002. Sampling, tenant/source authority, cardinality, privacy, ingestion/query budgets and retention require separate implementation and certification.
+- The Phase-1.5 extension uses the approved existing storage architecture; it does not select a dedicated trace database, unlimited retention, bytecode instrumentation or full native APM. The separate Phase-2.5 native deep-observability roadmap remains subject to its own architecture/dependency/certification gates.
 
 ---
 
@@ -2564,6 +2570,46 @@ Backpressure, sampling/capture reduction and explicit degraded states SHALL be p
 The following are **SPECIFIED** flow invariants, not proof of a current deployed implementation or a change to frozen edge ACK naming:
 
 1. **DF-014 Syslog/OTLP trust and durability:** `Source → configured listener/source/Sensor binding → unambiguous tenant authorization (Phase-1.5 MSP overlap gate) → transport/framing/size checks → bounded parse + pre-spool redaction/cardinality admission → durable authorized Sensor route → existing Core ingestion → event/entity correlation`. On ambiguous tenant, malformed/decompression failure or quota exhaustion, reject with counted reason or metadata-only sanitized diagnostics; never write unassigned raw payload to a default tenant. TCP ingress and OTLP have different acknowledgement/delivery semantics.
-2. **DF-016 typed Agent evidence:** `Agent certified typed capture → (BUILD-016 versioned bounded envelope/optional fragments) → durable Sensor acceptance → current agent-ingress Kafka+PG watermark/at-least-once Core path (BUILD_003 reservation parity target) → BUILD-062/063/064 validation/storage → BUILD-098 authoritative complete-snapshot reconciliation`. Scalar metrics wire is preserved; partial/late/incomplete inventory never triggers disappearance/removal. The typed physical path is NOT yet implementation-certified.
+2. **DF-016 typed Agent evidence:** `Agent certified typed capture → (BUILD-016 versioned bounded envelope/optional fragments) → durable Sensor acceptance → current at-least-once Agent-ingress PostgreSQL reservation → publisher lease/owner-epoch → Kafka transaction commit → fenced PostgreSQL finalize → ACK boundary (source 36e1513f; typed-family acceptance remains BUILD-016/062 gated) → BUILD-062/063/064 validation/storage → BUILD-098 authoritative complete-snapshot reconciliation`. Scalar metrics wire is preserved; partial/late/incomplete inventory never triggers disappearance/removal. The typed physical path is NOT yet implementation-certified.
 3. **DF-017 agentless/provider control:** `scheduled admitted job → per-target/session/credential API budget → versioned read-only query or provider API → typed normalized evidence+provenance → Core quality`; credential, quota, source privilege, expired vSphere token and cloud 429 failures follow bounded retry/resync and `PARTIAL/UNKNOWN`, not target DOWN.
 4. **SIEM export:** `authorized sanitized Log/Syslog event → primary durable Sensor→Core ingest → Core/Integration Service → independently capped per-tenant/destination SIEM export`. The Core→SIEM path is the current HLD default (Platform_04 §31). A Sensor-local parallel export is **optional, not selected as a mandatory architecture**; it requires separate connector approval, tenant authority, backpressure tests and noninterference proof. SIEM delivery outcome never substitutes for Core durable ACK. Exhaustion/retention/80% disk protection yields explicit destination lag, expiry and loss; no infinite spool or absolute lossless guarantee.
+
+---
+
+## 118. Operator journeys bound to existing system flows
+
+This supplement specifies operator-facing composition of existing requirements; it does not replace system flow IDs, allocate another screen catalogue or claim that an API/UI exists. Preserve registered paths from `ui/src/platform/primary-navigation.ts` and `workspace-registry.ts`; `Platform_09` §4.12 records their source checkpoint. A named administration or authentication subview is a logical destination where no dedicated route is implemented. Do not invent a supported endpoint to fill that gap.
+
+### 118.1 Shared journey boundary
+
+Each journey begins with current tenant/resource authorization and its declared identity/context, validates input before mutation and reports the authoritative outcome. Page/filter/time selection is presentation context, never authority. Mutations bind the permitted target/revision and an idempotency contract where retried; a conflict is visible and requires refresh/review. Async acceptance, execution, validation and final completion are separate outcomes. Closing a drawer does not silently cancel an active job; cancellation is requested explicitly and remains pending until confirmed. Where rollback cannot undo an external effect, retain partial result/evidence and provide the governed recovery path instead of claiming success.
+
+Navigation preserves authorized scope, selected object, time/display timezone, filters and incident/investigation context. Return restores the originating view/focus. An authoritative denial/revocation/expiry response or a session/scope change triggers removal of affected protected data and actions from the UI. The backend reauthorizes each protected request independently of cached UI permission state. Client revocation-detection timing remains governed by the approved session/expiry/revocation contract; no instant push mechanism is assumed, and an unselected mechanism/timing is an acceptance gate. Notification generation, queueing and confirmed delivery are separate states; read/unread is not incident acknowledgement. Shared UI state, field/unit, query bounds, accessibility and action rules are owned by `Platform_09` §3/§4. Each flow's existing protocol/ACK/data authority remains unchanged.
+
+### 118.2 Journey binding and acceptance table
+
+| Operator journey and existing entry | Requirement/system owner | Concrete sequence and required failure/recovery evidence |
+|---|---|---|
+| Login/MFA/access and tenant selection; authenticated shell, `/administration`, UI-084 `/access-governance` | PRD §29/§37; DF-061 | Establish authenticated session and required MFA → resolve current permitted tenant/resource scopes → render only authorized destinations. Invalid/expired/revoked access or denied scope must not fall back to presentation-only `FOUNDATION_ACCESS`. Logout and the authority-loss triggers in §118.1 clear affected protected cached state; backend authorization never waits for client detection. The current UI session bridge is pending; exact auth interaction/session and detection-timing bindings remain an entry gate. |
+| Tenant/site/initial inventory setup; `/administration`, `/inventory` | PRD §38; canonical inventory contracts | Authorized admin validates tenant/site metadata and ownership → reviews effective scope → persists via owning API → sees committed identity and audit outcome. Existing tenant/site/entity APIs do not prove a connected wizard. Failed or conflicting creation retains input safely and does not show a completed deployment or activation. |
+| Individual, bulk and discovered review; Inventory → `/provisioning` | DF-005..008; Platform_20 DF-ONB-001/004 | Enter or import approved target scope → validate identity/credentials/preflight → preview policy, entitlement and capacity → choose Approve/Leave Unmanaged/Reject/Exclude Permanently with reason → display each authoritative result. Denied, conflict, unsupported, capacity-blocked and partial-batch items remain separate. Permanent exclusion has no automatic expiry; removal is separately authorized/audited. |
+| Agent enrollment; `/provisioning`, UI-077 `/agent-estate` | DF-004; DF-ONB-002/005 | Local key/CSR and scoped enrollment → unique Agent identity → provisional authenticated Sensor association and bounded bootstrap health → governed review → authorized active profile/assignment. Token replay, clone conflict and trust/SAN mismatch fail closed. Address changes update observations of the same identity. Pending approval does not activate monitoring/licensing or normal direct Agent→Core telemetry. |
+| Agentless onboarding/evidence; `/provisioning`, UI-031 `/server-detail` | DF-017/095; PRD §23; Platform_17 EDS | Select authorized host/protocol and Credential Profile USE → bounded read-only access/preflight → eligible Sensor and typed query/diagnostic definition → evidence with provenance/quality. Timeout, denied privilege, unsupported query, no eligible source and cancellation preserve distinct reasons. No Agent identity/enrollment semantics, reusable secret reveal or unrestricted shell is introduced. |
+| Recurring Discovery; `/provisioning` | DF-SCHED-001/002; Platform_20 §3.1A, DF-ONB-006 and §8.6 | Configure mode/scope/timezone/limits → preview exact next occurrence → revision-checked save → admitted current-generation work → review results/history. DST/month-end, coalescing, pause/resume, edit/cancel and late obsolete results use the specialized contract. Pure calendar calculation is not durable scheduling/dispatch. |
+| Placement/drain/reassignment; UI-073 `/sensor-estate-overview`, UI-075 `/sensor-pool-ha` | DF-009/010/039; DF-ONB-005 | Select current eligible scope → preview locality/capacity/failure-domain effect → confirm authorized action → observe generation, assignment and degraded/draining progress → verify new current authority. No-capacity, stale revision/generation, partial migration and failed cancellation are visible. Cancelling a request never restores superseded ownership. |
+| Alert → incident → investigation → recovery; UI-055 `/alert-console`, UI-057 `/incident-detail`, UI-058 `/rca-investigation-workspace` | DF-019..024/027A/027B/029/RCA-001; Platform_19/22 | Open qualified evidence → acknowledge/assign under the owning incident contract → preserve time/scope while inspecting supporting/contradictory/missing evidence → run only authorized bounded diagnostics → attach outcome/evidence → qualify recovery. No Data and monitoring degradation are not DOWN; an external ticket's state does not prove recovery. Cancellation, lost source, changed authorization and `INCONCLUSIVE` remain visible. |
+| Maintenance/suppression; UI-060 `/maintenance-suppression` | PRD §20/§37.10; UI-060; DF-030/058 for related policy/freeze | Select scope/window/execution timezone/recurrence → preview affected qualification/notification behavior → record reason/ticket and required approval → commit revision → show scheduled/active/end/expiry evidence. Reject stale edits; distinguish cancel of future work from early end of active maintenance. Preserve suppressed evidence and audit; expiry is not recovery or acknowledgement. Exact lifecycle/action bindings remain required before enablement. |
+| NCM and CLI; UI-062 `/ncm-overview`, UI-063 `/device-configuration`, UI-065 `/configuration-change` | DF-025..027/066/ACP-005; PRD §24/§58.4 | Phase-1 permitted read/backup/diff/manual CLI uses current authorization and audit. Phase-1.5 controlled change adds plan/version/target/config hashes, window and precheck/risk preview → approval → canary/batch execution → postcheck/stabilization → result/rollback where certified. Changed plan/config/window requires reapproval. Failed/partial execution, cancelled work and unsupported rollback remain explicit. |
+| IPAM reservation/conflict; UI-066 `/ipam-overview`, UI-067 `/subnet-detail`, UI-068 `/ip-conflict` | PRD §25; canonical inventory/IPAM owner | Select authorized VRF/subnet/address → inspect observed/declared state, source and conflicts → validate requested reservation/state change → commit via authoritative API → show updated state/history. A competing reservation or stale edit must not silently overwrite ownership. Reservation/release transition, concurrency and exact action API contracts remain documentation HOLD until frozen; no direct DNS/DHCP/device configuration is implied by a record edit. |
+| Capacity/retention and fixed storage safety; UI-093 `/storage-retention` | DF-032..036/063; Platform_11 §9–11; Platform_05 §37; approved issue #292 | Select volume/data-class scope → load qualified measurements → preview canonical model and requested/effective retention → expose headroom/shortfall, assumptions, protected data and hold conflicts → confirm authorized revision-checked policy → observe apply/purge/notification outcomes. Missing inputs are UNKNOWN. Model uncertainty uplift, 70% planning and non-disableable 80% emergency state are distinct; no universal retention/SLA promise. A generated notification is not proven delivery. |
+| ITSM/CMDB connection and synchronization; `/integrations`, UI-080 `/integration-health`, UI-081 `/itsm-lifecycle` | DF-028/029/056/ACP-003/004; PRD §28/§58 | Configure permitted endpoint/auth references and discovered capabilities → test sandbox/mapping preview → controlled enablement → durable delivery/reconciliation → current status/audit. Duplicate, rate-limit, auth expiry, mapping conflict and dead-letter outcomes use the existing outbox/inbox and authority contract. Retry/reconcile is authorized and idempotent; external closure/CI disappearance does not overwrite monitoring truth/delete the entity. |
+| Report/SLA authoring and execution; `/reports`, `/studios/report`, UI-071 `/sla`, UI-072 `/isp-carrier-sla` | DF-043/SLA-001; PRD §27 | Choose authorized definition/scope/period and policy version → preview supported metric/formula and quality → execute or save schedule → re-authorize at execution → generate PDF/CSV → authorize retrieval/delivery → inspect execution/delivery evidence. Denied, insufficient, partial, cancelled or failed output is labelled. Immutable closed measurement periods and access revocation are both respected; snapshotting data does not preserve access. |
+| Credential/certificate rotation; logical Administration Credentials view, UI-052 `/certificate` | DF-062/087; PRD §10/§37.5; Platform_10/18 | Select authorized credential/certificate reference → validate scope and proposed replacement → test through approved bounded path → controlled rotation/overlap where supported → verify consumers → revoke prior authority → audit. USE is distinct from REVEAL; no secret/private key in URL/log/support output. Failure retains the approved recovery path and never offers plaintext or disabled verification. Monitoring certificate evidence alone does not grant rotation. |
+| Backup, DR and upgrade; `/platform-operations`, UI-095 `/housekeeping-lifecycle-jobs` | DF-047/048/049/050/091/093; Platform_16 | Select exact approved artifact/profile → preflight compatibility/backups/space → execute the profile-specific procedure → prove restored/updated data and service health → retain evidence or invoke supported rollback/recovery. Phase-1 standalone recovery/upgrade is distinct from Phase-1.5 two-Core failover/standby-first work. Do not promise rollback across an irreversible migration or an unverified RPO/RTO. |
+| Audit/export and tenant offboarding; UI-083 `/audit-explorer`, logical Administration offboarding view | PRD §29; Platform_21 §4.4/§4.6; Platform_17 audit/data contracts | Authorize bounded search/export against current scope → review artifact contents/quality → retrieve with current authorization/audit. Offboarding separately confirms export/active deletion, revokes secrets, observes legal holds and backup/archive expiry, and reports final evidence only when its state permits. Pending immutable-backup expiry is not immediate physical erasure. Exact offboarding mutation and tamper-evidence mechanism remain owned design/implementation gates. |
+
+### 118.3 Closure and source truth
+
+At the source checkpoint above, the Discovery request APIs, entity APIs and bounded per-entity metric read are real foundations, but no numbered workspace is marked backend-integrated. Schedule calendar helpers do not prove persistent dispatch. The source-path/API boundary table in `Platform_09` §4.12 is the current implementation reference; all remaining endpoint/action bindings must be explicitly specified and source-verified before enablement.
+
+This table closes journey ownership and negative-path composition only. An unselected essential query/action/state/field/authorization contract is a documentation blocker for that journey; an already adequate contract awaiting code, UI binding or runtime evidence is an implementation/certification blocker. Record them separately in the existing RTM/Build gate. Neither a complete system diagram nor a route skeleton may be used as acceptance evidence for the other layer.

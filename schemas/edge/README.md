@@ -3,7 +3,8 @@
 **Scope:** Agent↔Sensor and Sensor↔Core JSON transport contracts, sequence bounds, ACK durability, heartbeat v1, standard errors.
 **Mother Reference:** Platform v3.3.0.
 **Issue:** #110.
-**Canonical base SHA:** `315a20980e89683666a64362f0ed3827bf613d4a`.
+**Historical BUILD-000 base SHA:** `315a20980e89683666a64362f0ed3827bf613d4a`.
+**Current source reconciliation:** `36e1513f25265d0bcd45bdfe5156ee02fdbf5238` (2026-11-06). Frozen B000 decisions remain; historical target labels are not current absence claims.
 
 `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
@@ -11,11 +12,11 @@
 
 | Label | Meaning |
 |---|---|
-| `CURRENT_IMPLEMENTED_V1` | Matches current runtime wire behavior at the BUILD-000 base SHA |
+| `CURRENT_IMPLEMENTED_V1` | Historical runtime wire behavior at the BUILD-000 base SHA; current source differences are reconciled explicitly below |
 | `FROZEN_BUILD_000_INVARIANT` | Approved BUILD-000 decision; must not silently diverge |
-| `BUILD_002_TARGET` | Agent↔Sensor hardening; `agentStreamId` / schemaVersion 2 now implemented on Agent hop (this branch) |
-| `BUILD_003_TARGET` | Required for Sensor↔Core hardening; not implemented in BUILD-000 |
-| `BUILD_004_TARGET` | Desired/observed control reconciliation; not heartbeat v1 authority |
+| `BUILD_002_TARGET` | Original Agent↔Sensor hardening owner; `agentStreamId`, schemaVersion 2 and ceiling enforcement are implemented at the reconciled current source |
+| `BUILD_003_TARGET` | Original Sensor↔Core hardening owner; reservation, publisher lease/fence, transactional publish/finalize and ceiling guards now exist on both Core ingest paths |
+| `BUILD_004_TARGET` | Desired/observed control reconciliation; bounded separate desired/applied-state path implemented, never heartbeat v1 authority or full scheduler certification |
 
 ## Directory layout
 
@@ -31,6 +32,8 @@ schemas/edge/
   sensor-agent-ingress-ack.schema.json
   sensor-heartbeat-request.schema.json
   sensor-heartbeat-response.schema.json
+  sensor-control-desired-state.schema.json
+  sensor-control-applied-state.schema.json
   standard-error.schema.json
   tools/validate.mjs
   examples/
@@ -46,9 +49,8 @@ JSON Schema Draft 2020-12 documents structure. `tools/validate.mjs` performs dep
 | Maturity | Meaning |
 |---|---|
 | `FROZEN_BUILD_000_INVARIANT` | JSON-carried sequence/control ceiling is `2^53−1`. Schemas/validator encode this now. |
-| `CURRENT_IMPLEMENTED_V1` | Runtimes use Go `uint64` / Java `long` / SQL `BIGINT` and current positive/range behavior. They do **not** yet explicitly enforce `9007199254740991` at all hops. |
-| `BUILD_002_TARGET` | Agent→Sensor runtime ceiling enforcement |
-| `BUILD_003_TARGET` | Sensor→Core runtime ceiling enforcement |
+| Historical `CURRENT_IMPLEMENTED_V1` | The original freeze recorded Go `uint64` / Java `long` / SQL `BIGINT` without all later explicit guards. |
+| Current source (`36e1513f`) | Agent queue ceiling guards and delivery-worker ACK range binding, Sensor Agent receiver, Core `TransportSequenceLimits`/validators and V012/V013 now enforce ceiling constraints on their implemented transport/control paths. Future extensions require separate conformance evidence. |
 
 Applies to JSON-carried durable delivery/replay sequences and JSON-carried control counters/generations/versions.
 
@@ -123,10 +125,10 @@ Do not rename for consistency. Dual casing is frozen:
 | Boundary | ACK means | Delete/advance requires |
 |---|---|---|
 | Agent→Sensor | Authz + contract checks + durable Sensor Agent spool accept + durable replay accounting | Validated batch-bound application ACK (HTTP 2xx alone insufficient) |
-| Sensor→Core telemetry | PG pending reserve → Kafka txn commit → PG finalize watermark → ACK | Validated `accepted_through_sequence` |
-| Sensor→Core agent-ingress | Kafka publish + PG ingress watermark (**at-least-once**; no V009 reservation yet) | Validated `acceptedThroughIngressSequence` |
+| Sensor→Core telemetry | PG pending reserve → bounded owner/epoch publisher lease → Kafka txn commit → fenced PG finalize watermark → ACK; at-least-once | Validated `accepted_through_sequence` |
+| Sensor→Core agent-ingress | PG pending reserve → bounded owner/epoch publisher lease → Kafka txn commit → fenced PG finalize watermark → ACK; **at-least-once** | Validated `acceptedThroughIngressSequence` |
 
-ClickHouse completion is asynchronous and **MUST NOT** gate Sensor ACK.
+ClickHouse completion is asynchronous and **MUST NOT** gate Sensor ACK. `SensorIngestionService` and `AgentIngestionService` implement the current boundaries with V012 publisher/Agent-ingress schema support. PostgreSQL and Kafka are not one XA transaction: a commit/finalize crash may require replay. Lease ownership does not establish exactly-once delivery, physical ClickHouse deduplication or permanent-node-loss HA certification.
 
 ## bootEpoch (B000-D005)
 
@@ -146,17 +148,19 @@ Core heartbeat response authority (wire):
 
 `desiredConfigVersion` / `assignmentVersion` / `policyVersionWatermark` are **not** authoritative Core desired/applied-state values in heartbeat v1. Sensor request fields of that form are non-authoritative compatibility fields.
 
+Current desired-state authority is separate: `SensorControlDesiredStateController` exposes `GET /api/v1/sensor/control/desired-state` and `PUT /api/v1/sensor/control/applied-state`, backed by V014 and the desired/applied schemas above. This bounded source path is not a claim that the full Sensor production scheduler is wired or certified.
+
 ## Entity authority (B000-D009)
 
 Agent `hostId` is source evidence. Agent-supplied `entityId` is not authoritative. Canonical tenant-scoped entity mapping remains Core-owned.
 
-## CURRENT V1 LIMITATION — Agent stream generation (B000-D015)
+## Legacy v1 limitation and current v2 Agent stream generation (B000-D015)
 
 Sensor durable Agent replay authority was historically keyed by `tenantId + agentId`.
 
 If the same Agent identity loses/recreates its durable queue and sequences restart, v1 Sensor correctly fails closed because it cannot distinguish legitimate fresh lineage from replay.
 
-**BUILD-002 (implemented on Agent↔Sensor hop):** durable `agentStreamId` on a versioned Agent→Sensor contract:
+**BUILD-002 (implemented at the reconciled source on Agent↔Sensor hop):** durable `agentStreamId` on a versioned Agent→Sensor contract:
 
 - durable across Agent process restart (`sequence.meta` version 3);
 - changes only when durable delivery lineage is intentionally recreated;
@@ -171,9 +175,9 @@ If the same Agent identity loses/recreates its durable queue and sequences resta
 
 ## Agent-ingress hardening ownership (B000-D013)
 
-Current Sensor→Core agent-ingress remains **at-least-once**.
+Current Sensor→Core Agent-ingress remains **at-least-once**. At `36e1513f`, outer schemaVersion 2 and `sensorAgentSpoolStreamId`, pending reservation, first-range/conflict checks, bounded publisher lease/owner-epoch fence and transactional publish/finalize are implemented in `AgentIngestionValidator`, `AgentIngestionService` and `PostgresAgentIngressWatermarkStore`. Historical BUILD-003 target wording is superseded for these bounded paths.
 
-**BUILD_003_TARGET:** pending replay reservation, conflicting retry protection, first-batch sequence conformance (`start at 1`), retry amplification hardening.
+The accepted canonical payload is still the supported numeric observation path. Structured software inventory, process-network and EDS evidence require the separate BUILD-016/062/063/064/098 contract gates; reservation parity does not make those payloads implemented or certified.
 
 ## Monitoring correctness (B000-D012)
 

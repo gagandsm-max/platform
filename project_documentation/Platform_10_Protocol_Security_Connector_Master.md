@@ -230,7 +230,7 @@ Where external SIEM forwarding is enabled, use per-destination/tenant bounded **
 3. **Deterministic Capability State Machine:**
    - `ACTIVE`: eBPF bytecode verified and attached; BPF ring-buffer healthy; local aggregation active.
    - `UNSUPPORTED`: Host architecture or OS kernel is non-Linux or below minimum supported eBPF baseline.
-   - `UNAVAILABLE`: Host eBPF subsystem disabled by sysctl or security policy (e.g. `kernel.unprivileged_bpf_disabled=2`).
+   - `UNAVAILABLE`: Required eBPF functionality is unavailable under verified host/kernel/security policy. A single sysctl observation is not sufficient to classify the collector; bounded preflight and actual permitted load/attach capability determine the outcome, with a non-secret reason code.
    - `PRIVILEGE_DENIED`: Agent process lacks required Linux capabilities (`CAP_BPF`, `CAP_PERFMON`).
    - `KERNEL_INCOMPATIBLE`: Kernel verifier rejected bytecode, or BTF definitions do not match running kernel.
    - `RESOURCE_GUARDED`: Local Agent memory or kernel map capacity exceeded; shedding/sampling enabled to protect host stability.
