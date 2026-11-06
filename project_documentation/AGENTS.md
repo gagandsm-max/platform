@@ -77,6 +77,16 @@ A mother document **MUST** be updated when:
 Such updates require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and GitHub review/merge.
 No implementation may permanently diverge from mother-reference truth. If implementation discovers a mother-document error, correct the mother documents rather than knowingly preserve a false specification.
 
+## P0 Mother Reference correction gate — 2026-11-06
+
+The Founder-directed priority is to reconcile the **existing** Mother References across all six P0 documentation areas: technical requirements, application/user flows, UI/UX, schema/API/event/migration contracts, the Master Build Sequence Register, and executable module plans. `Platform_00` §10.1, `Platform_08` §4.1–4.3 and `Platform_12` §29 govern acceptance and adjudication. The root `Platform_Master_Build_Sequence_Register_v1.0.md` remains the single programme execution map.
+
+- Before a correction, the responsible reviewer MUST verify the exact current `main`/task SHA, read the owning and affected masters, check existing coverage and implementation evidence, and record ACCEPT, ACCEPT WITH CHANGES, REJECT, HOLD FOR EVIDENCE or FOUNDER DECISION REQUIRED with rationale. An earlier handover or open PR is evidence to challenge, not merged authority.
+- Corrections MUST preserve stable REQ/PRD/BUILD/UI/DF identifiers, approved phase boundaries and the 25-file v3.3.0 set unless separately governed change control authorizes a change. Existing owners take precedence over creating new master documents.
+- Every accepted correction MUST update its affected owners and the Index/Decision Register/RTM/Build Register/navigation where applicable. No writer may resolve a material missing contract by guessing an API, schema, capacity guarantee, HA mechanism or security exception.
+- All six areas require acceptance together. `DOC_P0_BLOCKED` remains until the complete evidence gate passes; a corrected subset or green structural validator is not partial acceptance. Documentation acceptance, implementation maturity and production certification remain separate.
+- Documentation work MUST use isolated controlled branches and PRs, exact-head independent review and relevant validation. It MUST NOT change runtime code, infrastructure, CI runner state or service configuration merely to make documentation pass. Existing tool authority and exact-SHA independent-audit requirements remain in force; writers cannot certify their own amendments.
+
 ## Non-negotiable engineering rules
 
 - Product name is **Platform** (internal engineering/build identifier); commercial/customer-facing product name is **AmrudAi**.
@@ -224,7 +234,7 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.3 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library (63 Skills) from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.3 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library (63 Skills) from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §5; do not freeze a historical file-count ceiling.
 
 ---
 

@@ -375,7 +375,7 @@ A2.1 does **not** implement runtime fixes. The following current gaps must remai
 |---|---|---|
 | Exactly-two-Core HA stateful mechanisms | Active/Standby &lt;60s; fail-safe fencing | **SPECIFIED / OPEN P0 / NOT PRODUCTION CERTIFIED** — see §7 and §40 |
 | Production Sensor runtime wiring | Universal Go Sensor with governed scheduler/workers/spool/uploader | Target normative; **production entrypoint does not yet use the entire governed runtime/scheduler architecture** |
-| Persistent IAM/RBAC authority | IdentityDirectory / PermissionGrantDirectory production authority | **NOT IMPLEMENTED** on current main as durable production authority |
+| Persistent IAM/RBAC authority | IdentityDirectory / PermissionGrantDirectory production authority | **BOUNDED PERSISTENCE IMPLEMENTED, DEFAULT OFF; NOT PRODUCTION CERTIFIED** at `36e1513f`: opt-in JDBC directories and V016 exist; see §29 implementation truth |
 | Discovery authorization | Tenant/RBAC-integrated Discovery | Intentionally **fail-closed** while permission integration incomplete |
 | Sensor Pool / Region physical persistence | Logical placement model | Logical design ≠ implemented physical schema |
 | Replay relational integrity | Idempotent durable ACK/replay | Known defect class under #92 |
@@ -522,9 +522,9 @@ Sensors execute protocol adapters and bounded local buffering. They do **not** o
 
 ## 10. Agent architecture boundary
 
-Agents (Windows/Linux) are distinct builds. They enroll via Core, receive Sensor association for collection paths, use mTLS identity, and must not become licensed/actively monitored without onboarding approval (or trusted auto-approval policy). Agents are not causal RCA authorities. Optional local/private inference providers are not Agents and must not participate in HA quorum (see §14 / §22).
+Agents (Windows/Linux) are distinct builds. They enroll via Core, receive Sensor association for collection paths, use mTLS identity, and must not become licensed/actively monitored without onboarding approval (or trusted auto-approval policy). Agents are not causal RCA authorities. Optional local/private inference providers are not Agents and must not participate in HA quorum (see §14 / §23 and `Platform_22`).
 
-Detailed Agent product behavior: `Platform_02_PRD.md`. EDS placement: §22.
+Detailed Agent product behavior: `Platform_02_PRD.md`. EDS placement: §23.
 
 ## 11. Placement architecture (Region, Site, Sensor Pool)
 Core owns placement policy. Placement may incorporate observed locality/capacity/completion evidence as **placement-learning recommendations**. Recommendations do not silently override pinned/manual placement or pool policy without authorized auto-rebalance controls.
@@ -840,19 +840,12 @@ Flow/NTA strengthens Network/Flow contracts under existing `REQ-NET-004` authori
 
 
 ## 19. NCM and remediation architecture
-The UI uses Platform APIs/control paths rather than direct browser-to-target network access. Contextual actions create bounded diagnostic/investigation jobs in Core; Core authorizes tenant/resource scope, selects an eligible Sensor/Agent/vantage, and routes execution to the appropriate existing worker/domain. Results return as typed evidence with source/vantage, event/result time, quality and correlation identifiers.
 
-Architectural rules:
+NCM uses the existing modular Core orchestration and assigned Sensor/device-adapter workers. Core owns target authorization, credential-use policy, immutable change-plan versions, approval validity, maintenance windows and audit. Sensors execute only the bounded, authorized operation and return typed result/evidence through existing control and telemetry paths. No separate NCM database or mandatory orchestration microservice is introduced.
 
-- extend the modular Core/Sensor/Agent domains first; no new mandatory standalone diagnostics microservice or database is introduced by this capability;
-- browsers do not gain arbitrary target-network reachability or reusable device secrets;
-- target selection is canonical-entity/resource scoped by default; ad-hoc targets, if separately permitted, are bounded and protected against cross-tenant/arbitrary-network abuse;
-- on-demand diagnostics and continuous tests have timeout/rate/concurrency/cancellation limits so NOC actions cannot starve scheduled monitoring;
-- multi-vantage execution uses Sensor/Agent eligibility and capacity rules and preserves contradictory results;
-- monitored observations and fresh operator-triggered verification remain distinguishable while sharing a common evidence model;
-- Investigation Sessions reference existing telemetry/config/topology/flow/audit evidence rather than indiscriminately duplicating it;
-- deterministic diagnostic packs define checks and safety bounds; AI may explain evidence or suggest the next authorized check but is not execution authority.
+Change Assurance references canonical configuration, topology, service, incident and audit evidence. Before execution, approval MUST still match the exact Change Plan version, target-set hash, rendered configuration/template hash and approved maintenance window; local Platform RBAC, policy and preconditions remain authoritative. Plan changes invalidate approval rather than silently broadening execution.
 
+The independently certifiable **Phase 1** subset is backup/version/diff/compliance/golden-state and controlled manual CLI when credential brokering, RBAC and audit are certified. Mass push, canary/staged automated privileged execution, automated remediation and firmware remain **Phase 1.5** unless governed change control promotes them. Detailed boundaries remain §45.5, `Platform_04` §21 and `Platform_17` §13; this section does not claim runtime completion.
 
 ## 20. Operational troubleshooting architecture
 The UI uses Platform APIs/control paths rather than direct browser-to-target network access. Contextual actions create bounded diagnostic/investigation jobs in Core; Core authorizes tenant/resource scope, selects an eligible Sensor/Agent/vantage, and routes execution to the appropriate existing worker/domain. Results return as typed evidence with source/vantage, event/result time, quality and correlation identifiers.
@@ -890,18 +883,12 @@ NetBox-like external tools may integrate, but Platform IPAM remains coherent wit
 
 
 ## 23. Endpoint diagnostics (EDS) and local intelligence placement
-Authoritative system/event/telemetry/audit/RCA/replay/ingestion-ordering instants remain absolute UTC. Storage and M2M contracts use UTC-capable RFC3339/ISO-8601. Interactive UI display resolves an effective IANA zone:
 
-```text
-explicit dashboard/view/session override
-→ saved user display_timezone preference
-→ browser/device local IANA timezone
-→ tenant.timezone
-→ UTC
-```
+Endpoint Diagnostic Snapshot (EDS) is the `ENDPOINT_DIAGNOSTIC_SNAPSHOT` profile of the existing Diagnostic Job / Live Evidence / Investigation architecture. Core owns authorization, effective policy and trigger/eligibility definitions, generation fencing, manual/incident-driven requests, global evidence budgets and request coalescing, evidence references, cross-domain correlation and deterministic RCA. Agents and the governed agentless monitoring authority evaluate bounded local capture eligibility under currently valid Core-issued policy/authority and collect evidence; they do not become independent host-health or causal RCA authorities. Expired/revoked authority remains fail-closed; this clarification does not invent an offline authorization period.
 
-Operational policy timezones (maintenance, SLA/business calendar, scheduled-report execution, business-hours) are separate fields. Display preference never rewrites them. Host OS timezone of Core/Sensor/Agent is not product authority.
+Agent execution remains within the existing Agent runtime. Agentless Linux SSH and Windows WinRM/WMI/CIM use governed read-only query packs with typed parameters, timeout/output/concurrency limits, credential-use authorization and cancellation. Evidence reuses the existing Agent → assigned Sensor → Core durability path; an EDS profile does not create a second daemon, transport, queue product, diagnostic registry or datastore. The structured physical evidence transport remains subject to BUILD-016/062/063/064 and is not made implemented by this placement contract.
 
+Optional local/private inference is reached only through AI Gateway under `Platform_22` policy and resource budgets. It has no scheduling, durable control-state, telemetry-ingestion or HA quorum authority. EDS and base monitoring MUST operate with all AI disabled. Detailed responsibilities and contracts remain `Platform_04` §45, `Platform_05` §86 and `Platform_17` §4.6.
 
 ## 24. Recurring scheduling and freshness architecture
 No scheduler microservice. Core owns desired schedule/policy, placement, recurring assignment and generation/fencing. Sensor executes currently authorized work and retains durable recurring desired-state for temporary Core outage/failover.
@@ -938,12 +925,13 @@ Canonical Sensor telemetry durability:
 ```text
 durable spool stream identity
 → PostgreSQL pending reservation
-→ Kafka transactional publish
-→ PostgreSQL finalize
+→ claim bounded PostgreSQL publisher lease (owner/epoch)
+→ Kafka transactional publish and commit
+→ PostgreSQL finalize for matching reservation/owner/epoch
 → Sensor ACK
 ```
 
-At-least-once. Concurrent pending-reservation HTTP retries may amplify Kafka republish (P1 hardening). PR #59 insert-token/dedupe-window correctness is superseded; bounded Kafka→ClickHouse micro-batching remains future P1 performance work after benchmark.
+At-least-once. Current publisher-lease arbitration bounds concurrent publication; the Kafka-commit/PostgreSQL-finalize crash window can still require replay and remains a separate hardening/certification concern. Already-finalized exact replay may return the proven prior ACK without republishing. PR #59 insert-token/dedupe-window correctness is superseded; bounded Kafka→ClickHouse micro-batching remains future P1 performance work after benchmark.
 
 **Deletion-authorizing ACK durability (FROZEN governance; physical mechanism NOT selected):**
 
@@ -1067,7 +1055,7 @@ Release produces SBOM, checksums, provenance and third-party notices. Dependency
 Platform is architected for highly regulated deployments: server-side tenant isolation, mTLS, TLS-only UI, MFA/SSO, least privilege, separate credential use/reveal permission, signed artifacts, audit, SIEM export, secret masking, KMS/HSM integration points, PKI rotation, offline installation and hardening profiles. Architecture must preserve pathways for FIPS-capable cryptographic modules and CIS/STIG-style OS hardening. No certification is claimed until actually completed.
 
 
-**IAM implementation truth:** required production architecture includes persistent IdentityDirectory / PermissionGrantDirectory authority. That durable production authority is **not implemented** on current main. Discovery authorization remains fail-closed until permission integration is complete. Target architecture is unchanged.
+**IAM implementation truth (source baseline `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`):** bounded JDBC `IdentityDirectory` / `PermissionGrantDirectory` persistence is implemented in `core/src/main/java/com/platform/core/security/http/SecurityDirectoryConfiguration.java` with `V016__platform_identity_and_permission_grants.sql`. `platform.security.directories.persistence-enabled` defaults to `false`; disabled directories remain fail-closed, and enabled initialization/query failures must not fall back to permissive authority. This establishes source implementation of the directory boundary, not deployed activation, complete IAM/SSO or production certification. Discovery remains authorization-gated and fails closed when trusted identity or grants are absent. Target architecture is unchanged.
 
 **Audit implementation truth:** enterprise target includes durable/tamper-evident audit. Current common emitter logging is **not equivalent** to durable audit persistence. Actor attribution gaps remain where applicable (#92).
 
@@ -1283,7 +1271,7 @@ Operational policies must be editable with inheritance and impact preview.
 
 
 ## 36. Open-source technology baseline and supply-chain architecture
-The following are recommended/approved candidates subject to version-level OSS catalogue scanning:
+The following are recommended/approved candidates subject to version-level OSS catalogue scanning. Approval is distinct from implementation: `Platform_07` records Apicurio/Avro/Protobuf (OSS-004/005/006) as `APPROVED_NOT_IMPLEMENTED`. Current telemetry publication uses the source-bound JSON contract in `Platform_17` §4.7. BUILD-063 owns any physical topic/serializer/registry admission and compatibility transition; this table does not assert an already-running registry or authorize a silent wire migration.
 
 | Module | OSS / technology | Architecture use |
 |---|---|---|
@@ -1331,7 +1319,7 @@ The v1 document listed only names. The v2 architecture freezes how OSS is used a
 | OSS-001 | Core Framework | Core control plane/API | Spring Boot | Apache-2.0 | USE | Core | Java 21 modular Core framework, REST/API, security integration, configuration, lifecycle. | Do not build web/application framework plumbing. Platform-specific domain modules, policies, authorization semantics and workflows remain custom. |
 | OSS-002 | Streaming | Internal durable event/telemetry backbone | Apache Kafka | Apache-2.0 | USE | Core | Internal message backbone for normalized telemetry, events, audit, alert/RCA processing and async integration. Kafka is not exposed directly to Sensors. | Kafka is commodity streaming; Platform owns topic contracts, idempotency, routing, retention, replay semantics and two-Core failover integration. |
 | OSS-003 | Streaming | Go Kafka client | franz-go | BSD-3-Clause | USE | Core/Sensor utilities | Efficient Go Kafka producer/consumer where Go components communicate with internal Kafka. | Do not write Kafka protocol client. Wrap behind Platform producer/consumer interfaces. |
-| OSS-004 | Schema Registry | Schema governance | Apicurio Registry | Apache-2.0 | USE | Core | Registry for Avro/Protobuf schemas and compatibility rules. | Avoid proprietary schema-registry lock-in; Platform owns subject naming, compatibility policy and release governance. |
+| OSS-004 | Schema Registry | Schema governance | Apicurio Registry | Apache-2.0 | USE | Core (approved target) | Approved registry target for Avro/Protobuf schema compatibility; `APPROVED_NOT_IMPLEMENTED` per Platform_07, subject to BUILD-063 physical-contract admission. | Avoid proprietary schema-registry lock-in; Platform owns subject naming, compatibility policy and release governance. |
 | OSS-005 | Schema | Event serialization | Apache Avro | Apache-2.0 | USE | Core/Schemas | Candidate/default for selected event families needing schema evolution. | Schema choice is per contract; Platform owns canonical event definitions. |
 | OSS-006 | Schema | RPC/event serialization | Protocol Buffers | BSD-3-Clause / bundled notices | USE | Core/Sensor/API | Typed RPC/event contracts where protobuf/gRPC is appropriate. | Platform owns canonical schemas and compatibility rules. |
 | OSS-007 | Transactional Data | Authoritative control/config database | PostgreSQL | PostgreSQL License | USE | Core | Tenants, inventory, policies, RBAC metadata, device definitions, current state, IPAM, NCM metadata, licensing, workflow state. | Do not use PostgreSQL as the primary high-volume telemetry store. Platform owns schema and migrations. |
@@ -1453,10 +1441,10 @@ Platform must monitor itself: collectors, Sensors, queues, ingestion lag, droppe
 
 
 ## 40. Architecture acceptance gates
-Architecture is accepted for implementation only when engineering plans explicitly address:
+Architecture implementation plans MUST identify the active certification envelope in §46. Phase 1 is one authoritative standalone Core; it requires the declared recoverable-failure, durability and backup/restore profile. Phase 1.5 additionally requires the exactly-two-Core HA design gate. The following gates apply to their stated envelope:
 
-- two-Core split-brain prevention;
-- two-Core PostgreSQL/ClickHouse/Kafka failover/replay behavior;
+- **Phase 1.5 HA:** two-Core split-brain prevention;
+- **Phase 1.5 HA:** two-Core PostgreSQL/ClickHouse/Kafka failover/replay behavior and deletion-authorizing ACK durability;
 - Sensor spool durability/idempotency;
 - SNWP-2500-v1 benchmark;
 - Sensor workload model;
@@ -1527,7 +1515,7 @@ AmrudAi Phase 1 is **Unified Network & Infrastructure Observability**. It define
 Phase 1 explicitly enforces strict architectural boundaries:
 - **No full APM:** No code-level transaction tracing, no Java/.NET bytecode instrumentation, no method-level timing, no continuous profiling, no flame graphs, and no Real User Monitoring (RUM).
 - **No full DPI:** No always-on bulk packet capture, no TLS decryption, and no continuous packet payload reconstruction. (Existing bounded, incident-triggered packet evidence under `PRD-OIV-002` remains active and is preserved).
-- **No dedicated new backends:** No mandatory GPU/NPU hardware, no third Core node for quorum, no separate eBPF database or service, no standalone trace database (Jaeger/Tempo), and no dedicated graph database. PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative data stores.
+- **No dedicated new backends:** No mandatory GPU/NPU hardware, no third Core node for quorum, no separate eBPF database or service, no standalone trace database (Jaeger/Tempo), and no dedicated graph database. The approved baseline remains PostgreSQL for transactional/control authority, ClickHouse for historical facts, Kafka for internal durable transport, and Valkey for reconstructable cache/ephemeral state. Kafka retains committed-event custody through the defined ingestion/replay durability boundary; it is not the long-term historical query authority. Valkey remains reconstructable and cannot be the sole durable authority.
 
 ### 44.3 eBPF process-to-network telemetry architecture
 
@@ -1551,7 +1539,7 @@ Linux Kernel (eBPF Probes)
 ### 44.4 Active path observability architecture
 
 Active path probing is executed by Network Sensors toward monitored infrastructure, WAN circuits, and cloud targets:
-- **Flow-Preserving Active Path Tracing:** Active path probing evaluates flow-stable techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040 across ICMP, TCP where appropriate, and UDP where certified) to maintain constant flow identifiers across probes and prevent ECMP route fluttering where supported.
+- **Flow-Preserving Active Path Tracing:** Active path probing evaluates flow-stable techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040 across ICMP, TCP where appropriate, and UDP where certified) to maintain constant flow identifiers across probes and reduce false path-change artifacts from ECMP where supported.
 - **Hop & Change Telemetry:** Measures hop and destination latency, loss, and jitter where reliable, and MPLS label stacks when observable from supported protocol extensions; computes opaque, versioned, deterministic path fingerprints; detects route divergence and emits `PathChangeEvidence` records.
 - **Causal Integrity:** Intermediate packet drops or hidden hops record unresponsive/hidden states without asserting target DOWN. Multi-vantage contradictions are preserved as evidence.
 

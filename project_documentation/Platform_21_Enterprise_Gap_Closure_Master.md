@@ -25,7 +25,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 3. **Compliance claims require evidence.** Protocol support or tamper evidence must not be marketed as certification.
 4. **Privacy by design.** Endpoint experience monitoring is operational telemetry, not employee surveillance.
 5. **Deletion is a lifecycle, not a button.** Active data, backups, archives, legal holds and final destruction evidence are distinct states.
-6. **Existing HA is not reopened.** v1 remains exactly two full Core nodes in Active/Standby; regional federation is future scope.
+6. **Existing deployment envelopes are not reopened.** Phase 1 supports standalone Core. The Phase-1.5 HA envelope remains exactly two full Core nodes in Active/Standby; regional federation is separately governed future scope and does not silently change either envelope.
 7. **Integration over imitation.** Incident collaboration integrates with existing enterprise communication/ITSM tools; Platform does not become a chat product.
 8. **Future capabilities do not preselect dependencies.** Browser engines, probe SaaS, federation transport and vendor SDKs require later OSS/security/performance review.
 
@@ -33,7 +33,9 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 
 ## 3. Formal product requirements
 
-| PRD ID | Release | Requirement |
+The legacy labels below preserve earlier priority/milestone intent. `P0`/`P1` are priorities, not release phases; `V1.x`, `P1.5` and `P2` are historical milestone labels. The later approved Phase-1/1.5/2/2.5 reconciliation in this master, PRD and Master Build Register governs actual release scope. Each implementation slice must bind its explicit certification envelope; these labels do not select a release date or waive the capability's design/implementation gates.
+
+| PRD ID | Legacy priority / milestone | Requirement |
 |---|---|---|
 | `PRD-EGC-001` | P0 | Platform shall expose a normalized SD-WAN model spanning controller/fabric, site, edge, underlay, overlay/tunnel, path, SLA/SLO class, application/path policy and health, with vendor adapters mapped into the canonical model. |
 | `PRD-EGC-002` | P1 | Platform shall target SCIM v2-compatible identity lifecycle integration for governed user/group provisioning and deprovisioning, while making no SCIM compliance/certification claim until independently validated. |
@@ -49,7 +51,7 @@ Nothing in this document selects a new OSS dependency, database, mandatory micro
 | `PRD-EGC-012` | V1.x | Optional endpoint Digital Experience Monitoring may collect bounded device/application/network experience signals needed for service quality, with explicit tenant policy, transparency, minimization, retention controls and prohibitions on keystroke/content/user-surveillance collection. |
 | `PRD-EGC-013` | P1.5 | Platform may add multi-step browser synthetics with scripted journeys, assertions, timing and evidence capture. No browser runtime or automation dependency is selected by this requirement. |
 | `PRD-EGC-014` | V1.x | Platform may support customer-operated/outside-in probes for externally observed reachability and service experience. This does not commit Platform to operating a global managed probe SaaS. |
-| `PRD-EGC-015` | P2 | Future regional Core federation may provide governed cross-region inventory/service/incident summarization and continuity, but shall not alter the v1 exactly-two-Core Active/Standby contract without separate architecture change control. |
+| `PRD-EGC-015` | P2 | Future regional Core federation may provide governed cross-region inventory/service/incident summarization and continuity, but shall not alter the exactly-two-Core Active/Standby HA contract without separate architecture change control. |
 
 ---
 
@@ -152,13 +154,13 @@ Multi-step browser synthetics, customer-operated probes and regional federation 
 
 P0/P1 capability implementation is not complete until the relevant requirements have source traceability, negative security tests, tenant-isolation tests, upgrade/backward-compatibility coverage, failure-mode tests and operational telemetry/runbook evidence. Protocol or vendor compatibility claims require reproducible contract/integration tests against supported versions.
 
-`V1.x` and `P2` requirements are not v1 GA blockers unless separately promoted through change control. A capability may not be advertised as implemented merely because this master defines it.
+Historical `V1.x`/`P2` labels do not independently create Phase-1 GA blockers; use the current approved certification envelope and later phase reconciliation. Conversely, a legacy `P0`/`P1` priority is not proof of Phase-1 implementation scope. A capability may not be advertised as implemented merely because this master defines it. Missing essential normative contracts are documentation/design blockers; a complete specification awaiting implementation or certification is a separate readiness state.
 
 ---
 
 ## 7. Formal traceability requirements
 
-| REQ ID | Release | Requirement / acceptance evidence |
+| REQ ID | Legacy priority / milestone | Requirement / acceptance evidence |
 |---|---|---|
 | `REQ-EGC-001` | P0 | SD-WAN adapters prove canonical mapping, vendor-extension isolation, tenant scoping and topology/health consumption using supported vendor fixtures/contracts. |
 | `REQ-EGC-002` | P1 | SCIM lifecycle tests cover create/update/disable/delete/reconcile, duplicate/retry behavior, RBAC convergence and explicit unsupported-feature behavior; compliance is not claimed by test existence alone. |
@@ -173,8 +175,31 @@ P0/P1 capability implementation is not complete until the relevant requirements 
 | `REQ-EGC-011` | V1.x | DEX privacy tests prove prohibited content/surveillance fields are not collected, tenant policy gates collection, and retention/export honor configured privacy controls. |
 | `REQ-EGC-012` | P1.5 | Browser-synthetic implementation requires an approved dependency/security/performance decision plus deterministic journey, secret, evidence-retention and failure-isolation tests. |
 | `REQ-EGC-013` | V1.x | Outside-in probe implementation proves customer/probe identity, tenant scope, replay resistance, bounded buffering, time quality and explicit ownership/operating model. |
-| `REQ-EGC-014` | P2 | Regional federation requires separate architecture approval and tests for partition, authority, data residency, reconciliation and compatibility while preserving v1 two-Core HA semantics. |
+| `REQ-EGC-014` | P2 | Regional federation requires separate architecture approval and tests for partition, authority, data residency, reconciliation and compatibility while preserving the exactly-two-Core HA semantics and separately governed standalone envelope. |
 | `REQ-EGC-015` | P0 | Every capability introduced under this master exposes health/lag/error/capacity telemetry sufficient to distinguish Platform collection/control degradation from monitored-environment failure. |
+
+### 7.1 Explicit product-to-acceptance crosswalk
+
+Do not join these families by numeric suffix: middleware and backup intentionally share REQ-EGC-005, and the self-observability requirement is cross-cutting. Preserve all existing IDs.
+
+| Product requirement | Acceptance requirement | Scope |
+|---|---|---|
+| PRD-EGC-001 | REQ-EGC-001 | Canonical SD-WAN |
+| PRD-EGC-002 | REQ-EGC-002 | SCIM lifecycle |
+| PRD-EGC-003 | REQ-EGC-003 | Service Assurance |
+| PRD-EGC-004 | REQ-EGC-004 | Audit tamper evidence |
+| PRD-EGC-005 | REQ-EGC-005 | Middleware monitoring |
+| PRD-EGC-006 | REQ-EGC-006 | Tenant offboarding |
+| PRD-EGC-007 | REQ-EGC-007 | Licensing |
+| PRD-EGC-008 | REQ-EGC-008 | Declarative policy |
+| PRD-EGC-009 | REQ-EGC-005 | Backup-product monitoring |
+| PRD-EGC-010 | REQ-EGC-009 | SASE/SSE/ZTNA integration |
+| PRD-EGC-011 | REQ-EGC-010 | Incident command |
+| PRD-EGC-012 | REQ-EGC-011 | Endpoint DEX |
+| PRD-EGC-013 | REQ-EGC-012 | Browser synthetics |
+| PRD-EGC-014 | REQ-EGC-013 | Customer-operated outside-in probes |
+| PRD-EGC-015 | REQ-EGC-014 | Regional federation |
+| All applicable PRD-EGC capabilities | REQ-EGC-015 | Source/control health, lag, errors and capacity |
 
 ---
 

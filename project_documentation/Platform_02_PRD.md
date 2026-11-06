@@ -665,7 +665,7 @@ Platform shall support:
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
-- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and reduce false path-change artifacts from ECMP where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
 - TCP/DNS/TLS/HTTP validation where relevant.
 - Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
 
@@ -2357,6 +2357,14 @@ Acceptance criteria apply to the selected certification envelope. Before an init
 Phase 1 standalone certification is not gated by Core HA failover. When the Phase 1.5 HA certification envelope is selected, engineering/QA shall additionally prove:
 
 - Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity.
+
+### 42.1 Requirement, journey and screen acceptance binding
+
+For each capability selected into a certification envelope, retain its existing `PRD-*`/`REQ-*` identity and bind the requirement to: actor and tenant/resource scope; trigger/preconditions; authoritative state/data owner; existing Dataflow or specialized flow; numbered UI workspace or named administrative subview; governed read/action contract; normal, denied, empty/no-data, partial, stale, conflict, timeout/cancel and recovery outcomes where applicable; audit/notification result; and reproducible acceptance evidence. A shared contract may be inherited explicitly; it must not conceal a capability-specific rule or leave the implementer to invent one.
+
+`Platform_06` §118 owns the operator-journey binding supplement; `Platform_09` §3/§4 and specialized masters own field/state/interaction semantics. Preserve UI-001..UI-098 and the registered routes. A route/title/tab entry is presentation coverage, not a functional dashboard, authenticated workflow, backend API or certification result.
+
+Two gates remain distinct. An essential unselected query, mutation, state, field/unit or authorization contract is a **documentation/design blocker** for that capability and must be resolved or explicitly held before implementation. An adequately specified but unimplemented API/session bridge, runtime integration or test is an **implementation/certification gate**; it does not make the normative requirement absent. Both must be visible in the existing traceability/build evidence, and neither is a pass inferred from green unrelated CI. No supported endpoint, performance measurement or production-ready screen may be invented to fill a binding.
 
 ---
 

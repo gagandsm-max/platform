@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-29 — Issue #269 Founder-approved Phase 2 Enterprise RFP Readiness full-set roadmap reconciliation; Mother Reference set remains v3.3.0 and v3.4.0 remains reserved for the separately gated set-wide tranche. Prior Issue #200/#202 Phase 1/1.5 envelope reconciliation and ACP-001..ACP-018 decisions retained.
+**Last reconciliation:** 2026-11-06 — Founder-directed P0 correction of the existing Mother References, baselined at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`; six-area acceptance remains `DOC_P0_BLOCKED` under §10.1. Issues #200/#202/#268/#269/#272 and ACP-001..ACP-018 remain governing scope. Set version remains v3.3.0; v3.4.0 is reserved for the separately gated set-wide tranche. Amendments become authoritative only after reviewed merge to canonical main.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -28,7 +28,7 @@
 - Capacity statements remain engineering targets until benchmark-certified. A capacity target is not benchmark certification.
 - Security/compliance readiness must never be represented as achieved certification until independently achieved. Security readiness is not compliance certification.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
-- A1 does not resolve Founder/commercial/legal-reserved conflicts (including any licence-grace day-count conflict between Mother References and external handover notes). Encountered conflicts remain unresolved until Founder change control.
+- Engineering MUST NOT invent a resolution to Founder/commercial/legal-reserved conflicts. First check recorded supersession: the 15-day post-expiry grace is already decided by the Founder on 2026-09-30 (`Platform_12` §22), so obsolete seven-day text requires correction, not a new commercial decision. Genuinely unresolved reserved matters remain blocked until Founder change control.
 
 ## 3. Maturity model
 
@@ -53,7 +53,7 @@ Unsupported combined spellings that accidentally imply a higher maturity without
 
 A logical table, API, topic, service or interface described in a Mother Reference does **not** prove it physically exists.
 
-Where implementation exists, documentation should eventually point to physical source evidence such as:
+An implementation-maturity claim MUST identify its exact source SHA and physical evidence for the claimed boundary, such as:
 
 - migration;
 - schema;
@@ -65,7 +65,7 @@ Where implementation exists, documentation should eventually point to physical s
 - benchmark;
 - CI evidence.
 
-Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1 establishes this rule; A2–A5 progressively attach evidence pointers without inventing architecture.
+Where production-path source is absent, status remains `SPECIFIED` / `NOT IMPLEMENTED`. Where evidence has not been inspected, status is `NOT VERIFIED`; lack of a pointer alone MUST NOT be misreported as proof that code is absent. A default-off implementation is not the same as an absent implementation. Structural normalization and historical layer checkmarks do not satisfy semantic or implementation evidence gates.
 
 ## 5. Exact Mother Reference set
 
@@ -166,7 +166,7 @@ Conflicts require documented change control.
 
 ## 8. Mandatory capability specification contract
 
-Every significant capability/sub-capability must eventually be specified against the following contract fields where applicable. Fields that are genuinely irrelevant may state **N/A with reason**. The contract must not encourage meaningless boilerplate.
+Every significant approved capability/sub-capability MUST satisfy the following applicable contract fields before documentation acceptance or implementation admission for that boundary. Shared behavior MAY be inherited by an exact owner/section reference plus capability-specific differences; copying all 83 fields into every document is not required. A genuinely irrelevant field MUST state **N/A with reason**. A material unknown MUST identify an owner, evidence required and blocked acceptance; a generic “as needed” or family-level link is insufficient.
 
 1. capability ID/name
 2. customer/operational outcome
@@ -252,7 +252,7 @@ Every significant capability/sub-capability must eventually be specified against
 82. owner of each unresolved decision
 83. blocking impact
 
-A1 makes this contract normative. Completing the field set for every capability across Platform_01..23 is A2–A5 work, not an A1 claim.
+The 2026-11-06 Founder directive makes complete, reviewed coverage across the six areas in §10.1 P0. Earlier A1/A2–A5 normalization labels describe document structure only; they do not defer this acceptance obligation or claim it has passed. Approved future-phase intent remains explicit and MUST NOT be promoted into an earlier phase. An unresolved in-scope contract remains a blocker even when its phase is recorded.
 
 ## 9. Fixed product/architecture decisions
 
@@ -311,7 +311,7 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
 - Exactly-two-Core Active/Standby HA remains P0 and not production-certified; Phase 1 certifies standalone Core only. No Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
 - Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
-- PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
+- Sensor telemetry durability remains at-least-once: PostgreSQL reservation/publisher lease, Kafka transactional publication, PostgreSQL finalization, then deletion-authorizing ACK. Current source includes publisher-lease arbitration; the old “no publisher lease” description is obsolete. Cross-store crash-window replay, downstream visibility/deduplication and declared failure-profile certification remain separate gates (`Platform_12` §16; `Platform_17`).
 
 ## 10. Completeness and global traceability
 
@@ -329,11 +329,19 @@ Machine-enforced structural protection is provided by:
 
 These are supporting governance artifacts, not Mother References.
 
+### 10.1 Six-area P0 documentation acceptance
+
+**Authority:** Founder directive 2026-11-06; adjudication and current baseline are recorded in `Platform_12` §29. The attached handover is a proposal, not a substitute for current-source review. The existing master set and root Build Register remain the owners; no additional TRD, flow, UI or schema master is authorized merely because a gap exists.
+
+`Platform_08` §4.1 is the canonical six-area acceptance matrix. Each approved requirement MUST trace to its phase, technical contract, applicable journey/UI, API/event/data/migration contract, test/operational acceptance and BUILD/module plan. Explicit nontechnical or non-UI applicability requires a reason. Every material missing binding, contradiction or unselected load-bearing decision blocks the affected area and therefore the programme.
+
+`DOC_P0_ACCEPTED` requires all six areas to pass at one reviewed source baseline, with no unresolved in-scope material gap, exact-head independent review, relevant validation/CI, reviewed merge and post-merge read-back. Until then the programme is `DOC_P0_BLOCKED`; no “partial but accepted” state exists. `SOURCE_RECONCILED` identifies a verified baseline, not complete documentation. A structural validator PASS cannot establish semantic completeness, implemented behavior or production readiness.
+
 ## 11. Explicit unresolved/P0 items
 
 Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026-09-21 handoff priority freeze. Restated here for navigation:
 
-- exact Counter64 typed pipeline (Sensor→Core→Kafka→ClickHouse) preserving full unsigned 64-bit source truth;
+- derived Counter64 delta/rate/reset/wrap/discontinuity behavior and its certification; the exact raw Sensor→Core→Kafka→ClickHouse path is already IMPLEMENTED+TESTED after PR #84 (§9), not an unresolved raw-transport design;
 - display timezone persistence/API/UI behavior (`display_timezone` preference, precedence, DST/report correctness);
 - generic recurring scheduling/freshness/deterministic spreading and production scheduler wiring (including SNMP);
 - failure-domain backoff, recovery ramp and resource-pressure deferral behavior;
@@ -417,7 +425,7 @@ Policy:
 
 For ChatGPT Project use, these **25 Markdown mother-reference files** are sufficient as the authoritative source set.
 For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
-Authority of the clone follows §12 after merge to the canonical GitHub repository.
+Authority of the clone follows §13 after merge to the canonical GitHub repository.
 
 OSS governance remains governed by `Platform_07_OSS_Catalog.md`:
 

@@ -86,9 +86,17 @@ All applicable dashboards inherit time range, timezone, compare period, auto-ref
 
 Every screen/panel must explicitly design: Loading, Empty, Partial Data, Stale Data, Permission Restricted, Not Licensed, Query Limited, Error, Monitoring Degraded and Normal. A blank panel is never an acceptable error state.
 
+These are presentation outcomes, not one mutually exclusive resource-health enum. Permission/entitlement, query lifecycle, evidence quality, capability readiness and monitored-object lifecycle remain separate dimensions. On an authoritative denial/revocation/expiry response or a session/scope change, the UI hides protected payloads, clears no-longer-authorized cached rows and disables affected actions. The backend reauthorizes every protected request regardless of cached UI state; stale client permission data never authorizes an action. Client detection timing depends on the approved session/expiry/revocation mechanism, which must be bound before acceptance; this rule does not imply instant detection of a server-side revocation. A query error may coexist with a clearly dated last-known value only while the approved authorization/cache contract permits its display and no authority-loss trigger has occurred. Maintenance/suppression is an explicit overlay with scope/window/reason; it neither repairs telemetry nor proves the resource healthy.
+
+An empty authorized inventory/filter result means no matching objects. `No Data` means an existing object has no qualifying observation for the selected scope/window. An unbound/unavailable source means the data provider is unavailable; it is not an empty estate. A measured zero is shown as zero only when the source contract supplies valid evidence. `Normal` means query/data presentation completed normally, not `DEVICE_UP`/`HOST_UP`. Unknown or insufficient evidence remains explicit, including `INCONCLUSIVE` RCA and OIV `INSUFFICIENT EVIDENCE`. No missing, stale, partial, suppressed or collector-failed evidence is converted directly to DOWN.
+
+The implementation's `screen-state.ts` and health-overview presentation types already separate several of these cases; the rules above define required composition, not a claim that every screen implements it. Each frozen manifest must give examples for every applicable state and specify which actions remain enabled, why others are disabled, affected source/time and safe retry/cancel behavior.
+
 ### 3.3 Accessibility/readability
 
 Support Light/Dark/System theme; Compact/Comfortable/Large density; keyboard navigation; scalable typography; accessible contrast; status icon/text in addition to color; and NOC TV/full-screen layouts. Full admin/studios are desktop-first; mobile/tablet supports dashboards, alerts, incidents, acknowledgement and investigation summaries.
+
+Acceptance is observable: keyboard-only users can reach and operate every enabled control; tabs expose selected state and support arrow/Home/End navigation; drawers/dialogs have a named heading, preserve a logical focus order and return focus to their launching control on close. Modal confirmation retains focus inside its scope while open. Loading and result/error messages are announced without repeated interruption; a static unbound preview is not an assertive alarm. Labels identify units, timezone, required input and validation error without relying on placeholder text or color. Text zoom, supported theme/density and each declared desktop/tablet/mobile/wallboard layout must preserve critical values, errors and authorized actions without overlap or clipped controls; tables may use a labelled bounded scroll region. Each screen's frozen manifest declares supported viewport/layout cases and verification evidence. A responsive foundation alone does not certify all 98 screens.
 
 ### 3.4 NOC Operational Troubleshooting Experience
 
@@ -159,6 +167,16 @@ Stable customer outcomes distinguish timeout/path, unknown v3 user, auth mismatc
 **Polling policy.** Monitoring Profile/Adaptive Polling UI exposes normal/adaptive interval, cooldown, maximum duration, target scope, retry/bulk policy where configurable, projected Sensor impact and effective inherited policy. The normal SNMP operational-metric default is **5 minutes**; the UI must make clear that this does not require every available OID every five minutes and that availability/liveness remains a separate plane. Unsafe settings are warned or blocked by capacity/policy.
 
 **SNMP SET.** Routine SNMP Test/monitoring UI is read-only. Any supported SET action appears only in an explicitly privileged NCM/remediation workflow with authorization, reason/ticket/approval where required, pre/post value evidence and audit.
+
+### 3.6 Shared read, action and context contract
+
+Every frozen view declares its authoritative query/read-model owner. Current configuration, authorization, workflow and other operational state use their owning contracts; eligible historical telemetry uses the selected ClickHouse raw/rollup resolution. A screen may combine these through governed APIs without turning ClickHouse, Valkey or browser state into a new authority. Query contracts specify supported filters/sorts, deterministic ordering, time-window semantics, units/precision/nullability, default and maximum page/row/scan/time bounds, freshness/provenance and explicit truncation. Server pagination and rendered-row virtualization solve different limits; neither authorizes downloading the entire estate into the browser. No data-source assumption follows from a screen's title.
+
+Every enabled action declares target identity/revision, current server permission and entitlement, allowed parameters, validation, risk/reason/confirmation or approval where required, idempotency/conflict behavior, asynchronous status and cancellation/recovery evidence. A request accepted into a job is not completed work. Cancel requested, cancelled, partially applied, validation failed and rollback unsupported must not be rendered as success. Unsupported actions are absent or explicitly unavailable with an actionable reason; a generic “Apply” label never grants an unspecified mutation.
+
+Drill-downs preserve authorized tenant/site, selected object, time range, display timezone, filters and incident/investigation context when applicable. A detail destination lacking a required object shows a bounded selector or a clear context-required state; it must not guess an entity. Back/close returns to the prior list/tab/selection/focus. Context is revalidated on navigation and shared-link open. Credentials, tokens and sensitive evidence are never placed in URLs. The source route path remains stable; each manifest freezes the allowed context serialization and query/action references before implementation.
+
+These rules are inherited by §5. Domain-specific columns and actions are additional minimum behavior, not an exhaustive substitute for the frozen per-view contract. Missing essential field/query/action semantics remain a documentation/design HOLD. A fully specified contract awaiting source integration is an implementation HOLD, a separate condition.
 
 
 ## 4. Dashboard Studio
@@ -486,6 +504,49 @@ Semantic review of each §5 Purpose/Tabs/Actions found eight classifications whe
 | UI-097 | Runbook Library | `GOVERNANCE` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 | UI-098 | Device / Time Comparison | `ANALYTICAL_DASHBOARD` | CLASSIFIED; PANEL MANIFEST NOT FROZEN | PARTIAL / WORKSPACE RUNTIME PENDING | WME + QMC + VIS + DOMAIN | R2 DOMAIN MANIFEST AFTER R1 |
 
+### 4.12 Source binding checkpoint and manifest closure
+
+**Checkpoint:** repository `gagandsm-max/platform`, main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`, reviewed 2026-11-06. This records the source baseline, not a live deployment or certification claim. `ui/src/platform/workspace-registry.ts` contains exactly 98 `UI-001..UI-098` entries, all `PENDING_BACKEND`; preserve each existing `uiCode` → `path` association. `ui/src/platform/primary-navigation.ts` separately contains fourteen sidebar categories, six Studio children and `/provisioning` under Inventory. Category paths are not aliases for similarly named numbered screens; `/provisioning` is not UI-089 Migration Studio.
+
+`ui/src/App.tsx` uses identity-free `FOUNDATION_ACCESS` for presentation only. `WorkspacePage.tsx` does not bind a live data-state provider. UI-009/UI-029 have dedicated unbound health view models; the other routes use the generic host. Their accessible shell/state behavior does not prove authenticated interaction, live telemetry, aggregate health, action APIs or completed manifests. Do not replace pending capability with fabricated metrics or green health.
+
+The R1 representative source routes are:
+
+| UI ID | Existing route | Binding status at checkpoint |
+|---|---|---|
+| UI-001 | `/executive-cio-overview` | Presentation only; value/aggregate query contract pending |
+| UI-003 | `/noc-command-center` | Presentation only; wallboard queries pending |
+| UI-009 | `/network-health-overview` | Dedicated unbound presentation; aggregate health API pending |
+| UI-010 | `/network-device-detail` | Presentation only; entity context and governed detail bindings pending |
+| UI-017 | `/network-flow-traffic-analytics` | Presentation only; bounded Flow query contract pending |
+| UI-029 | `/infrastructure-health-overview` | Dedicated unbound presentation; aggregate health API pending |
+| UI-042 | `/database-estate-overview` | Presentation only; estate query contract pending |
+| UI-048 | `/kubernetes-overview` | Presentation only; estate/query binding pending |
+| UI-055 | `/alert-console` | Presentation only; qualified-alert read/action bindings pending |
+| UI-057 | `/incident-detail` | Presentation only; incident context and read/action bindings pending |
+| UI-058 | `/rca-investigation-workspace` | Presentation only; versioned evidence/read/action bindings pending |
+| UI-066 | `/ipam-overview` | Presentation only; IPAM read/action bindings pending |
+| UI-073 | `/sensor-estate-overview` | Presentation only; estate/control read/action bindings pending |
+| UI-076 | `/telemetry-quality` | Presentation only; quality query binding pending |
+| UI-083 | `/audit-explorer` | Presentation only; governed audit search/export binding pending |
+| UI-088 | `/shift-handover` | Presentation only; handover state/read/action bindings pending |
+| UI-092 | `/data-pipeline-integrity` | Presentation only; interval/stream reconciliation query binding pending |
+
+The complete existing route inventory remains the pinned source registry; the table does not allocate new IDs or waive the remaining 81 manifests. R1/R2 are design-proof sequencing labels, not release phases. The two R1 schema fixtures remain subject to their existing contracts and are not additional numbered screens.
+
+Verified backend foundations are distinct from UI integration:
+
+| Existing source contract | Implemented boundary | What is not established by it |
+|---|---|---|
+| `core/.../api/EntityController.java` at `/api/v1/tenants/{tenantId}/entities` | Entity CRUD/identifier/group/tag operations and bounded list reads | Aggregate estate-health, all declared filters/sorts, monitor creation or a connected screen |
+| `core/.../api/DiscoveryController.java` at `/api/v1/tenants/{tenantId}/discovery` | Create/read/list/cancel a Discovery request; read candidates/evidence | Recurring schedule CRUD/dispatch and candidate Approve/Reject/Exclude mutation contracts |
+| `core/.../api/EntityMetricObservationController.java` at `/api/v1/tenants/{tenantId}/entities/{entityId}/metric-observations` | Bounded per-entity typed observations with quality, freshness, provenance and truncation | Estate aggregate health, derived rate/availability or integrated UI |
+| `core/.../domain/discovery/scheduling/DiscoveryOccurrenceCalculator.java` | Pure calendar occurrence calculation | Persisted schedules, execution ownership, dispatch or recurrence UI |
+
+The abbreviated Java prefix above is `core/src/main/java/com/platform/core/`. Supported endpoint claims must be checked against the exact controller/DTO and current security route mapping; this checkpoint is not a new API specification. Existing paged domain APIs use `PageResult` (default 50, maximum 200); do not extend those numbers to unrelated query contracts without their owner.
+
+**Manifest closure record:** for each existing UI ID/view, bind the governing requirement(s), class-specific definition, registered route/context, domain-specific fields/units/states, QMC/query reference, action/permission/entitlement contract, layout/responsive behavior and test/evidence references. Record two independent statuses: **normative contract complete or documentation HOLD**, and **implementation/certification state**. An essential query/action/field/state choice still unselected cannot be passed merely by labelling runtime pending. Conversely, an adequate normative contract is not defective solely because implementation has not started. The owner is the existing domain BUILD plus BUILD-110..118 UI work, as sequenced in the Master Build Register; no duplicate registry service or new master is created here. §4.11's unfrozen manifests remain HOLD until these bindings are reviewed.
+
 
 ## 5. Dashboard/workspace screen specifications
 
@@ -543,7 +604,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -605,7 +666,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -655,7 +716,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -707,7 +768,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -762,7 +823,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -836,7 +897,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -906,7 +967,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -973,7 +1034,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1058,7 +1119,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1136,7 +1197,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1210,7 +1271,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1285,7 +1346,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1360,7 +1421,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1432,7 +1493,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1503,7 +1564,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1575,7 +1636,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1628,16 +1689,14 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Interface
 
 **Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+- Observation window and source freshness/quality
+- Source and destination address/subnet with authorized enrichment
+- Protocol and source/destination port where applicable
+- Exporter / observation domain / Sensor and source interface
+- Direction, VRF and site context where supplied
+- Bytes, packets and interval-derived bit/s or packet/s with explicit units
+- Sampling/template quality and estimated-versus-observed label
+- Application/ASN classification with source/provenance where supported
 
 **Actions (subject to RBAC, scope and entitlement):**
 - Open contextual entity/detail
@@ -1653,13 +1712,15 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - View topology
 - View alerts/incidents
 
+**Domain contract:** Flow filters and grouping must not silently mix incompatible sampling, direction, observation windows or exporter domains. Unknown application/ASN/interface identity remains unknown. Derived rates use the actual qualified interval; raw counts and estimated sampled totals are labelled separately. This contract does not imply packet/DPI payload access.
+
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
 **Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1737,7 +1798,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1815,7 +1876,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1860,16 +1921,15 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - VRF
 
 **Primary table/list columns where applicable:**
-- Entity/Link
-- IP/Identifier
-- Site
-- Vendor/Model
-- Status
-- Availability
-- Primary KPI
-- Sensor
-- Active alerts
-- Last update
+- Canonical device / routing instance / VRF
+- Peer identity and observed address
+- Local ASN and peer ASN
+- Peer session state and last transition
+- Session uptime / age with units
+- Received/advertised/accepted prefix counts where exposed
+- Flap count and explicit observation window
+- Related BFD/interface evidence and freshness
+- Collection source, quality and last successful observation
 
 **Actions (subject to RBAC, scope and entitlement):**
 - Open contextual entity/detail
@@ -1888,13 +1948,15 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - View/backup configuration (RBAC)
 - Run monitoring test/poll now (RBAC)
 
+**Domain contract:** A stale or unavailable BGP collection does not prove the peer is down. Prefix counters with different provider meanings are not merged into an unlabeled total; unsupported counters remain unavailable.
+
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
 **Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -1967,7 +2029,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2041,7 +2103,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2118,7 +2180,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2190,7 +2252,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2270,7 +2332,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2343,7 +2405,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2415,7 +2477,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2487,7 +2549,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2563,7 +2625,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2633,7 +2695,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2702,7 +2764,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2741,30 +2803,25 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Host/Entity
-- OS/Platform
-- Site
-- CPU
-- Memory
-- Disk/Storage
-- Network
-- Monitoring method
-- Status
-- Alerts
+- Canonical host and process/service technical identity
+- Stable monitor selector / service unit or service name
+- Display name and authorized redacted command context
+- Current PID(s) as runtime evidence only
+- Observed process/service state and expected instance range
+- CPU utilization (%) and memory (bytes or explicitly labelled %), where supported
+- Restart count/rate and declared observation window
+- Effective Monitoring Profile/version and assignment source
+- Collector method, observation time and quality
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping/Traceroute where applicable
-- Agent/WinRM/SSH test
-- Create maintenance
-- View processes/services
-- View RCA
+- Open host/process/service detail
+- Monitor with stable-selector, condition and policy/capacity preview
+- Edit supported monitor conditions/profile with current authorization
+- Stop Monitoring with reason and audit
+- Open bounded Diagnostics/Evidence where authorized
+- Open related alerts, history and audit; preserve shared permitted view/export actions
+
+**Domain contract:** Apply the Phase-1 endpoint operations amendment below. Monitoring does not authorize restart or remediation. PID is never the durable selector; absent/stale/denied evidence is distinct from a confirmed missing expected process.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -2772,7 +2829,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2813,30 +2870,22 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Host/Entity
-- OS/Platform
-- Site
-- CPU
-- Memory
-- Disk/Storage
-- Network
-- Monitoring method
-- Status
-- Alerts
+- Canonical chassis / managed entity and component identity
+- Management interface/vendor/model and certified source
+- Component type: CPU, DIMM, RAID, disk, PSU, fan, battery or other supported sensor
+- Observed component state and vendor-normalized severity
+- Sensor value with explicit unit and applicable threshold source
+- Firmware/lifecycle version where exposed
+- Observation time, source freshness and quality
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping/Traceroute where applicable
-- Agent/WinRM/SSH test
-- Create maintenance
-- View processes/services
-- View RCA
+- Open chassis/component/sensor detail
+- Inspect source/provenance and recent hardware events
+- Open related host, dependency, alert or investigation
+- Run an approved bounded read-only OOB diagnostic where supported
+- Preserve shared permitted view/report/export/history actions
+
+**Domain contract:** Power cycle, firmware change or device configuration is not implied by a health-screen action. Missing/denied OOB telemetry is monitoring degradation, not failed hardware.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -2844,7 +2893,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2917,7 +2966,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -2992,7 +3041,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3065,7 +3114,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3137,7 +3186,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3210,7 +3259,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3252,30 +3301,21 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Host/Entity
-- OS/Platform
-- Site
-- CPU
-- Memory
-- Disk/Storage
-- Network
-- Monitoring method
-- Status
-- Alerts
+- Canonical array / controller / pool / volume identity
+- Certified vendor/model/source and tenant/site context
+- Health, redundancy and replication state where exposed
+- Usable/used/free capacity in explicit bytes or labelled units
+- Read/write IOPS, throughput (bytes/s) and latency (ms), where supported
+- Capacity/latency observation window and aggregation
+- Dependencies, relevant alerts, source freshness and quality
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping/Traceroute where applicable
-- Agent/WinRM/SSH test
-- Create maintenance
-- View processes/services
-- View RCA
+- Open array/controller/pool/volume detail and dependencies
+- Compare qualified capacity/performance windows
+- Open replication/hardware evidence and related investigation
+- Preserve shared permitted view/report/export/history actions
+
+**Domain contract:** This monitors customer storage. Platform’s own retention/protection policy is UI-093; neither view gains array provisioning or deletion authority from a generic Apply action.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -3283,7 +3323,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3324,30 +3364,23 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Host/Entity
-- OS/Platform
-- Site
-- CPU
-- Memory
-- Disk/Storage
-- Network
-- Monitoring method
-- Status
-- Alerts
+- Fabric, switch and port identity
+- WWN / port WWN and zone membership where exposed
+- Link/admin/operational state with provenance
+- Negotiated link speed and throughput with explicit bit/s units
+- Utilization (%) with declared denominator
+- Error/discard/congestion counters and qualified interval
+- Related host/storage paths and source confidence
+- Observation time, freshness and collection quality
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping/Traceroute where applicable
-- Agent/WinRM/SSH test
-- Create maintenance
-- View processes/services
-- View RCA
+- Open fabric/switch/port/zone detail
+- Inspect related host/storage path and historical evidence
+- Compare supported link/error/congestion intervals
+- Open related alert/investigation and audit
+- Preserve shared permitted view/report/export actions
+
+**Domain contract:** Zone or port configuration changes require their separately approved privileged workflow. SAN membership, unavailable collection and actual link failure are different states; this view does not use host CPU/WinRM semantics as its primary contract.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -3355,7 +3388,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3396,30 +3429,21 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Host/Entity
-- OS/Platform
-- Site
-- CPU
-- Memory
-- Disk/Storage
-- Network
-- Monitoring method
-- Status
-- Alerts
+- Site / room / rack / device / sensor identity
+- UPS/PDU/power/cooling/environment sensor type
+- Current value and native/normalized unit (for example °C, % humidity or W)
+- Source-normalized state and applicable threshold/policy
+- Power/cooling redundancy or battery state where supported
+- Observation window/time, source freshness and quality
+- Related affected equipment and active alerts
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Investigate
-- Ping/Traceroute where applicable
-- Agent/WinRM/SSH test
-- Create maintenance
-- View processes/services
-- View RCA
+- Open environmental device/sensor and related equipment
+- Inspect qualified history, threshold source and provenance
+- Open related alert/investigation
+- Preserve shared permitted view/report/export/history actions
+
+**Domain contract:** No-data/unsupported sensor values are not zero temperature, zero load or healthy power. Outlet switching, power cycling and cooling control are not authorized by this monitoring screen.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -3427,7 +3451,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3497,7 +3521,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3563,7 +3587,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3637,7 +3661,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3710,7 +3734,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3783,7 +3807,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3855,7 +3879,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3930,7 +3954,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -3992,7 +4016,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4060,7 +4084,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4125,7 +4149,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4165,28 +4189,20 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status/Severity
 
 **Primary table/list columns where applicable:**
-- Test/Target
-- Location
-- Type
-- Availability
-- Latency
-- Validation result
-- SLA
-- Last run
-- Status
+- Endpoint/service and port with observed TLS identity
+- Certificate subject / SAN and issuer where available
+- Validity start/end as timestamps and computed days remaining
+- Chain validation, hostname match and applicable TLS policy result
+- Observed fingerprint/serial and chain depth where permitted
+- Probe/source vantage, last observed and quality
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Run test now
-- Investigate failure
-- Create maintenance
-- Open target entity
-- View SLA
+- Open endpoint/certificate chain and validation evidence
+- Run an approved bounded certificate/TLS check
+- Open expiry/policy alert and related service context
+- Preserve shared permitted view/report/export/history actions
+
+**Domain contract:** A failed probe or unavailable chain is distinct from an observed invalid certificate. Monitoring exposes public certificate evidence only; private key export or certificate rotation is not implied.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -4194,7 +4210,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4261,7 +4277,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4330,7 +4346,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4407,7 +4423,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4485,7 +4501,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4559,7 +4575,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4642,7 +4658,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4715,7 +4731,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4757,30 +4773,22 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - RCA status/confidence
 
 **Primary table/list columns where applicable:**
-- Time
-- Severity/Type
-- State
-- Entity
-- Site
-- Summary
-- Confidence/RCA state
-- Owner
-- Incident/ITSM
-- Duration
+- Maintenance/suppression record ID and current revision
+- Authorized tenant/resource scope and affected-object preview
+- Lifecycle state: scheduled, active, ended, cancelled or expired as applicable
+- Start/end, execution timezone and recurrence where supported
+- Reason/ticket, creator and required approval state
+- Suppressed alert/notification effects separately from monitoring evidence
+- Next occurrence / actual activation / end time and audit reference
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Acknowledge (RBAC)
-- Assign (RBAC)
-- Investigate
-- Create/attach incident
-- Create maintenance/suppression (RBAC)
-- Open ITSM ticket/context
+- Create or edit a permitted window with scope/effect preview and expected revision
+- Confirm reason/ticket and approval where policy requires
+- Cancel a scheduled window or request early end of an active window
+- Inspect affected alerts and preserved underlying evidence
+- Open recurrence/history/audit; preserve shared permitted view/report/export actions
+
+**Domain contract:** Show the effective interval and timezone before save. A stale edit returns a visible revision conflict; cancellation/early-end status remains pending until the authoritative transition is confirmed. Expiry restores ordinary qualification/notification behavior according to policy without deleting suppressed evidence or asserting recovery. Maintenance is not alert acknowledgement.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -4788,7 +4796,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4860,7 +4868,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -4934,7 +4942,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5005,7 +5013,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5074,7 +5082,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5143,7 +5151,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5212,7 +5220,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5275,7 +5283,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5341,7 +5349,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5407,7 +5415,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5472,7 +5480,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5545,7 +5553,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5612,7 +5620,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5682,7 +5690,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5748,7 +5756,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5818,7 +5826,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5890,7 +5898,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -5961,7 +5969,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6032,7 +6040,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6102,7 +6110,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6169,7 +6177,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6209,27 +6217,22 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - ITSM status
 
 **Primary table/list columns where applicable:**
-- Connector
-- Type
-- State
-- Queue
-- Success rate
-- Latency
-- Last success
-- Last error
+- Platform incident/change identity and external binding ID
+- Connector instance, external system and external object key/link
+- Platform monitoring/incident state
+- External ITSM lifecycle state, displayed separately
+- Synchronization direction, mapping/version and last attempted operation
+- Delivery result, retry/dead-letter/conflict state and correlation ID
+- Last successful synchronization and source freshness
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Test connector
-- Retry failed item
-- Pause/enable connector (RBAC)
-- Open mapping
-- View audit
+- Open authorized Platform object and external-object link
+- Inspect sanitized delivery history, mapping and conflict evidence
+- Request an authorized idempotent retry/reconcile through the Integration owner
+- Open connector health/test sandbox and audit
+- Preserve shared permitted view/report/export actions
+
+**Domain contract:** An external closed/resolved ticket cannot mark the monitored resource UP or replace Platform recovery qualification. Retry is unavailable until the existing outbox/inbox contract and current permission authorize it; duplicate delivery must not create a duplicate external incident.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -6237,7 +6240,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6306,7 +6309,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6374,7 +6377,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6444,7 +6447,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6513,7 +6516,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6574,7 +6577,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6633,7 +6636,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6695,7 +6698,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6756,7 +6759,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6816,7 +6819,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6876,7 +6879,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6915,13 +6918,13 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status
 
 **Primary table/list columns where applicable:**
-- Scope/Entity
-- State
-- Finding
-- Risk/Impact
-- Owner
-- Recommended action
-- Last update
+- Tenant/source/Sensor and stream lineage or other canonical ingestion scope
+- Explicit reconciliation interval and evidence watermark
+- Produced and durably accepted counts at the named boundaries
+- Kafka committed / processed / inserted counts with their exact contract meaning
+- Rejected, duplicate, late and dropped counts with reason/source
+- Unresolved backlog, missing accounting evidence and collection quality
+- Last reconciliation and supporting evidence/audit references
 
 **Actions (subject to RBAC, scope and entitlement):**
 - Open contextual entity/detail
@@ -6934,13 +6937,15 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Apply only with RBAC/approval
 - Open audit/history
 
+**Domain contract:** Counters from different windows, streams or ACK boundaries cannot be subtracted as if they measure the same population. Missing accounting evidence is UNKNOWN, not a zero-loss assertion. This view never changes frozen ACK semantics or claims end-to-end exactly-once delivery from visual equality.
+
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
 **Data-quality behavior:** Show telemetry freshness/quality and distinguish `No Data`, `Stale`, `Monitoring Degraded`, `Suppressed/Maintenance` and real operational failure. Never convert missing telemetry directly into a device-down assertion.
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -6974,24 +6979,25 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Status
 
 **Primary table/list columns where applicable:**
-- Scope/Entity
-- State
-- Finding
-- Risk/Impact
-- Owner
-- Recommended action
-- Last update
+- Volume/deployment role and affected tenant/data-class scope
+- Usable capacity, current usage and measurement time/quality
+- Measured daily growth and requested/effective retention by data class
+- Calculator/model version, assumptions and uncertainty uplift
+- Forecast required space, headroom/shortfall and confidence/UNKNOWN state
+- Planning target versus fixed emergency-protection state
+- Protected metadata, legal/investigation holds and eligible reclamation
+- Last policy revision/change, purge outcome and audit reference
+- Customer notification state, delivery attempt/result and next retry/escalation
 
 **Actions (subject to RBAC, scope and entitlement):**
-- Open contextual entity/detail
-- Save view
-- Share permitted view
-- Export
-- Create/Schedule report
-- Add annotation where time-series context exists
-- Review recommendation
-- Apply only with RBAC/approval
-- Open audit/history
+- Open the canonical per-volume capacity calculator preview
+- Compare requested retention against the qualified model and available headroom
+- Preview a retention-policy change and protected/affected data before confirmation
+- Apply only a currently authorized, revision-checked policy change with reason and required approval
+- Inspect purge/hold history, risk notifications and actual delivery outcomes
+- Preserve shared permitted view/report/export/history actions
+
+**Domain contract:** The calculator is owned by Platform_11 §9–11 and Platform_05 §37, including the approved #292 storage assurance: at least 20% uncertainty uplift, a separate 70% planned-utilization goal and fixed non-disableable 80% emergency protection. Display measured inputs, assumptions and the resulting per-volume recommendation; missing measurements remain UNKNOWN. Do not promise universal 180-day retention or a customer SLA. A policy preview shows requested/effective retention, growth/shortfall, protected data and legal-hold conflict. Apply requires current authorization and the same reviewed policy revision; a changed estimate/scope is shown before confirmation. Capacity/retention risk notifications expose generated, queued, delivered or failed/retrying outcome according to the Notification/Integration contract: generated is not delivered. Delivery failure remains visible and auditable. No action disables the 80% safety rule or silently deletes protected data.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -6999,7 +7005,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -7058,7 +7064,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -7119,7 +7125,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -7181,7 +7187,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -7241,7 +7247,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
@@ -7303,7 +7309,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Empty/error behavior:** Empty state explains why no entities match and offers filter reset/onboarding action where authorized. Errors show an actionable reason, error/correlation ID and retry/diagnostic path; partial data identifies the affected source/Sensor.
 
-**Performance:** Default query uses the appropriate ClickHouse rollup resolution for the selected time range, applies bounded row/scan limits and uses server-side pagination/virtualization for large lists.
+**Performance:** Apply §3.6 with this view’s authoritative read/query contract, bounded server pagination and rendered-row virtualization where needed. Use time-series rollups only for eligible historical telemetry; disclose truncation and stale/partial results.
 
 ---
 
