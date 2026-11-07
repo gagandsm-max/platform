@@ -1185,8 +1185,8 @@ func TestIssue302AdmissionHealthCannotMaskLossOrRecovery(t *testing.T) {
 		{"recovery", scheduler.AdmissionStatus{RecoveryRequired: true}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
 		{"uncertain", scheduler.AdmissionStatus{UncertainObservations: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
 		{"write_blocked", scheduler.AdmissionStatus{WriteBlocked: true, BacklogFragments: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_BLOCKED"},
-		{"blocked_with_loss", scheduler.AdmissionStatus{WriteBlocked: true, BacklogFragments: 1, DroppedObservations: 2}, 503, "NOT_READY", "COLLECTION_ADMISSION_LOSS"},
-		{"recovery_with_backlog", scheduler.AdmissionStatus{RecoveryRequired: true, BacklogFragments: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_BACKLOG"},
+		{"blocked_with_loss", scheduler.AdmissionStatus{WriteBlocked: true, BacklogFragments: 1, DroppedObservations: 2}, 503, "NOT_READY", "COLLECTION_ADMISSION_BLOCKED"},
+		{"recovery_with_backlog", scheduler.AdmissionStatus{RecoveryRequired: true, BacklogFragments: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
 		{"recovered_capacity", scheduler.AdmissionStatus{FailedAttempts: 1, RejectedAttempts: 1, DurableObservations: 3}, 200, "UP", ""},
 	}
 	for _, tc := range cases {
@@ -1197,8 +1197,22 @@ func TestIssue302AdmissionHealthCannotMaskLossOrRecovery(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertReady(t, s, tc.code, tc.state, tc.code == 200, tc.reason)
+			readyBody := assertReady(t, s, tc.code, tc.state, tc.code == 200, tc.reason)
 			body := assertHealth(t, s, tc.code, tc.state, tc.reason)
+			w := httptest.NewRecorder()
+			s.httpSrv.Handler.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/healthz", nil))
+			if w.Code != tc.code {
+				t.Fatalf("healthz code=%d want=%d", w.Code, tc.code)
+			}
+			for _, evidence := range []map[string]any{readyBody, body, decodeBody(t, w)} {
+				reasons, _ := json.Marshal(evidence["reason_codes"])
+				if tc.admission.BacklogFragments > 0 && !strings.Contains(string(reasons), "COLLECTION_ADMISSION_BACKLOG") {
+					t.Fatalf("secondary backlog evidence missing: %s", reasons)
+				}
+				if tc.admission.DroppedObservations+tc.admission.DroppedErrors > 0 && !strings.Contains(string(reasons), "COLLECTION_ADMISSION_LOSS") {
+					t.Fatalf("secondary loss evidence missing: %s", reasons)
+				}
+			}
 			counters := body["counters"].(map[string]any)
 			if counters["admission_dropped_observations"] != float64(tc.admission.DroppedObservations) || counters["admission_backlog_bytes"] != float64(tc.admission.BacklogBytes) {
 				t.Fatalf("lost counters: %v", counters)

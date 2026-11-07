@@ -439,17 +439,24 @@ func TestIssue302WriteRejectionHealthStateAndRecovery(t *testing.T) {
 		if st := s.Status().Admission; !st.WriteBlocked || st.BacklogObservations == 0 || q.Stats().AtCapacity {
 			t.Fatalf("byte rejection below exact capacity not exposed: %+v queue=%+v", st, q.Stats())
 		}
-		records, err := q.ReadBatch(100, 10000)
-		if err != nil {
-			t.Fatal(err)
+		// The 2000-byte ceiling fits one serialized record at a time. Exercise
+		// repeated partial recovery without assuming two payloads fit on disk.
+		for i := 0; i < 3 && s.Status().Admission.BacklogObservations > 0; i++ {
+			records, err := q.ReadBatch(100, 10000)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(records) == 0 {
+				t.Fatal("capacity fixture admitted no prefix")
+			}
+			if err := q.CommitAccepted(records, records[len(records)-1].Sequence); err != nil {
+				t.Fatal(err)
+			}
+			s.flushPending()
+			if st := s.Status().Admission; int(st.DurableObservations)+st.BacklogObservations != 3 || st.DroppedObservations != 0 {
+				t.Fatalf("partial recovery accounting: %+v", st)
+			}
 		}
-		if len(records) == 0 {
-			t.Fatal("capacity fixture admitted no prefix")
-		}
-		if err := q.CommitAccepted(records, records[len(records)-1].Sequence); err != nil {
-			t.Fatal(err)
-		}
-		s.flushPending()
 		if st := s.Status().Admission; st.WriteBlocked || st.BacklogObservations != 0 || st.DurableObservations != 3 {
 			t.Fatalf("capacity recovery failed: %+v", st)
 		}
