@@ -1,5 +1,30 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-PRV -->
+#### Formal requirements — `REQ-PRV` family
+
+Governing locator: Discovery / onboarding / identity governance sections. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-PRV-001` | UI-only customer provisioning: individual, CSV/XLSX bulk and auto discovery |
+| `REQ-PRV-002` | Optional user display name and description; auto-derive when blank |
+| `REQ-PRV-003` | Do not use IP alone as canonical identity |
+| `REQ-PRV-004` | Credential Profiles; avoid secrets in CSV |
+| `REQ-PRV-005` | CSV/XLSX staging, normalization, duplicate/error/warning classification |
+| `REQ-PRV-006` | Sensitive-field whitespace never silently modified |
+| `REQ-PRV-007` | Preflight Diagnostic Engine with actionable failure evidence/remediation |
+| `REQ-PRV-008` | Diagnostics execute from actual selected Sensor |
+| `REQ-PRV-009` | Required firewall/connectivity matrix export |
+| `REQ-PRV-010` | Discovery review queue before licensing/monitoring |
+| `REQ-PRV-011` | IP/CIDR/seed/site/IPAM scope + exclusions |
+| `REQ-PRV-012` | Provisioning capacity simulation before activation |
+| `REQ-PRV-013` | Provisioning jobs support Fix & Retry |
+| `REQ-PRV-014` | Environment/Deployment Readiness Test |
+| `REQ-PRV-015` | Asset lifecycle/reconciliation and no automatic deletion |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-PRV -->
+
 **Document ID:** PLATFORM-ONBOARDING-001
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
@@ -862,49 +887,3 @@ Phase-2 closure SHALL require exact discovery/onboarding identity for vendor pac
 Phase 2.5 planning SHALL extend canonical identity to instrumented applications/services/instances/runtimes, browser/mobile application identities where governed, capture sources/interfaces/TAPs/packet brokers and decoded conversations/transactions linked back to canonical services/entities.
 
 Deep-observability sources must reconcile to existing identity authority; they may not create a parallel CMDB or service graph.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-ONB-001`
-- `REQ-ONB-002`
-- `REQ-ONB-003`
-- `REQ-ONB-004`
-- `REQ-ONB-005`
-- `REQ-ONB-006`
-- `REQ-ONB-007`
-- `REQ-ONB-008`
-- `REQ-ONB-009`
-- `REQ-ONB-010`
-- `REQ-ONB-011`
-- `REQ-ONB-012`
-- `REQ-ONB-013`
-- `REQ-ONB-014`
-- `REQ-ONB-015`
-- `REQ-ONB-016`
-- `REQ-ONB-017`
-- `REQ-ONB-018`
-- `REQ-ONB-019`
-- `REQ-ONB-020`
-- `REQ-PRV-001`
-- `REQ-PRV-002`
-- `REQ-PRV-003`
-- `REQ-PRV-004`
-- `REQ-PRV-005`
-- `REQ-PRV-006`
-- `REQ-PRV-007`
-- `REQ-PRV-008`
-- `REQ-PRV-009`
-- `REQ-PRV-010`
-- `REQ-PRV-011`
-- `REQ-PRV-012`
-- `REQ-PRV-013`
-- `REQ-PRV-014`
-- `REQ-PRV-015`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

@@ -97,7 +97,7 @@ Service-control stop/drain and file replacement shall tolerate Windows sharing/l
 
 ### 4.5 Offline bundles
 
-Air-gapped release bundle contains packages, dependencies/repository metadata as required, SBOMs, notices, checksums, signatures/certificates, upgrade/rollback metadata and documentation. No runtime internet download is required.
+**`REQ-OSS-008`:** Air-gapped release bundle contains packages, dependencies/repository metadata as required, SBOMs, notices, checksums, signatures/certificates, upgrade/rollback metadata and documentation. No runtime internet download is required.
 
 ### 4.6 Uninstall semantics
 
@@ -194,3 +194,11 @@ The pipeline stages above are normative release requirements, not a claim that e
 | BUILD-018/019/126/127/129/134 release artifacts and manifest | Signed Linux packages, Windows MSI/BAT wrappers for the approved mandatory Windows Phase-1/first-GA scope, SBOM/notices/provenance, offline bundle, install/upgrade/rollback and native recovery evidence. | Main source/runtime tests and operator-reported clean package worktree status cannot stand in for these artifacts or acceptance. A bounded Linux package certificate does not waive the Windows/full-product gate. Do not invent an installer invocation when no current accepted builder is present in the reviewed main. |
 
 Each package/release record must name source SHA/tree, artifact hash, target OS/architecture/profile, embedded dependency/probe provenance, signature verification, migration direction, mixed-version compatibility, rollback/restore limits, service identity/paths and executed acceptance evidence. Phase-1 standalone recovery/DR is mandatory; Phase-1.5 HA adds its fencing/replication/rejoin matrix. Whole cross-platform release acceptance remains separate from a bounded Linux package slice.
+
+### Signed packages, SBOM and supply-chain security — `REQ-SEC-004`
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-SEC-004` | Signed packages/updates, SBOM, CVE/license/secret scan, secret redaction |
+
+Release artifacts SHALL be signed, SBOM-covered and scanned for CVE/licence/secret issues before promotion. Secret redaction applies to support bundles, logs and release evidence. Documentation of the gate is not certification that every gate has already passed on a given SHA.

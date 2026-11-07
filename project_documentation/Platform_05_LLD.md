@@ -3508,27 +3508,3 @@ No physical schema in Phase 2 may assume full native APM span retention or full 
 Phase-2.5 implementation design SHALL explicitly bound per-tenant trace/profile/packet cardinality and ingest rate, sampling/capture policies and backpressure, durable storage classes and retention, PII/secret/payload redaction, raw-packet access and chain-of-custody, TLS-key handling where decryption is enabled, collector/agent failure semantics, service identity reconciliation, replay/idempotency and upgrade compatibility of instrumentation/capture components.
 
 No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unrestricted payload visibility, or mandatory TLS decryption.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-SCHED-001`
-- `REQ-SCHED-002`
-- `REQ-SCHED-003`
-- `REQ-SCHED-004`
-- `REQ-SCHED-005`
-- `REQ-SCHED-006`
-- `REQ-SCHED-007`
-- `REQ-SCHED-008`
-- `REQ-SCHED-009`
-- `REQ-CMDB-002`
-- `REQ-INT-009`
-- `REQ-NCM-007`
-- `REQ-SLS-003`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

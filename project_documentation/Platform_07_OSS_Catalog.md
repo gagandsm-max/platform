@@ -1,5 +1,22 @@
 # Platform — Authoritative Open-Source Software Catalogue
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->
+#### Formal requirements — `REQ-OSS` family
+
+Governing locator: OSS catalogue / licence policy sections. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-OSS-001` | Clean-room Platform independent of ThoughtData and NetAI |
+| `REQ-OSS-002` | Only approved OSS catalogue dependencies may ship |
+| `REQ-OSS-003` | Green permissive licenses generally allowed; Yellow review; Red blocked by default |
+| `REQ-OSS-004` | SBOM SPDX + CycloneDX, notices, license texts, provenance/checksums every release |
+| `REQ-OSS-005` | Transitive dependency license/CVE scan mandatory |
+| `REQ-OSS-006` | Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights |
+| `REQ-OSS-007` | Customer-supplied MIBs may be used for that customer but not automatically redistributed |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->
+
 **Document ID:** PLATFORM-OSS-001
 **Version:** 3.3.0
 **Status:** Authoritative Mother Reference — Dependency Allow-List Authority (**A2.3 NORMALIZED_V1**)
@@ -284,22 +301,3 @@ Roadmap inclusion is not dependency approval.
 This correction is bounded to verified source at GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`. `CURRENT_RUNTIME` identifies a dependency actually wired in a runtime source path, including an optional disabled-by-default path; it does not certify every deployment profile, activate that path, or grant commercial distribution approval. The source-admission restrictions in OSS-124 remain unchanged.
 
 OSS-004 Apicurio Registry and OSS-005/006 Avro/Protocol Buffers remain approved architecture with `APPROVED_NOT_IMPLEMENTED` current truth. Current JSON transport is not evidence that those dependencies were revoked, and their catalog approval is not evidence that a registry currently runs or that all physical messages use Avro/Protobuf. BUILD-063 and `Platform_17_API_Event_and_Data_Model_Contracts.md` own exact physical serialization, schema compatibility, migration/replay and registry-admission gates. No new runtime service or dependency is introduced by this documentation correction.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-OSS-001`
-- `REQ-OSS-002`
-- `REQ-OSS-003`
-- `REQ-OSS-004`
-- `REQ-OSS-005`
-- `REQ-OSS-006`
-- `REQ-OSS-007`
-- `REQ-OSS-008`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

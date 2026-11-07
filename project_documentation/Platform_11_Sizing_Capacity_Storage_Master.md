@@ -267,6 +267,30 @@ Existing BUILD-061/064/074/086/094/097/130 gates own this bounded specification;
 
 ## 10. Retention and rollups
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->
+#### Formal requirements — `REQ-DATA` family
+
+Governing locator: Data lifecycle / retention / storage-protection sections. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-DATA-001` | Customer-configurable raw retention by data type/scope |
+| `REQ-DATA-002` | Customer-configurable rollup resolution and rollup retention |
+| `REQ-DATA-003` | Numeric rollups preserve min/max/avg/count/percentiles as appropriate |
+| `REQ-DATA-004` | Counter and state metrics use correct rate/delta/availability semantics |
+| `REQ-DATA-005` | Automatic query resolution selection based on time range |
+| `REQ-DATA-006` | Hot/warm/archive capability and NFS/S3-compatible/customer archive destinations |
+| `REQ-DATA-007` | Mandatory Core 80% storage-protection watermark |
+| `REQ-DATA-008` | Mandatory Sensor 80% storage-protection watermark |
+| `REQ-DATA-009` | Emergency purge oldest eligible raw telemetry/flow/log before protected state |
+| `REQ-DATA-010` | Preserve recent operational window within safety limits |
+| `REQ-DATA-012` | Telemetry cardinality/explosion protection |
+| `REQ-DATA-013` | Deduplication, replay, late/out-of-order handling |
+| `REQ-DATA-014` | Legal hold/preserve incident evidence from purge |
+| `REQ-DATA-015` | Data pipeline integrity counters and no silent data loss |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->
+
 Customer admins configure by data type/scope:
 
 - raw retention;
@@ -460,31 +484,3 @@ Phase-2 customer acceptance profiles SHALL independently size device/CI count, i
 Phase-2.5 SHALL introduce separate capacity profiles for trace spans/transactions per second, unique services/resources and attribute cardinality, profile samples and symbol/storage overhead, RUM/mobile event rate, packet capture line rate, packets/bytes per second, decoded transaction rate, packet metadata retention, bounded raw-PCAP retention and query/replay concurrency.
 
 Core reference sizing MUST NOT be reused as an unqualified deep-observability sizing claim.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-DATA-001`
-- `REQ-DATA-002`
-- `REQ-DATA-003`
-- `REQ-DATA-004`
-- `REQ-DATA-005`
-- `REQ-DATA-006`
-- `REQ-DATA-007`
-- `REQ-DATA-008`
-- `REQ-DATA-009`
-- `REQ-DATA-010`
-- `REQ-DATA-011`
-- `REQ-DATA-012`
-- `REQ-DATA-013`
-- `REQ-DATA-014`
-- `REQ-DATA-015`
-- `REQ-CMDB-007`
-- `REQ-SLS-007`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

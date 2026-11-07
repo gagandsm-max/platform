@@ -1050,19 +1050,3 @@ Keep exact existing Platform_17 §10.3 ACK fields and boundaries: Agent→Sensor
 OTLP receiver budgets apply to exact tenant/source/metric-series identity and decoded resource cost **before spooling**, with deterministic oversize/invalid/overbudget rejection and protocol-correct `partial_success.rejected_data_points` / `rejected_log_records` where supported. Preserve Resource/Scope/attributes, Sum monotonicity, temporality and histogram semantics; **never** make a rejected series into a Gauge, silently merge distinct series after stripping identity dimensions or retain excluded PII in an unindexed raw JSON overflow column. Estimates/sketches may inform a pre-admission budget but cannot prove exact new-series membership by themselves. Accounting separates accepted, rejected, sampled/shed and upstream continuity gaps; no sensitive values appear in reason details/metrics.
 
 An outbound SIEM destination has independently bounded tenant-scoped queue/backlog/retry/dead-letter and terminal delivered-or-expired status, with message/batch identity and acknowledged delivery recorded only when the sink protocol actually supplies it. Destination status does not change primary Core ingest ACK. After expiry/quota exhaustion, expose irreversible export loss and relevant evidence uncertainty; do not claim lossless forwarding, infinite legal-hold quarantine, or "100% unaffected" shared resource operation.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-TIME-001`
-- `REQ-TIME-002`
-- `REQ-TIME-003`
-- `REQ-TIME-004`
-- `REQ-TIME-005`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

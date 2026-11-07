@@ -1,5 +1,18 @@
 # Platform — Installation, Upgrade, Rollback & Operational Runbooks
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
+#### Formal requirements — `REQ-LC` family
+
+Governing locator: Backup/restore operations. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-LC-001` | Backup/restore with verification |
+| `REQ-LC-002` | Safe low-downtime upgrades and rollback |
+| `REQ-LC-007` | Support bundle with secret masking and error correlation IDs |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
+
 **Document ID:** PLATFORM-OPSINSTALL-001
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
@@ -262,24 +275,3 @@ This is a specified procedure and acceptance delta under [Issue #292](https://gi
 5. **Verify remedy and custody.** After approved expansion, retention change, restore or rollback, remeasure physical capacity, protected/reclaimable accounting, data-age/retrieval obligations, Kafka/ClickHouse replay, Sensor spool horizon, queue/lag/drop metrics and case state. Preserve deletion/audit evidence. Never reset volumes/spools or regenerate identities to hide a recovery defect.
 
 The future executable runbook must bind these steps to accepted source paths/UI/API actions and test evidence; those bindings remain blocked where the storage estimator, measurement authority or notification workflow is absent. This task supplies no unverified host command or customer compliance promise.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-LC-001`
-- `REQ-LC-002`
-- `REQ-LC-003`
-- `REQ-LC-004`
-- `REQ-LC-005`
-- `REQ-LC-006`
-- `REQ-LC-007`
-- `REQ-LC-008`
-- `REQ-LC-009`
-- `REQ-LC-010`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

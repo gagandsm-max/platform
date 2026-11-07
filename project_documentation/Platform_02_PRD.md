@@ -250,6 +250,32 @@ The Administration and Platform Health workspaces shall expose service health, r
 
 ## 6. Sensor runtime, roles and local continuity
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-S -->
+#### Formal requirements — `REQ-S` family
+
+Governing locator: §6 Sensor runtime, roles and local continuity; §7 Sensor placement, pools and capacity. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-S-001` | Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles |
+| `REQ-S-002` | Sensor locality-aware placement close to devices |
+| `REQ-S-003` | Capacity-aware placement; never overload Sensor for lower RTT |
+| `REQ-S-004` | Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool |
+| `REQ-S-005` | Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models |
+| `REQ-S-006` | Distributed leases/fencing prevent duplicate polling |
+| `REQ-S-007` | Local durable spool/store-and-forward |
+| `REQ-S-008` | Sensor 80% disk protection and bounded junk/log cleanup |
+| `REQ-S-009` | Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures |
+| `REQ-S-010` | Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices |
+| `REQ-S-011` | Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED) |
+| `REQ-S-012` | Agentless infrastructure target ~800 endpoints per 4C/16G Sensor |
+| `REQ-S-013` | Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit |
+| `REQ-S-014` | Windows/Linux Agent supports host metrics and edge network tests |
+| `REQ-S-015` | Branch→DC and DC→branch test support for asymmetric-path evidence |
+| `REQ-S-016` | Agent enrolls with Core and Core assigns correct available Sensor |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-S -->
+
 **Feature contract (summary):**
 - **Purpose/outcome:** One Universal Sensor runtime with role-based collection near the estate
 - **Subfeatures:** NETWORK/INFRASTRUCTURE/FLOW/LOG; conditional SYNTHETIC/CLOUD_API; COMBINED lab; local spool; 80% protection
@@ -617,6 +643,30 @@ Credential permissions shall distinguish **USE** from **REVEAL**.
 
 
 ## 11. Network monitoring requirements
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-NET -->
+#### Formal requirements — `REQ-NET` family
+
+Governing locator: §11.1 SNMP. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-NET-001` | SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols |
+| `REQ-NET-002` | ICMP/traceroute/TCP/DNS/TLS/HTTP probes |
+| `REQ-NET-003` | SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring |
+| `REQ-NET-004` | NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics |
+| `REQ-NET-005` | NETCONF/RESTCONF/gNMI/gRPC/streaming |
+| `REQ-NET-006` | SSH/CLI; Telnet legacy disabled by default and audited |
+| `REQ-NET-008` | BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring |
+| `REQ-NET-009` | WLAN deep client/radio/controller experience |
+| `REQ-NET-010` | VPN/IPsec/IP SLA/CUCM/VoIP operational monitoring |
+| `REQ-NET-011` | DNS/DHCP/NTP operational monitoring |
+| `REQ-NET-012` | TLS/certificate lifecycle monitoring |
+| `REQ-NET-013` | Circuit/ISP inventory and SLA correlation |
+| `REQ-NET-014` | Path Analysis workspace |
+| `REQ-NET-015` | IPv4/IPv6/dual-stack first-class support |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-NET -->
 ### 11.1 SNMP
 
 Platform shall support:
@@ -633,31 +683,31 @@ Platform shall support:
 
 #### 11.1.1 Enterprise SNMP correctness and usability requirements
 
-| PRD ID | Requirement |
-|---|---|
-| `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
-| `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`; it is not yet benchmarked/certified/deployed. Derived delta/rate/reset/wrap/discontinuity remains SPECIFIED but NOT IMPLEMENTED/CERTIFIED — remaining P0. |
-| `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
-| `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
-| `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
-| `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
-| `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
-| `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
-| `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
-| `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
-| `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
-| `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
-| `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
-| `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
-| `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
-| `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
-| `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
-| `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
-| `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
-| `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
-| `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
-| `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
-| `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
+| Requirement ID | PRD ID | Requirement |
+|---|---|---|
+| `REQ-SNMP-001` | `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
+| `REQ-SNMP-002` | `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`; it is not yet benchmarked/certified/deployed. Derived delta/rate/reset/wrap/discontinuity remains SPECIFIED but NOT IMPLEMENTED/CERTIFIED — remaining P0. |
+| `REQ-SNMP-003` | `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
+| `REQ-SNMP-004` | `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
+| `REQ-SNMP-005` | `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
+| `REQ-SNMP-006` | `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
+| `REQ-SNMP-007` | `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
+| `REQ-SNMP-008` | `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
+| `REQ-SNMP-009` | `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
+| `REQ-SNMP-010` | `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
+| `REQ-SNMP-011` | `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
+| `REQ-SNMP-012` | `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
+| `REQ-SNMP-013` | `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
+| `REQ-SNMP-014` | `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
+| `REQ-SNMP-015` | `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
+| `REQ-SNMP-016` | `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
+| `REQ-SNMP-017` | `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
+| `REQ-SNMP-018` | `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
+| `REQ-SNMP-019` | `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
+| `REQ-SNMP-020` | `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
+| `REQ-SNMP-021` | `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
+| `REQ-SNMP-022` | `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
+| `REQ-SNMP-023` | `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
 
 
 ### 11.2 Availability and path
@@ -800,6 +850,24 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 
 ## 14. Cloud, Kubernetes and OpenTelemetry
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-INF -->
+#### Formal requirements — `REQ-INF` family
+
+Governing locator: §12 Infrastructure — agentless. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-INF-001` | SSH/WMI/WinRM agentless infrastructure monitoring |
+| `REQ-INF-002` | Windows/Linux Agents |
+| `REQ-INF-003` | iDRAC/iLO/CIMC/Redfish/IPMI hardware lifecycle |
+| `REQ-INF-005` | Storage and SAN/FC monitoring |
+| `REQ-INF-006` | UPS/PDU/environment/power/cooling/rack sensors |
+| `REQ-INF-009` | Kubernetes/Docker/container monitoring |
+| `REQ-INF-011` | Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange |
+| `REQ-INF-012` | Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-INF -->
 ### 14.1 Cloud
 
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
@@ -874,6 +942,23 @@ HTTP/API tests shall support method, headers, authentication, body, expected sta
 
 
 ## 16. Extensibility studios (MIB, API, Device Pack)
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-EXT -->
+#### Formal requirements — `REQ-EXT` family
+
+Governing locator: §16 Extensibility studios (MIB, API, Device Pack). Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-EXT-001` | MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation |
+| `REQ-EXT-002` | API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/ |
+| `REQ-EXT-003` | Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards |
+| `REQ-EXT-004` | Device Packs signed/versioned/exportable/importable/rollback capable |
+| `REQ-EXT-005` | Device Pack certification levels: Official/Partner/Customer/Experimental |
+| `REQ-EXT-006` | Device Pack test simulator using sample SNMP walk/API/CLI/trap/syslog |
+| `REQ-EXT-007` | Vendor MIB/YANG/API/icon/template provenance and redistribution rights tracked |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-EXT -->
 MIB Studio remains part of the single Capability Pack extension architecture (not a second pack registry/SDK). Required contracts include import, revision/version, provenance/licensing, dependencies, compile/test, OID/table/notification mapping and firmware/model compatibility.
 
 
@@ -1202,6 +1287,28 @@ Every grouped/suppressed child remains inspectable with its governing rule/versi
 
 
 ## 21. Graph intelligence, GNN and RCA
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-RCA -->
+#### Formal requirements — `REQ-RCA` family
+
+Governing locator: §21 Graph intelligence, GNN and RCA. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-RCA-001` | One temporal multi-layer canonical operational graph |
+| `REQ-RCA-002` | Physical/L2/L3/routing/MPLS/VXLAN/SDWAN/traffic/infra/service/causal/geo views |
+| `REQ-RCA-003` | Relationship provenance/confidence and historical topology |
+| `REQ-RCA-004` | Hybrid deterministic+temporal+topology+protocol+change+anomaly RCA |
+| `REQ-RCA-005` | Root cause, confidence, causal chain, blast radius, evidence, contradictions, missing evidence, recommendation |
+| `REQ-RCA-006` | INCONCLUSIVE is a valid RCA outcome |
+| `REQ-RCA-007` | GNN only as hypothesis/propagation/impact scorer, never automatic causal proof |
+| `REQ-RCA-008` | Gemini through AI Gateway for NL search/explanation/summaries/recommendations |
+| `REQ-RCA-009` | Future private/offline/local LLM provider |
+| `REQ-RCA-010` | AI data boundaries, masking and audit |
+| `REQ-RCA-011` | RCA correctness feedback and intelligence-quality dashboard |
+| `REQ-RCA-013` | PIR/problem-management generation and customer runbook knowledge base |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-RCA -->
 ### 21.1 Architecture principle
 
 Platform RCA is a **hybrid evidence-based graph reasoning system**. It shall not be an LLM-only system and shall not treat GNN output as proof of causality.
@@ -1415,6 +1522,20 @@ No universal customer CPU/memory/disk threshold is fixed here. Effective values 
 
 
 ## 24. NCM and Privileged CLI Session Broker
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-NCM -->
+#### Formal requirements — `REQ-NCM` family
+
+Governing locator: §24 NCM and Privileged CLI Session Broker. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-NCM-002` | NCM change evidence enters RCA timeline |
+| `REQ-NCM-003` | Separate NCM concurrency/rate/window controls |
+| `REQ-NCM-004` | Privileged browser CLI Session Broker; browser never gets credentials |
+| `REQ-NCM-005` | CLI RBAC/command policy/JIT/approval/break-glass/session audit |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-NCM -->
 NCM is Day-1 important. Capabilities below are architecture/product scope; certification follows the Phase 1 / Phase 1.5 split (see also §58.4).
 
 **Phase 1 independently certifiable subset:**
@@ -1474,6 +1595,19 @@ Telnet is legacy, disabled by default and never automatic fallback.
 
 
 ## 25. IPAM requirements
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-IPAM -->
+#### Formal requirements — `REQ-IPAM` family
+
+Governing locator: §25 IPAM requirements. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-IPAM-001` | Native IPAM IPv4/IPv6/subnet/supernet/VLAN/VRF/address/DNS/DHCP/leases/conflicts/history/forecast |
+| `REQ-IPAM-002` | Microsoft DHCP/DNS and Infoblox integration |
+| `REQ-IPAM-003` | IPAM enriches canonical graph and Flow |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-IPAM -->
 IPAM shall support:
 
 - IPv4 and IPv6 as first-class, including dual-stack estates;
@@ -1499,24 +1633,24 @@ IPAM is integrated into the canonical graph and shall not be a separate competin
 ## 26. Display timezone, scheduling and freshness
 | ID | Requirement |
 |---|---|
-| `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
-| `PRD-TIME-002` | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
-| `PRD-TIME-003` | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
-| `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
-| `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
+| `REQ-TIME-001` / `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
+| `PRD-TIME-002` (product) / see `REQ-TIME-002` UI ownership | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
+| `PRD-TIME-003` (product) / see `REQ-TIME-003` UI ownership | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
+| `REQ-TIME-004` / `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
+| `REQ-TIME-005` / `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
 
 
 | ID | Requirement |
 |---|---|
-| `PRD-SCHED-001` | Core owns desired monitoring schedule/policy, placement, recurring assignment and generation/fencing authority. Sensor owns execution of currently authorized work and shall retain durable recurring desired-state sufficient to continue safely during temporary Core outage/failover. No second independent schedule authority and no scheduler microservice. |
-| `PRD-SCHED-002` | Monitor Group (semantic/product grouping), Scheduling Class (priority/freshness behavior) and Execution Class (runtime worker/resource pool) shall remain distinct concepts. |
-| `PRD-SCHED-003` | Recurring monitoring definitions shall specify both nominal cadence and freshness/maximum staleness. The normal SNMP operational-metric default remains 5 minutes and does not mean all OIDs every five minutes. Availability/liveness remains a separate plane. |
-| `PRD-SCHED-004` | Eligible recurring work shall use a versionable deterministic 64-bit phase calculation so fleets do not stampede at clock boundaries. Phase inputs should remain stable across normal restart and preferably across Sensor reassignment; Sensor identity must not dominate where reassignment would reshuffle the estate. |
-| `PRD-SCHED-005` | Admission order shall be priority/scheduling class → freshness urgency/deadline → fairness → execution cost/capacity. Opaque ML shall not drive routine collection scheduling. Cost inputs remain bounded/explainable (protocol, operation, cardinality, duration, RTT, timeout/retry, payload size, API quota). |
-| `PRD-SCHED-006` | Concurrency shall be bounded by Sensor, execution class, protocol, target, tenant, site, subnet and controller/API as applicable. Identical recurring collections must not stack without bound. Missed cycles coalesce or skip per policy with quality/overrun evidence; never create infinite catch-up queues or fabricate historical samples. |
-| `PRD-SCHED-007` | Controller/site/API failure domains shall use bounded retry, dependency-aware backoff, circuit-breaker-like qualification, cheap recovery probes and explicit monitoring-path degradation. `No Data != Device Down` remains invariant. |
-| `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
-| `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
+| `REQ-SCHED-001` / `PRD-SCHED-001` | Core owns desired monitoring schedule/policy, placement, recurring assignment and generation/fencing authority. Sensor owns execution of currently authorized work and shall retain durable recurring desired-state sufficient to continue safely during temporary Core outage/failover. No second independent schedule authority and no scheduler microservice. |
+| `REQ-SCHED-002` / `PRD-SCHED-002` | Monitor Group (semantic/product grouping), Scheduling Class (priority/freshness behavior) and Execution Class (runtime worker/resource pool) shall remain distinct concepts. |
+| `REQ-SCHED-003` / `PRD-SCHED-003` | Recurring monitoring definitions shall specify both nominal cadence and freshness/maximum staleness. The normal SNMP operational-metric default remains 5 minutes and does not mean all OIDs every five minutes. Availability/liveness remains a separate plane. |
+| `REQ-SCHED-004` / `PRD-SCHED-004` | Eligible recurring work shall use a versionable deterministic 64-bit phase calculation so fleets do not stampede at clock boundaries. Phase inputs should remain stable across normal restart and preferably across Sensor reassignment; Sensor identity must not dominate where reassignment would reshuffle the estate. |
+| `REQ-SCHED-005` / `PRD-SCHED-005` | Admission order shall be priority/scheduling class → freshness urgency/deadline → fairness → execution cost/capacity. Opaque ML shall not drive routine collection scheduling. Cost inputs remain bounded/explainable (protocol, operation, cardinality, duration, RTT, timeout/retry, payload size, API quota). |
+| `REQ-SCHED-006` / `PRD-SCHED-006` | Concurrency shall be bounded by Sensor, execution class, protocol, target, tenant, site, subnet and controller/API as applicable. Identical recurring collections must not stack without bound. Missed cycles coalesce or skip per policy with quality/overrun evidence; never create infinite catch-up queues or fabricate historical samples. |
+| `REQ-SCHED-007` / `PRD-SCHED-007` | Controller/site/API failure domains shall use bounded retry, dependency-aware backoff, circuit-breaker-like qualification, cheap recovery probes and explicit monitoring-path degradation. `No Data != Device Down` remains invariant. |
+| `REQ-SCHED-008` / `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
+| `REQ-SCHED-009` / `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
 
 
 ## 27. Reporting, SLA/OLA and Service Assurance
@@ -1567,6 +1701,21 @@ SLA/OLA reports shall be able to expose target/expected, minimum, actual, trend,
 Financial/service-credit formulas may be represented as customer-defined metadata/calculation only when configured; Platform shall not invent contractual credits, pricing, liability or commercial terms.
 
 ## 28. ITSM and notification integrations
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-INT -->
+#### Formal requirements — `REQ-INT` family
+
+Governing locator: §28 ITSM and notification integrations. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-INT-001` | ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform hea |
+| `REQ-INT-002` | Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels |
+| `REQ-INT-003` | Bidirectional ITSM field/state/note synchronization where API allows |
+| `REQ-INT-004` | Durable outbound integration queue/retry/idempotency/dead-letter/pause-drain-replay health |
+| `REQ-INT-005` | Integration Test Sandbox before production enablement |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-INT -->
 Supported adapters shall include architecture for:
 
 - ServiceNow;
@@ -1603,6 +1752,21 @@ An Integration Test Sandbox shall validate authentication, connection, field map
 
 
 ## 29. RBAC, audit, API-first and query protection
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-GOV -->
+#### Formal requirements — `REQ-GOV` family
+
+Governing locator: §29 RBAC, audit, API-first and query protection. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-GOV-001` | Append-only/tamper-evident structured audit, SIEM export and protected retention |
+| `REQ-GOV-002` | RBAC + resource scope + conditions; explicit deny wins |
+| `REQ-GOV-003` | AD/LDAP/SAML/OIDC/Entra identity mapping |
+| `REQ-GOV-004` | Credentials USE vs VIEW separated |
+| `REQ-GOV-005` | MFA/approval/reason/ticket for sensitive actions |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-GOV -->
 Authorization model: **Who × Resource × Action × Where × Conditions**.
 
 Dimensions:
@@ -1845,6 +2009,22 @@ A Housekeeping workspace shall show status/history/failures for rollups, TTL del
 
 ### 31.14 Usage and Licensing Forecast
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-LIC -->
+#### Formal requirements — `REQ-LIC` family
+
+Governing locator: §33 Licensing and usage forecast. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-LIC-001` | Commercial license supports annual/perpetual/device/element/module models |
+| `REQ-LIC-002` | 30-day expiry warning |
+| `REQ-LIC-003` | 7-day dashboard banner before expiry |
+| `REQ-LIC-004` | Post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30); polling stops after the 15-day grace expires unless manually extended/renewed. T-7 pre-expiry banner remains distinct. |
+| `REQ-LIC-005` | Historical data remains accessible after polling stops |
+| `REQ-LIC-006` | Usage/licensing dashboard and entitlement-aware UI |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-LIC -->
+
 Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
 
 ### 31.15 Contextual Help
@@ -1855,6 +2035,23 @@ Complex settings and diagnostics shall expose `What is this?`, contextual docume
 
 
 ## 32. Upgrade, canary, rollback and PKI
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
+#### Formal requirements — `REQ-LC` family
+
+Governing locator: §32 Upgrade, canary, rollback and PKI. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-LC-003` | Canary rollout and feature flags |
+| `REQ-LC-004` | Desired-vs-actual state and configuration drift |
+| `REQ-LC-005` | Change impact preview and dry-run |
+| `REQ-LC-006` | Technology lifecycle/EOL/EOS/firmware risk visibility |
+| `REQ-LC-008` | Migration Studio from incumbent tools/CMDB/CSV/API |
+| `REQ-LC-009` | Template library and onboarding wizard |
+| `REQ-LC-010` | Change freeze and business calendars |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
 Platform upgrade workflow shall include:
 
 - preflight;
@@ -2623,78 +2820,3 @@ Full native APM scope SHALL include, subject to later implementation/dependency 
 Full native DPI / Network Performance Intelligence scope SHALL include, subject to later implementation/dependency change control: SPAN/TAP/vTAP/packet-broker acquisition; continuous capture with bounded raw-PCAP retention; packet metadata, flow reconstruction and L2-L7 decoding; TCP/DNS/TLS/HTTP performance analytics; network-versus-application response decomposition; packet-to-service/trace correlation; historical investigation/replay where safe; controlled TLS decryption only where lawful and authorized; key-custody controls; payload masking/privacy filters; evidence custody and role-restricted packet access.
 
 Phase 2.5 MUST NOT redefine AmrudAi as a general SIEM/NDR replacement.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-INF-001`
-- `REQ-INF-002`
-- `REQ-INF-003`
-- `REQ-INF-004`
-- `REQ-INF-005`
-- `REQ-INF-006`
-- `REQ-INF-007`
-- `REQ-INF-008`
-- `REQ-INF-009`
-- `REQ-INF-010`
-- `REQ-INF-011`
-- `REQ-INF-012`
-- `REQ-INF-013`
-- `REQ-INF-014`
-- `REQ-INF-015`
-- `REQ-INF-016`
-- `REQ-IPAM-001`
-- `REQ-IPAM-002`
-- `REQ-IPAM-003`
-- `REQ-LIC-001`
-- `REQ-LIC-002`
-- `REQ-LIC-003`
-- `REQ-LIC-004`
-- `REQ-LIC-005`
-- `REQ-LIC-006`
-- `REQ-NCM-001`
-- `REQ-NCM-002`
-- `REQ-NCM-003`
-- `REQ-NCM-004`
-- `REQ-NCM-005`
-- `REQ-P-001`
-- `REQ-P-002`
-- `REQ-P-003`
-- `REQ-P-004`
-- `REQ-P-005`
-- `REQ-P-006`
-- `REQ-P-007`
-- `REQ-P-008`
-- `REQ-P-009`
-- `REQ-P-010`
-- `REQ-P-011`
-- `REQ-CMDB-001`
-- `REQ-CMDB-003`
-- `REQ-CMDB-005`
-- `REQ-CMDB-006`
-- `REQ-INT-006`
-- `REQ-INT-010`
-- `REQ-INT-011`
-- `REQ-INT-012`
-- `REQ-INT-013`
-- `REQ-NCM-006`
-- `REQ-NCM-008`
-- `REQ-NCM-009`
-- `REQ-NCM-010`
-- `REQ-NCM-011`
-- `REQ-NCM-012`
-- `REQ-NET-017`
-- `REQ-OTEL-001`
-- `REQ-OTEL-003`
-- `REQ-OTEL-005`
-- `REQ-OTEL-006`
-- `REQ-SLS-001`
-- `REQ-SLS-004`
-- `REQ-SLS-005`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

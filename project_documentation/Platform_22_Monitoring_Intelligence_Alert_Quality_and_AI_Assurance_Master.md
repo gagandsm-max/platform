@@ -145,6 +145,28 @@ For eBPF process-network and active-path domains, telemetry trust evaluation mus
 
 ## 6. Alert-policy lifecycle and false-alert quality gates
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-ALT -->
+#### Formal requirements — `REQ-ALT` family
+
+Governing locator: Alert policy / qualification / incident quality contracts (Platform_22 normative sections). Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-ALT-001` | Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric |
+| `REQ-ALT-002` | Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds |
+| `REQ-ALT-003` | Adaptive polling with triggers, cooldown and capacity guardrails |
+| `REQ-ALT-004` | Alert qualification state machine; failed SNMP poll != device down |
+| `REQ-ALT-005` | Multi-protocol/multi-vantage validation and confidence |
+| `REQ-ALT-006` | Event vs Alert vs Incident distinction |
+| `REQ-ALT-007` | Alert storm protection/dedup/rate-limit/compression |
+| `REQ-ALT-008` | Flapping detection and reopen windows |
+| `REQ-ALT-009` | Maintenance, notification mute and dependency suppression separated |
+| `REQ-ALT-010` | Recovery qualification before auto-resolution |
+| `REQ-ALT-011` | Alert ownership/assignment/escalation/shift handover |
+| `REQ-ALT-012` | Alert-policy effectiveness analytics |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-ALT -->
+
 Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`.
 
 - **DRAFT:** authoring/validation only; no production customer alert effect.
@@ -658,95 +680,3 @@ First Alert Evidence Contract schemas, per-class activation envelopes, determini
 Exact local LLM/GNN/embedding artifacts, inference package/build options, training labels, hardware throughput and future model context/concurrency remain separately phased optional design/admission work. Their incompleteness does not block the deterministic first-GA scope; it does block claims or activation of their own profile. The existing §19 unresolved-spike list must be read with this split.
 
 Plan state remains **DESIGN_GAPS_RECORDED / NOT_EXECUTABLE_AS_A_COMPLETE_MODULE_SET** until each applicable module has the filled source/contract/dependency/failure-test/rollout record required by Platform_13. This honest gap ledger does not clear `DOC_P0_BLOCKED`, certify algorithms or authorize a writer to invent missing interfaces.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-ALT-001`
-- `REQ-ALT-002`
-- `REQ-ALT-003`
-- `REQ-ALT-004`
-- `REQ-ALT-005`
-- `REQ-ALT-006`
-- `REQ-ALT-007`
-- `REQ-ALT-008`
-- `REQ-ALT-009`
-- `REQ-ALT-010`
-- `REQ-ALT-011`
-- `REQ-ALT-012`
-- `REQ-MIA-001`
-- `REQ-MIA-002`
-- `REQ-MIA-003`
-- `REQ-MIA-004`
-- `REQ-MIA-005`
-- `REQ-MIA-006`
-- `REQ-MIA-007`
-- `REQ-MIA-008`
-- `REQ-MIA-009`
-- `REQ-MIA-010`
-- `REQ-MIA-011`
-- `REQ-MIA-012`
-- `REQ-MIA-013`
-- `REQ-MIA-014`
-- `REQ-MIA-015`
-- `REQ-MIA-016`
-- `REQ-MIA-017`
-- `REQ-MIA-018`
-- `REQ-MIA-019`
-- `REQ-MIA-020`
-- `REQ-MIA-021`
-- `REQ-MIA-022`
-- `REQ-MIA-023`
-- `REQ-MIA-024`
-- `REQ-MIA-025`
-- `REQ-MIA-026`
-- `REQ-MIA-027`
-- `REQ-MIA-028`
-- `REQ-MIA-029`
-- `REQ-MIA-030`
-- `REQ-MIA-031`
-- `REQ-MIA-032`
-- `REQ-MIA-033`
-- `REQ-MIA-034`
-- `REQ-MIA-035`
-- `REQ-MIA-036`
-- `REQ-MIA-037`
-- `REQ-MIA-038`
-- `REQ-MIA-039`
-- `REQ-MIA-040`
-- `REQ-MIA-041`
-- `REQ-MIA-042`
-- `REQ-MIA-043`
-- `REQ-MIA-044`
-- `REQ-MIA-045`
-- `REQ-MIA-046`
-- `REQ-MIA-047`
-- `REQ-MIA-048`
-- `REQ-MIA-049`
-- `REQ-MIA-050`
-- `REQ-MIA-051`
-- `REQ-MIA-052`
-- `REQ-MIA-053`
-- `REQ-MIA-054`
-- `REQ-MIA-055`
-- `REQ-MIA-056`
-- `REQ-RCA-001`
-- `REQ-RCA-002`
-- `REQ-RCA-003`
-- `REQ-RCA-004`
-- `REQ-RCA-005`
-- `REQ-RCA-006`
-- `REQ-RCA-007`
-- `REQ-RCA-008`
-- `REQ-RCA-009`
-- `REQ-RCA-010`
-- `REQ-RCA-011`
-- `REQ-RCA-012`
-- `REQ-RCA-013`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

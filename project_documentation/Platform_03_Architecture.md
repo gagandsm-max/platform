@@ -317,6 +317,28 @@ Reasons:
 Valkey is reconstructable ephemeral/cache state **ONLY** and must never become authoritative business state. Architecture requires Core to **degrade safely if Valkey is unavailable** rather than convert cache loss into authoritative data loss. Current hard-dependency behavior, if present, is an implementation gap under #92.
 
 ## 7. Exactly-two-Core HA and stateful-service strategy
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-A -->
+#### Formal requirements — `REQ-A` family
+
+Governing locator: §1 Architecture mandate; §4 Deployment; §7 Exactly-two-Core HA; §34 Backup/DR. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-A-001` | Standalone = one Core; HA = exactly two full Core nodes |
+| `REQ-A-002` | One Active Core and one Standby; continuous state synchronization |
+| `REQ-A-003` | Core HA failover under 60 seconds in certified scenario |
+| `REQ-A-004` | Sensors continue polling during Core failover |
+| `REQ-A-005` | Core is brain; Sensors/Agents enroll through Core |
+| `REQ-A-006` | All Core components run on Core nodes for standard deployments |
+| `REQ-A-007` | Sensor-to-Core HTTPS/gRPC mTLS ingestion; Kafka internal |
+| `REQ-A-008` | DR architecture mandatory in v1.0; exact RPO/RTO TBD until business freeze |
+| `REQ-A-009` | Ubuntu and RHEL Core/Sensor; no Windows Core/Sensor initially |
+| `REQ-A-010` | Separate signed Core, Sensor, Windows Agent, Linux Agent builds |
+| `REQ-A-011` | VM/bare metal Linux first; Kubernetes not mandatory |
+| `REQ-A-012` | Future regional/multi-Core + Master Core architecture is future scalability extension only |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-A -->
 The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members.
 
 This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
@@ -1023,6 +1045,21 @@ Emergency deletion must use efficient partition/TTL operations rather than billi
 
 
 ## 29. Security, IAM and audit architecture
+
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
+#### Formal requirements — `REQ-SEC` family
+
+Governing locator: §29 Security, IAM and audit architecture. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-SEC-003` | mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support |
+| `REQ-SEC-005` | PKI/certificate lifecycle management |
+| `REQ-SEC-006` | Proxy/no-proxy support |
+| `REQ-SEC-007` | Data sovereignty/regional placement architecture |
+| `REQ-SEC-008` | Tenant isolation enforced server/API/query layers |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
 ### 29.1 Trust boundaries
 
 - Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
@@ -1689,30 +1726,3 @@ Architecture planning SHALL preserve one canonical entity/service graph, one ten
 This reconciliation intentionally does **not** select an APM agent framework, trace store, profile store, packet decoder, capture engine, TLS-decryption mechanism or new mandatory datastore/service. Those selections require separate architecture/OSS/capacity/security change control.
 
 No Phase-2 requirement may force premature full native APM or full native DPI into the Phase-2 Core.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-A-001`
-- `REQ-A-002`
-- `REQ-A-003`
-- `REQ-A-004`
-- `REQ-A-005`
-- `REQ-A-006`
-- `REQ-A-007`
-- `REQ-A-008`
-- `REQ-A-009`
-- `REQ-A-010`
-- `REQ-A-011`
-- `REQ-A-012`
-- `REQ-CMDB-004`
-- `REQ-OTEL-002`
-- `REQ-OTEL-004`
-- `REQ-SLS-002`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

@@ -1,5 +1,40 @@
 # Platform — UI/UX, Navigation & Out-of-Box Dashboard Master
 
+<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-UI -->
+#### Formal requirements — `REQ-UI` family
+
+Governing locator: UI/UX/Reporting base requirements in Platform_09. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
+
+| Requirement ID | Normative requirement |
+|---|---|
+| `REQ-UI-001` | Native Platform Dashboard Studio with flexible composable dashboards; Grafana may inspire interaction patterns but is not copied/embedded |
+| `REQ-UI-002` | Create/group/folder/clone/import/export/share dashboards |
+| `REQ-UI-003` | Drag/drop/resizable panels and broad chart/table/topology/map/Sankey types |
+| `REQ-UI-004` | Light/dark theme, readable fonts, density options |
+| `REQ-UI-005` | Role-specific landing pages and permission-aware navigation |
+| `REQ-UI-006` | Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views |
+| `REQ-UI-007` | Inventory with server-side pagination, bulk actions and saved filters |
+| `REQ-UI-008` | Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio |
+| `REQ-UI-009` | Report Studio PDF/CSV-only artifacts, effective commercial logo embedding in PDF, branding, schedules, obligations and attestation |
+| `REQ-UI-010` | SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules |
+| `REQ-UI-011` | Accessibility, keyboard navigation, contrast and no color-only status |
+| `REQ-UI-012` | Mobile incident/dashboard experience; desktop for full admin/studios |
+| `REQ-UI-013` | Query protection: timeout/row/scan/concurrency/async export |
+| `REQ-UI-014` | Fast UI with caching/preaggregation/virtualization/lazy loading/query cancellation |
+| `REQ-UI-015` | No-context-switch NOC troubleshooting from entity/alert/incident context |
+| `REQ-UI-016` | Persistent contextual action bar + Troubleshoot drawer/workspace |
+| `REQ-UI-017` | On-demand bounded ICMP/traceroute/SNMP/TCP/DNS/SSH/API tests through eligible Sensor/Agent |
+| `REQ-UI-018` | Multi-vantage verification with contradictory evidence preserved |
+| `REQ-UI-019` | Verify Now deterministic diagnostic bundles/packs |
+| `REQ-UI-020` | Live Evidence distinguishes monitored state from fresh operator-triggered verification |
+| `REQ-UI-021` | Why/What Changed/Compare contextual investigation actions |
+| `REQ-UI-022` | Investigation Session preserves diagnostic/CLI/config/topology/flow evidence references and can link to incident |
+| `REQ-UI-023` | Risk-proportionate action friction; CLI supports stored/personal/one-time credentials without browser exposure of reusable secrets |
+| `REQ-UI-024` | Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity |
+| `REQ-UI-025` | AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls |
+
+<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-UI -->
+
 **Document ID:** PLATFORM-UIUX-001
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — UI/UX and Dashboard Specification**
@@ -53,6 +88,13 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 
 
 ## Display timezone UX — v3.2.2 handoff baseline
+
+### Formal interactive timezone requirements
+
+| Requirement ID | Normative UI/UX requirement |
+|---|---|
+| `REQ-TIME-002` | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
+| `REQ-TIME-003` | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
 
 The global shell and applicable operational screens shall expose:
 
@@ -7543,47 +7585,3 @@ Phase 2 UI SHALL expose honest capability/certification state and customer-profi
 Phase 2.5 planning SHALL include role-aware deep-observability experiences for application/service transaction traces, service maps and trace-waterfall correlation, errors/exceptions, continuous profiles/flame graphs, browser/mobile experience and user journeys, packet-derived network/application response analysis, packet conversations/transactions and historical investigation, and evidence linkage from trace/profile/packet findings into Investigation/RCA.
 
 Raw payload/session-replay visibility SHALL be privacy-, tenant- and RBAC-governed and must not be exposed by default.
-
-
-<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
-## RTM formal-ID ownership index
-
-This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
-
-Owned formal IDs:
-
-- `REQ-UI-001`
-- `REQ-UI-002`
-- `REQ-UI-003`
-- `REQ-UI-004`
-- `REQ-UI-005`
-- `REQ-UI-006`
-- `REQ-UI-007`
-- `REQ-UI-008`
-- `REQ-UI-009`
-- `REQ-UI-010`
-- `REQ-UI-011`
-- `REQ-UI-012`
-- `REQ-UI-013`
-- `REQ-UI-014`
-- `REQ-UI-015`
-- `REQ-UI-016`
-- `REQ-UI-017`
-- `REQ-UI-018`
-- `REQ-UI-019`
-- `REQ-UI-020`
-- `REQ-UI-021`
-- `REQ-UI-022`
-- `REQ-UI-023`
-- `REQ-UI-024`
-- `REQ-UI-025`
-- `REQ-UI-026`
-- `REQ-UI-027`
-- `REQ-UI-028`
-- `REQ-UI-029`
-- `REQ-UI-030`
-- `REQ-UI-031`
-- `REQ-UI-032`
-- `REQ-SLS-008`
-
-<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

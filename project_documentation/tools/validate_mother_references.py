@@ -143,6 +143,23 @@ REQ_MARKER_END = "<!-- END GLOBAL PRIMARY REQ REGISTRY -->"
 PRD_MARKER_START = "<!-- GLOBAL PRIMARY PRD REGISTRY -->"
 PRD_MARKER_END = "<!-- END GLOBAL PRIMARY PRD REGISTRY -->"
 
+# Non-normative ownership placeholders rejected as sole owner evidence.
+OWNERSHIP_INDEX_START = "<!-- RTM FORMAL-ID OWNERSHIP INDEX -->"
+OWNERSHIP_INDEX_END = "<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->"
+OWNERSHIP_INDEX_HEADING_RE = re.compile(
+    r"^#{1,6}\s+RTM formal-ID ownership index\b.*$",
+    re.I | re.M,
+)
+# Trailing/footer blocks that only list identifiers without requirement prose.
+BARE_ID_BULLET_RE = re.compile(
+    r"^\s*[-*]\s+`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*$",
+    re.M,
+)
+BARE_ID_TABLE_ROW_RE = re.compile(
+    r"^\|\s*`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*\|\s*$",
+    re.M,
+)
+
 REQ_COLUMNS = 7
 PRD_COLUMNS = 6
 REQ_HEADERS = {
@@ -174,6 +191,41 @@ def strip_marker_block(text: str, start: str, end: str) -> str:
     before, rest = text.split(start, 1)
     _, after = rest.split(end, 1)
     return before + after
+
+
+def strip_all_marker_blocks(text: str, start: str, end: str) -> str:
+    while start in text and end in text:
+        text = strip_marker_block(text, start, end)
+    return text
+
+
+def strip_ownership_index_placeholders(text: str) -> str:
+    """Remove index-only ownership placeholders that must not prove RTM ownership.
+
+    Structural ownership indexes, bare identifier bullets and identifier-only
+    table rows are non-normative. A static validator cannot certify semantic
+    correctness of remaining prose; independent line-by-line review remains
+    mandatory.
+    """
+    text = strip_all_marker_blocks(text, OWNERSHIP_INDEX_START, OWNERSHIP_INDEX_END)
+    # Drop the ownership-index heading and following bare-ID list until the next
+    # heading or horizontal rule, when present without markers.
+    if OWNERSHIP_INDEX_HEADING_RE.search(text):
+        parts: list[str] = []
+        idx = 0
+        for match in OWNERSHIP_INDEX_HEADING_RE.finditer(text):
+            parts.append(text[idx : match.start()])
+            rest = text[match.end() :]
+            # Consume until next markdown heading or EOF.
+            stop = re.search(r"\n#{1,6}\s+\S", rest)
+            idx_end = match.end() + (stop.start() if stop else len(rest))
+            idx = idx_end
+        parts.append(text[idx:])
+        text = "".join(parts)
+    # Remove bare identifier-only bullets/rows so they cannot satisfy presence.
+    text = BARE_ID_BULLET_RE.sub("", text)
+    text = BARE_ID_TABLE_ROW_RE.sub("", text)
+    return text
 
 
 def clean_cell(value: str) -> str:
@@ -620,6 +672,9 @@ class MotherReferenceValidator:
             text = strip_marker_block(text, REQ_MARKER_START, REQ_MARKER_END)
         else:
             text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
+        # Ownership proven solely via trailing ID indexes / bare ID placeholders
+        # is rejected. Substantive normative tables and prose remain.
+        text = strip_ownership_index_placeholders(text)
         return text
 
     def _validate_registry_owners(

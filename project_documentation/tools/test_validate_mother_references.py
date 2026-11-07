@@ -2244,6 +2244,149 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
+    def test_69_normative_owner_table_with_requirement_prose_passes(self) -> None:
+        """Legitimate normative owner anchors (ID + requirement prose) must pass."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 28. ITSM and notification integrations\n\n"
+                "| Requirement ID | Normative requirement |\n"
+                "|---|---|\n"
+                "| `REQ-INT-001` | ServiceNow/BMC/Jira SM ITSM with binding and certification |\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_70_identifier_only_ownership_index_footer_fails(self) -> None:
+        """Trailing RTM formal-ID ownership index placeholders must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 28. ITSM\n\nProduct prose without the formal ID.\n\n"
+                "<!-- RTM FORMAL-ID OWNERSHIP INDEX -->\n"
+                "## RTM formal-ID ownership index\n\n"
+                "This section is a structural ownership index.\n\n"
+                "- `REQ-INT-001`\n"
+                "<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-INT-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_71_bare_id_bullet_list_without_prose_fails(self) -> None:
+        """Bare identifier bullets (no requirement prose) must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-NET-008",
+                    "Protocol depth",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 11. Network monitoring\n\n"
+                "Some unrelated prose.\n\n"
+                "- `REQ-NET-008`\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-NET-008" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_72_missing_owner_id_still_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body="| `PRD-HA-001` | HA pair |\n\n## 28. ITSM\n\nNo formal ID here.\n",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-INT-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_73_invalid_owner_document_still_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ],
+            req_row_overrides={
+                "`Platform_08_Requirements_Traceability.md`": "`Platform_99_Does_Not_Exist.md`",
+            },
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-P-001" in e
+                and (
+                    "not a valid Mother Reference filename" in e
+                    or "does not exist" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_74_duplicate_primary_ids_still_fail(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("REQ-P-001", "Duplicate", "Platform_08_Requirements_Traceability.md"),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("duplicate primary REQ row: REQ-P-001" in e for e in errors),
+            errors,
+        )
+
+    def test_75_existing_source_ids_with_normative_prose_remain_accepted(self) -> None:
+        """Valid existing source IDs in owner prose/tables remain accepted."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+                ),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
 
 if __name__ == "__main__":
     unittest.main()
