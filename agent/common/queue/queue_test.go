@@ -3827,3 +3827,194 @@ func TestDurableQueueMissingMetaWithEvidenceFailsClosed(t *testing.T) {
 		_ = q
 	})
 }
+
+func TestIssue302EnqueueBoundariesAndCapacity(t *testing.T) {
+	for _, size := range []int{65535, 65536, 65537} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			q, err := NewDurableQueue(t.TempDir(), 1, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			r, err := q.Enqueue(bytes.Repeat([]byte("x"), size))
+			outcome, recovery := AdmissionOutcome(err)
+			t.Logf("payload_bytes=%d error=%v outcome=%s recovery=%v", size, err, outcome, recovery)
+			if size > 65536 {
+				if !errors.Is(err, ErrRecordTooLarge) || outcome != NotAdmitted || q.lastSeq != 0 {
+					t.Fatal("oversize admitted")
+				}
+				return
+			}
+			if err != nil || r.Sequence != 1 || outcome != DurablyAdmitted || recovery {
+				t.Fatalf("admission %v", err)
+			}
+			if _, err = q.Enqueue([]byte("full")); !errors.Is(err, ErrQueueFull) {
+				t.Fatal(err)
+			}
+			commitAcceptedThrough(t, q, 1)
+			next, err := q.Enqueue([]byte("retry"))
+			if err != nil || next.Sequence != 2 {
+				t.Fatalf("retry: %v %v", next, err)
+			}
+		})
+	}
+	q, err := NewDurableQueue(t.TempDir(), 10, 100, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = q.Enqueue([]byte("x")); !errors.Is(err, ErrQueueFull) || q.lastSeq != 0 {
+		t.Fatalf("disk byte ceiling: %v", err)
+	}
+}
+
+func TestIssue302MetadataAdmissionDispositionAndRestart(t *testing.T) {
+	for _, phase := range []string{syncPhaseMetaFile, syncPhaseMetaDir} {
+		t.Run(phase, func(t *testing.T) {
+			q, err := NewDurableQueue(t.TempDir(), 10, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			originalStream := q.AgentStreamID()
+			q.syncHook = func(p, target string) error {
+				if p == phase {
+					return errors.New("injected metadata failure")
+				}
+				return nil
+			}
+			_, err = q.Enqueue([]byte("retained"))
+			disposition, recovery := AdmissionOutcome(err)
+			if !errors.Is(err, ErrMetaUncertain) || disposition != DurablyAdmitted || !recovery {
+				t.Fatalf("post persistence %s %v %v", disposition, recovery, err)
+			}
+			if q.lastSeq != 1 || q.activeCount != 1 {
+				t.Fatalf("custody: %+v", q.Stats())
+			}
+			_, err = q.Enqueue([]byte("not admitted"))
+			disposition, recovery = AdmissionOutcome(err)
+			if disposition != NotAdmitted || !recovery || q.lastSeq != 1 {
+				t.Fatalf("pre admission %s %v", disposition, err)
+			}
+			if _, err = q.ReadBatch(10, 1<<20); !errors.Is(err, ErrMetaUncertain) {
+				t.Fatal(err)
+			}
+			reopened, err := NewDurableQueue(q.dir, 10, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			batch, err := reopened.ReadBatch(10, 1<<20)
+			if err != nil || len(batch) != 1 || string(batch[0].Payload) != "retained" || batch[0].Sequence != 1 {
+				t.Fatalf("restart: %v %v", batch, err)
+			}
+			if reopened.AgentStreamID() != originalStream {
+				t.Fatal("stream identity changed")
+			}
+			replay, err := reopened.ReadBatch(10, 1<<20)
+			if err != nil || replay[0].ID != batch[0].ID || replay[0].Checksum != batch[0].Checksum {
+				t.Fatal("replay identity changed")
+			}
+			commitAcceptedThrough(t, reopened, 1)
+			r, err := reopened.Enqueue([]byte("next"))
+			if err != nil || r.Sequence != 2 {
+				t.Fatalf("sequence continuity: %v %v", r, err)
+			}
+		})
+	}
+}
+
+func TestIssue302PostRenameFailureRetainsCustody(t *testing.T) {
+	for _, markerFailure := range []bool{false, true} {
+		t.Run(fmt.Sprint(markerFailure), func(t *testing.T) {
+			q, err := NewDurableQueue(t.TempDir(), 10, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			q.syncHook = func(phase, target string) error {
+				if phase == syncPhaseEnqueueDir {
+					if markerFailure {
+						if err := os.Mkdir(filepath.Join(q.dir, uncertainMarkerFile), 0700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					return errors.New("injected active directory sync failure")
+				}
+				return nil
+			}
+			_, err = q.Enqueue([]byte("uncertain"))
+			disposition, recovery := AdmissionOutcome(err)
+			if disposition != AdmissionUncertain || !recovery || !errors.Is(err, ErrQuarantineUncertain) {
+				t.Fatalf("outcome: %s %v", disposition, err)
+			}
+			if q.lastSeq != 1 || q.activeCount != 1 || !q.Stats().DeliveryBlocked {
+				t.Fatalf("custody not retained: %+v", q.Stats())
+			}
+			_, err = q.Enqueue([]byte("must not reuse"))
+			disposition, recovery = AdmissionOutcome(err)
+			if disposition != NotAdmitted || !recovery || q.lastSeq != 1 {
+				t.Fatalf("queue not blocked: %v", err)
+			}
+			if _, err = q.ReadBatch(10, 1<<20); !errors.Is(err, ErrQuarantineUncertain) {
+				t.Fatal(err)
+			}
+			reopened, err := NewDurableQueue(q.dir, 10, 1<<20, 65536)
+			if markerFailure {
+				if err == nil {
+					t.Fatal("unsafe marker must fail opening")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reopened.Stats().LocationUncertain || reopened.lastSeq != 1 {
+				t.Fatal("restart lost hold")
+			}
+			if _, err = reopened.ReadBatch(10, 1<<20); !errors.Is(err, ErrQuarantineUncertain) {
+				t.Fatal(err)
+			}
+			if _, err = reopened.Enqueue([]byte("blocked after restart")); !errors.Is(err, ErrQuarantineUncertain) {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+func TestIssue302MetadataFailureNeverAttemptsRollbackRemoval(t *testing.T) {
+	q, err := NewDurableQueue(t.TempDir(), 10, 1<<20, 65536)
+	if err != nil {
+		t.Fatal(err)
+	}
+	removals := 0
+	q.removeHook = func(path string) error { removals++; return os.ErrPermission }
+	q.syncHook = func(phase, target string) error {
+		if phase == syncPhaseMetaFile {
+			return errors.New("metadata write failed")
+		}
+		return nil
+	}
+	_, err = q.Enqueue([]byte("retained"))
+	if err == nil || removals != 0 || q.lastSeq != 1 || q.activeCount != 1 {
+		t.Fatalf("unsafe rollback: %v removals=%d %+v", err, removals, q.Stats())
+	}
+	entries, err := os.ReadDir(q.activeDir)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("record removed: %v", err)
+	}
+}
+
+func TestIssue302EmptyQueuePayloadBudget(t *testing.T) {
+	for _, maxBytes := range []int64{100, 1024, 2048, 65536, 1 << 20} {
+		q, err := NewDurableQueue(t.TempDir(), 10, maxBytes, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		limit := q.MaxAdmissionPayloadBytes()
+		if limit < 0 || limit > 65536 {
+			t.Fatal("invalid admission budget")
+		}
+		if limit == 0 {
+			continue
+		}
+		if _, err := q.Enqueue(bytes.Repeat([]byte("x"), limit)); err != nil {
+			t.Fatalf("budget %d bytes cannot fit capacity %d: %v", limit, maxBytes, err)
+		}
+	}
+}

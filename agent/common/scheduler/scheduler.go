@@ -2,7 +2,6 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"hash/fnv"
@@ -61,6 +60,7 @@ type Status struct {
 	RunErrors         int               `json:"run_errors"`
 	PendingOverflows  int               `json:"pending_overflows,omitempty"`
 	Collectors        []CollectorStatus `json:"collectors"`
+	Admission         AdmissionStatus   `json:"admission"`
 }
 
 type collectResult struct {
@@ -78,6 +78,7 @@ type pendingContribution struct {
 	name         string
 	collectedAt  time.Time
 	durationMs   int64
+	encodedBytes int
 	observations []telemetry.Observation
 	errors       []telemetry.CollectorError
 }
@@ -108,6 +109,12 @@ type Scheduler struct {
 
 	runtimes []*collectorRuntime
 	sem      chan struct{}
+
+	admissionMu     sync.Mutex // serializes detach, fragmentation and queue admission
+	backlog         []collectionFragment
+	backlogBytes    int
+	admissionPaused bool            // one failure per flush; no busy retry under pressure
+	admissionStatus AdmissionStatus // protected by mu
 
 	pendingMu  sync.Mutex
 	pending    map[string]pendingContribution
@@ -635,6 +642,7 @@ func (s *Scheduler) deposit(c pendingContribution) {
 		s.cycleStart = c.collectedAt
 	}
 
+	c = s.boundContribution(c)
 	existing, ok := s.pending[c.name]
 	if !ok {
 		if pendingItemCount(c) > maxPendingItemsPerCollector {
@@ -646,8 +654,13 @@ func (s *Scheduler) deposit(c pendingContribution) {
 		return
 	}
 
+	if existing.encodedBytes+c.encodedBytes > maxPendingContributionBytes {
+		s.recordAdmissionDrop(len(c.observations), len(c.errors), "pending_byte_bound")
+		return
+	}
 	mergedCount := pendingItemCount(existing) + pendingItemCount(c)
 	if mergedCount > maxPendingItemsPerCollector {
+		s.recordAdmissionDrop(len(c.observations), len(c.errors), "pending_item_bound")
 		s.recordPendingOverflowLocked(c.name, &existing)
 		s.pending[c.name] = existing
 		return
@@ -662,6 +675,7 @@ func (s *Scheduler) deposit(c pendingContribution) {
 	}
 	existing.observations = append(existing.observations, c.observations...)
 	existing.errors = append(existing.errors, c.errors...)
+	existing.encodedBytes += c.encodedBytes
 	s.pending[c.name] = existing
 }
 
@@ -682,13 +696,16 @@ func (s *Scheduler) recordPendingOverflowLocked(collectorName string, target *pe
 	// the PENDING_OVERFLOW marker itself.
 	for pendingItemCount(*target) > maxPendingItemsPerCollector {
 		if len(target.observations) > 0 {
+			s.recordAdmissionDrop(1, 0, "pending_item_bound")
 			target.observations = target.observations[1:]
 			continue
 		}
 		if !trimOldestNonOverflowError(target) {
 			break
 		}
+		s.recordAdmissionDrop(0, 1, "pending_item_bound")
 	}
+	target.encodedBytes = contributionBytes(*target)
 	s.logger.Warn("Pending aggregation overflow",
 		"event_code", "AGENT_COLLECTION_PENDING_OVERFLOW",
 		"result", "REJECTED",
@@ -711,12 +728,19 @@ func trimOldestNonOverflowError(target *pendingContribution) bool {
 	return false
 }
 
-// flushPending aggregates per-collector deposits into one CollectionBatch so
-// durable-queue record cardinality tracks the collection cycle, not collector count.
+// flushPending preserves small-cycle aggregation and fragments larger cycles.
+// Detached contributions remain owned by the bounded admission backlog until
+// accepted, explicitly dropped, or held for recovery; no full-cycle atomicity.
 func (s *Scheduler) flushPending() {
+	s.admissionMu.Lock()
+	defer s.admissionMu.Unlock()
+	s.admissionPaused = false
+	defer s.publishBacklog()
+	s.drainBacklog()
 	s.pendingMu.Lock()
 	if len(s.pending) == 0 {
 		s.pendingMu.Unlock()
+		s.drainBacklog()
 		return
 	}
 	contribs := make([]pendingContribution, 0, len(s.pending))
@@ -762,50 +786,8 @@ func (s *Scheduler) flushPending() {
 		Errors:        collectorErrors,
 	}
 
-	payload, err := json.Marshal(batch)
-	if err != nil {
-		s.logger.Error("Failed to marshal collection batch",
-			"event_code", "AGENT_COLLECTION_MARSHAL_FAILED",
-			"result", "FAILED",
-			"safe_context", map[string]any{"reason_class": "marshal_failed"},
-		)
-		return
-	}
-
-	if _, err := s.enqueuer.Enqueue(payload); err != nil {
-		s.mu.Lock()
-		s.runErrors++
-		s.mu.Unlock()
-		for _, c := range contribs {
-			if rt := s.runtimeByName(c.name); rt != nil {
-				rt.mu.Lock()
-				rt.errorCount++
-				rt.lastError = "enqueue_failed"
-				rt.mu.Unlock()
-			}
-		}
-		s.logger.Error("Failed to enqueue collection batch",
-			"event_code", "AGENT_COLLECTION_ENQUEUE_FAILED",
-			"result", "FAILED",
-			"safe_context", map[string]any{
-				"reason_class":      "enqueue_failed",
-				"observation_count": len(observations),
-				"error_count":       len(collectorErrors),
-			},
-		)
-		return
-	}
-
-	s.logger.Debug("Enqueued collection batch",
-		"event_code", "AGENT_COLLECTION_ENQUEUED",
-		"result", "ACCEPTED",
-		"safe_context", map[string]any{
-			"observation_count": len(observations),
-			"error_count":       len(collectorErrors),
-			"duration_ms":       maxDur,
-			"collector_count":   len(contribs),
-		},
-	)
+	s.fragmentCollection(batch)
+	s.drainBacklog()
 }
 
 func (s *Scheduler) runtimeByName(name string) *collectorRuntime {
@@ -830,7 +812,7 @@ func (s *Scheduler) beginRunOnce() bool {
 }
 
 // RunOnce executes every enabled collector once with timeout isolation and
-// bounded concurrency, then flushes one aggregate durable batch. The whole
+// bounded concurrency, then flushes bounded aggregate fragments. The whole
 // operation (collectors + final flush) is stop-gated; once Stop begins, RunOnce
 // performs no collector work and no enqueue/flush.
 func (s *Scheduler) RunOnce(ctx context.Context) {
@@ -925,6 +907,12 @@ func (s *Scheduler) StopContext(ctx context.Context) error {
 	s.beginStop()
 	select {
 	case <-s.stopDone:
+		s.mu.Lock()
+		incomplete := s.admissionStatus.BacklogFragments > 0 || s.admissionStatus.RecoveryRequired
+		s.mu.Unlock()
+		if incomplete {
+			return ErrPendingAdmission
+		}
 		return nil
 	case <-ctx.Done():
 		return fmt.Errorf("SCHEDULER_STOP_TIMEOUT: %w", ctx.Err())
@@ -975,6 +963,7 @@ func (s *Scheduler) Status() Status {
 	lastRun := s.lastRun
 	runErrors := s.runErrors
 	pendingOverflows := s.pendingOverflows
+	admission := s.admissionStatus
 	s.mu.Unlock()
 
 	collectors := make([]CollectorStatus, 0, len(s.runtimes))
@@ -1011,6 +1000,7 @@ func (s *Scheduler) Status() Status {
 		RunErrors:         runErrors,
 		PendingOverflows:  pendingOverflows,
 		Collectors:        collectors,
+		Admission:         admission,
 	}
 }
 
