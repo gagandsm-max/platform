@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-29 — Issue #268 Phase 1.5 Serverless/FaaS monitoring Mother Reference reconciliation (SPECIFIED only; retains v3.3.0). Prior Issue #200/#202/#206 Tranche A retained
+**Last reconciliation:** 2026-11-07 — Issue #300 P0-DOC-03 Phase-1 vs Phase-1.5 Integration Fabric/CMDB/ITSM baseline-vs-expansion wording (SPECIFIED only; retains v3.3.0). Prior Issue #268 / #269 / #200/#202/#206 Tranche A retained
 
 ---
 
@@ -2471,9 +2471,11 @@ Outbound delivery uses a PostgreSQL transactional outbox to connector workers; i
 
 Phase-1 connector certification targets are **ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus / ServiceDesk Plus MSP**. Phase-1.5 certification-priority targets are **Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM**. This is AmrudAi certification priority, not a claimed global market ranking. Every capability claim is edition/API/version/auth/workflow specific.
 
+**Phase boundary (baseline vs expansion):** Phase 1 owns the Integration Fabric baseline above — the common Integration Service architecture, mandatory safe delivery/authorization/durability, the four Phase-1 ITSM certification targets, Mapping Studio and Test Sandbox. Phase 1.5 expands enterprise-foundation depth (advanced bidirectional reconciliation/relationship-level certification, extended Integration Fabric capabilities, second-wave ITSM connectors under `REQ-INT-013`, and expanded integration capacity/compatibility certification where explicitly scoped). Phase 1.5 does **not** relocate the four Phase-1 ITSM connectors, the common Integration Service architecture, or Mapping Studio/Test Sandbox out of Phase 1.
+
 ### 58.6 CMDB authority and reconciliation
 
-Support Phase-1 **Enrichment** (CMDB -> Platform) and bounded **Publication** (Platform -> CMDB), plus Phase-1 architecture for governed bidirectional reconciliation with deeper relationship certification in Phase 1.5. External CIs bind to canonical Platform entities; no second entity database is created. Last-write-wins and automatic entity deletion from missing external CIs are prohibited.
+Support Phase-1 **Enrichment** (CMDB -> Platform) and bounded **Publication** (Platform -> CMDB), plus Phase-1 architecture for governed bidirectional reconciliation with deeper relationship certification in Phase 1.5. External CIs bind to canonical Platform entities; no second entity database is created. Last-write-wins and automatic entity deletion from missing external CIs are prohibited. Canonical Platform entity authority, tenant isolation, explicit field/class ownership, audit and conflict safeguards remain Phase-1 commitments. Phase 1.5 owns governed advanced bidirectional reconciliation and relationship-level certification depth; it does **not** move Phase-1 Enrichment or bounded Publication into Phase 1.5.
 
 Observed reachability, telemetry, device configuration, routing, discovered technical topology/runtime relationships and RCA/evidence remain Platform technical truth. ITSM workflow/assignee/CAB state and normal business-owner/support-group/cost-centre/lifecycle metadata remain external authority by default; business criticality, declared service relationships, maintenance policy and selected tags/custom fields may use explicit configurable field/class authority. Conflicts remain visible/auditable.
 
@@ -2587,8 +2589,8 @@ No row above implies implementation, benchmark, certification or deployment.
 
 ### Phase contract
 
-- **Phase 1:** current frozen Network & Infrastructure Observability commercial core.
-- **Phase 1.5:** enterprise foundation: HA/MSP, Integration Fabric + CMDB reconciliation, bounded sampled operational spans/service edges, NCM Change Assurance, selected broader Capability Packs and first-class serverless.
+- **Phase 1:** current frozen Network & Infrastructure Observability commercial core, including preserved Integration Fabric / ITSM / CMDB baselines in §58.5–58.7 (four ITSM certification targets; common Integration Service architecture and mandatory safe delivery/authorization/durability; CMDB Enrichment and bounded Publication; canonical entity authority/tenant isolation/field ownership/audit/conflict safeguards; Phase-1 architectural preparation for governed bidirectional reconciliation; Mapping Studio and Test Sandbox).
+- **Phase 1.5:** enterprise foundation expansion: HA/MSP; Integration Fabric and CMDB depth beyond the Phase-1 baseline (governed advanced bidirectional reconciliation and relationship-level certification; extended enterprise Integration Fabric capabilities; second-wave ITSM connectors; expanded integration capacity/compatibility certification where explicitly scoped); bounded sampled operational spans/service edges; NCM Change Assurance; selected broader Capability Packs; and first-class serverless. Phase 1.5 does not relocate the Phase-1 four ITSM connectors or bounded CMDB Enrichment/Publication.
 - **Phase 2:** Enterprise ITOM/AIOps RFP Readiness. Platform shall deliver native or certified-integrated coverage for the `PRD-ECR-*` catalogue in Platform_23 and pass `ECRP-P2-v1`.
 - **Phase 2.5+:** native full APM and native full always-on DPI/deep packet analytics.
 

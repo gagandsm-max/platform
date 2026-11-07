@@ -342,8 +342,8 @@ Capability Pack v1.3 status (IN PROGRESS / NOT CERTIFIED): Issue #92 commercial-
 
 | Phase | Certified outcome |
 |---|---|
-| **Phase 1** | Existing frozen production Network & Infrastructure Observability core. Issue #269 does not add Phase-2 breadth to the current first-GA critical path. |
-| **Phase 1.5 — Enterprise Foundation** | Exactly-two-Core HA/MSP + Integration Fabric/CMDB reconciliation + bounded operational OTel span/service-edge evidence + NCM Change Assurance + first-class serverless + selected broader Capability/Integration Packs. |
+| **Phase 1** | Existing frozen production Network & Infrastructure Observability core, including preserved Integration Fabric / ITSM / CMDB baselines (four ITSM certification targets; common Integration Service architecture and mandatory safe delivery/authorization/durability; CMDB Enrichment and bounded Publication; canonical entity authority/tenant isolation/field ownership/audit/conflict safeguards; Phase-1 architectural preparation for governed bidirectional reconciliation; Mapping Studio and Test Sandbox). Issue #269 does not add Phase-2 breadth to the current first-GA critical path and does not relocate those Phase-1 baselines. |
+| **Phase 1.5 — Enterprise Foundation** | Exactly-two-Core HA/MSP + Integration Fabric/CMDB **expansion depth** beyond the Phase-1 baseline (advanced bidirectional reconciliation and relationship-level certification; extended Integration Fabric capabilities; second-wave ITSM connectors; expanded integration capacity/compatibility certification where explicitly scoped) + bounded operational OTel span/service-edge evidence + NCM Change Assurance + first-class serverless + selected broader Capability/Integration Packs. |
 | **Phase 2 — Enterprise ITOM/AIOps RFP Readiness** | Large-enterprise heterogeneous monitoring/ITOM/AIOps breadth can be answered as **Native — Certified** or **Integrated — Certified**, and the representative `ECRP-P2-v1` profile passes. |
 | **Phase 2.5+** | Full native APM and full native always-on DPI/deep packet analytics, only after separate architecture/dependency/security/capacity change control. |
 
@@ -352,8 +352,8 @@ Capability Pack v1.3 status (IN PROGRESS / NOT CERTIFIED): Issue #92 commercial-
 | Capability | Existing BUILD ownership / gates | Required Phase-1.5 outcome |
 |---|---|---|
 | Exactly-two-Core HA + MSP | BUILD-060, 075, 120–124, 128, 130–132 | fencing/split-brain, PG/Kafka/CH continuity, Sensor reconnect/replay, noisy-neighbour/tenant isolation |
-| Integration Fabric / ITSM | BUILD-086 + integration contracts in 060/069/073/128 | transactional outbox/inbox, webhook/poll, mapping, sandbox, retry/idempotency, connector health |
-| CMDB reconciliation | BUILD-066/068/072/086 | ExternalBinding, CI/relationship reconciliation, field authority/conflicts, provenance/history |
+| Integration Fabric / ITSM (Phase-1.5 expansion over preserved Phase-1 baseline) | BUILD-086 + integration contracts in 060/069/073/128 | Phase-1 baseline remains: four ITSM certification targets, common Integration Service architecture, outbox/inbox durability, Mapping Studio/Test Sandbox, connector health. Phase-1.5 outcome adds: extended enterprise Integration Fabric capabilities, second-wave ITSM connectors (`REQ-INT-013`), expanded capacity/compatibility certification where explicitly scoped; does not relocate Phase-1 connectors |
+| CMDB reconciliation (Phase-1.5 expansion over preserved Phase-1 baseline) | BUILD-066/068/072/086 | Phase-1 baseline remains: Enrichment, bounded Publication, ExternalBinding, field authority/conflicts, audit, Phase-1 architectural preparation for governed bidirectional reconciliation. Phase-1.5 outcome adds: governed advanced bidirectional reconciliation and relationship-level certification depth/provenance/history; does not relocate Phase-1 Enrichment/Publication |
 | Bounded operational OTel spans/service edges | BUILD-036/062–064/072/084/085 | bounded sampled span/edge evidence; no full APM backend |
 | NCM Change Assurance | BUILD-090/091 + 069/073/085 | immutable plan/approval binding, canary/batch, pre/post validation, stop/rollback where certified |
 | Serverless/FaaS | BUILD-026/036 + cloud/API Sensor paths | AWS Lambda, Azure Functions, Google Cloud Functions, Cloud Run per Issue #268 |
