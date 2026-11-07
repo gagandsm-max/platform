@@ -53,6 +53,14 @@ func (a issue302Authority) ResolveAgentAuthority(_ context.Context, fp string) (
 }
 
 func TestIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T) {
+	for _, maxRecords := range []int{1, 100} {
+		t.Run(fmt.Sprintf("max_records_%d", maxRecords), func(t *testing.T) {
+			testIssue302FragmentedMTLSSpoolRestartAndLostACK(t, maxRecords)
+		})
+	}
+}
+
+func testIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T, maxRecords int) {
 	ca, key := mustCreateCA(t)
 	serverDER, serverKey := mustCreateServerKeyPair(t, ca, key)
 	clientDER, clientKey := mustCreateClientKeyPair(t, ca, key, "untrusted-display-name")
@@ -147,7 +155,7 @@ func TestIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		w, err := delivery.NewWorker(q, tr, ident.AgentID, 1, 384*1024, time.Millisecond, 10*time.Millisecond, time.Second, logger)
+		w, err := delivery.NewWorker(q, tr, ident.AgentID, maxRecords, 384*1024, time.Millisecond, 10*time.Millisecond, time.Second, logger)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -185,7 +193,8 @@ func TestIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T) {
 		t.Fatal("denied source changed Sensor custody")
 	}
 	worker = newWorker(ident.TenantID)
-	for i := 0; i < len(original); i++ {
+	expectedEnvelopes := (len(original) + maxRecords - 1) / maxRecords
+	for i := 0; i < expectedEnvelopes; i++ {
 		if delivered, err := worker.DeliverOnce(context.Background()); err != nil || !delivered {
 			t.Fatalf("reconnect/replay delivery %d: %v", i, err)
 		}
@@ -194,7 +203,7 @@ func TestIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T) {
 		t.Fatal("valid ACK did not advance queue")
 	}
 	batch, err := sp.ReadBatch(100, 4<<20)
-	if err != nil || len(batch.Records) != len(original) {
+	if err != nil || len(batch.Records) != expectedEnvelopes {
 		t.Fatalf("Sensor replay duplicate/missing records=%d err=%v", len(batch.Records), err)
 	}
 	seen := map[string]bool{}
@@ -223,5 +232,5 @@ func TestIssue302FragmentedMTLSSpoolRestartAndLostACK(t *testing.T) {
 	if len(seen) != len(expected) {
 		t.Fatalf("stored=%d expected=%d", len(seen), len(expected))
 	}
-	t.Logf("encoded_collection_bytes_sum=%d fragments=%d source_observations=%d stored_observations=%d; actual_mTLS_receiver_and_Sensor_spool=true; Core_authority=fixture", totalBytes, len(original), len(expected), len(seen))
+	t.Logf("encoded_collection_bytes_sum=%d fragments=%d source_observations=%d stored_observations=%d max_batch_records=%d stored_envelopes=%d; actual_mTLS_receiver_and_Sensor_spool=true; Core_authority=fixture", totalBytes, len(original), len(expected), len(seen), maxRecords, len(batch.Records))
 }

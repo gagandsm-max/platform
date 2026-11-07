@@ -1184,6 +1184,9 @@ func TestIssue302AdmissionHealthCannotMaskLossOrRecovery(t *testing.T) {
 		{"error_loss", scheduler.AdmissionStatus{DroppedErrors: 1}, 200, "DEGRADED", "COLLECTION_ADMISSION_LOSS"},
 		{"recovery", scheduler.AdmissionStatus{RecoveryRequired: true}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
 		{"uncertain", scheduler.AdmissionStatus{UncertainObservations: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
+		{"write_blocked", scheduler.AdmissionStatus{WriteBlocked: true, BacklogFragments: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_BLOCKED"},
+		{"blocked_with_loss", scheduler.AdmissionStatus{WriteBlocked: true, BacklogFragments: 1, DroppedObservations: 2}, 503, "NOT_READY", "COLLECTION_ADMISSION_LOSS"},
+		{"recovery_with_backlog", scheduler.AdmissionStatus{RecoveryRequired: true, BacklogFragments: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_BACKLOG"},
 		{"recovered_capacity", scheduler.AdmissionStatus{FailedAttempts: 1, RejectedAttempts: 1, DurableObservations: 3}, 200, "UP", ""},
 	}
 	for _, tc := range cases {

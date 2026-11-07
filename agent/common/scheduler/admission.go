@@ -23,6 +23,10 @@ var ErrPendingAdmission = errors.New("SCHEDULER_ADMISSION_INCOMPLETE: unaccepted
 // AdmissionStatus separates local queue custody, explicit loss, and uncertain
 // custody. Memory backlog does not survive a process crash. Durable counts are
 // not Sensor ACKs; only the existing delivery worker may commit an ACK.
+// Uncertain counts are a subset of retained Backlog counts, not an additional
+// custody bucket. Keep their payloads until governed recovery resolves custody.
+// Backlog describes serialized fragments; collection/encoding in flight is not
+// yet included. Each fragment's custody transition is published atomically.
 type AdmissionStatus struct {
 	DurableFragments      uint64 `json:"durable_fragments"`
 	DurableObservations   uint64 `json:"durable_observations"`
@@ -38,6 +42,7 @@ type AdmissionStatus struct {
 	BacklogObservations   int    `json:"backlog_observations"`
 	BacklogErrors         int    `json:"backlog_errors"`
 	RecoveryRequired      bool   `json:"recovery_required"`
+	WriteBlocked          bool   `json:"write_blocked"`
 }
 
 type collectionFragment struct {
@@ -105,6 +110,10 @@ func (s *Scheduler) recordAdmissionDrop(obs, errs int, reason string) {
 	s.admissionStatus.DroppedErrors += uint64(errs)
 	s.runErrors++
 	s.mu.Unlock()
+	s.logAdmissionDrop(obs, errs, reason)
+}
+
+func (s *Scheduler) logAdmissionDrop(obs, errs int, reason string) {
 	s.logger.Warn("Collection items dropped before durable admission", "event_code", "AGENT_COLLECTION_ADMISSION_DROPPED", "result", "DROPPED", "safe_context", map[string]any{"reason_class": reason, "observation_count": obs, "error_count": errs})
 }
 
@@ -151,6 +160,7 @@ func (s *Scheduler) fragmentCollection(batch telemetry.CollectionBatch) {
 			}
 			s.backlog = append(s.backlog, collectionFragment{payload: payload, observations: len(batch.Observations), errors: len(batch.Errors), collectors: names})
 			s.backlogBytes += len(payload)
+			s.publishBacklog()
 			s.drainBacklog()
 		}
 		batch.Observations = []telemetry.Observation{}
@@ -213,7 +223,13 @@ func (s *Scheduler) drainBacklog() {
 		f := s.backlog[0]
 		_, err := s.enqueuer.Enqueue(f.payload)
 		disposition, recovery := queue.AdmissionOutcome(err)
+		terminalDrop := disposition == queue.NotAdmitted && errors.Is(err, queue.ErrRecordTooLarge) && !recovery
 		s.mu.Lock()
+		// A known rejection due to capacity or local I/O means durable buffering
+		// cannot currently progress, even if QueueStats is below its byte ceiling.
+		// Clear only when a later attempt proves admission can progress, or the
+		// rejected item is intrinsically too large rather than a write failure.
+		s.admissionStatus.WriteBlocked = disposition == queue.NotAdmitted && err != nil && !terminalDrop
 		if disposition == queue.DurablyAdmitted {
 			s.admissionStatus.DurableFragments++
 			s.admissionStatus.DurableObservations += uint64(f.observations)
@@ -234,6 +250,17 @@ func (s *Scheduler) drainBacklog() {
 		if recovery {
 			s.admissionStatus.RecoveryRequired = true
 		}
+		if terminalDrop {
+			s.admissionStatus.DroppedObservations += uint64(f.observations)
+			s.admissionStatus.DroppedErrors += uint64(f.errors)
+			s.runErrors++
+		}
+		if disposition == queue.DurablyAdmitted || terminalDrop {
+			s.backlogBytes -= len(f.payload)
+			s.backlog[0] = collectionFragment{}
+			s.backlog = s.backlog[1:]
+		}
+		s.publishBacklogLocked()
 		s.mu.Unlock()
 		if err != nil {
 			for name := range f.collectors {
@@ -246,19 +273,12 @@ func (s *Scheduler) drainBacklog() {
 			}
 			s.logger.Error("Collection fragment admission failed", "event_code", "AGENT_COLLECTION_ENQUEUE_FAILED", "result", string(disposition), "safe_context", map[string]any{"encoded_bytes": len(f.payload), "observation_count": f.observations, "error_count": f.errors, "recovery_required": recovery, "reason_class": admissionReason(err)})
 		}
-		if disposition == queue.DurablyAdmitted {
-			s.backlogBytes -= len(f.payload)
-			s.backlog[0] = collectionFragment{}
-			s.backlog = s.backlog[1:]
-		} else if errors.Is(err, queue.ErrRecordTooLarge) && !recovery {
+		if terminalDrop {
 			// A legacy/non-limit-aware enqueuer rejected the complete record. Do not
 			// retry it forever or infer a larger receiver budget. Report exact loss.
-			s.recordAdmissionDrop(f.observations, f.errors, "queue_record_limit")
-			s.backlogBytes -= len(f.payload)
-			s.backlog[0] = collectionFragment{}
-			s.backlog = s.backlog[1:]
+			s.logAdmissionDrop(f.observations, f.errors, "queue_record_limit")
 			continue
-		} else {
+		} else if disposition != queue.DurablyAdmitted {
 			s.admissionPaused = true
 			return
 		}
@@ -287,15 +307,21 @@ func admissionReason(err error) string {
 }
 
 func (s *Scheduler) publishBacklog() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.publishBacklogLocked()
+}
+
+// Caller owns admissionMu and mu. Publish custody counters with the matching
+// backlog mutation so Status cannot count a durable fragment a second time.
+func (s *Scheduler) publishBacklogLocked() {
 	obs, errs := 0, 0
 	for _, f := range s.backlog {
 		obs += f.observations
 		errs += f.errors
 	}
-	s.mu.Lock()
 	s.admissionStatus.BacklogFragments = len(s.backlog)
 	s.admissionStatus.BacklogBytes = s.backlogBytes
 	s.admissionStatus.BacklogObservations = obs
 	s.admissionStatus.BacklogErrors = errs
-	s.mu.Unlock()
 }

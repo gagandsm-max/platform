@@ -638,11 +638,14 @@ func (s *Scheduler) deposit(c pendingContribution) {
 	}
 	s.pendingMu.Lock()
 	defer s.pendingMu.Unlock()
+	c = s.boundContribution(c)
+	if pendingItemCount(c) == 0 {
+		return
+	}
 	if s.cycleStart.IsZero() || c.collectedAt.Before(s.cycleStart) {
 		s.cycleStart = c.collectedAt
 	}
 
-	c = s.boundContribution(c)
 	existing, ok := s.pending[c.name]
 	if !ok {
 		if pendingItemCount(c) > maxPendingItemsPerCollector {

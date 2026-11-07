@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -408,4 +409,87 @@ func TestIssue302SustainedPressureRemainsBounded(t *testing.T) {
 		t.Fatal("pressure accumulated goroutines")
 	}
 	t.Logf("cycles=%d input_observations=%d elapsed_ms=%d heap_before=%d heap_after=%d goroutines_before=%d goroutines_after=%d backlog_bytes=%d dropped=%d failed_attempts=%d", cycles, cycles*192, time.Since(started).Milliseconds(), before.HeapAlloc, after.HeapAlloc, goroutines, runtime.NumGoroutine(), st.BacklogBytes, st.DroppedObservations, st.FailedAttempts)
+}
+
+func TestIssue302WriteRejectionHealthStateAndRecovery(t *testing.T) {
+	for _, cause := range []error{syscall.ENOSPC, syscall.EROFS, syscall.EIO} {
+		t.Run(cause.Error(), func(t *testing.T) {
+			q := newAdmissionQueue(t, 700)
+			f := &failingAdmissionQueue{q: q, failAt: 1, err: &queue.AdmissionError{Disposition: queue.NotAdmitted, Err: cause}}
+			s := admissionFixture(t, f, "cpu")
+			depositObservations(s, "cpu", admissionObservations(t, 1, "cpu"), nil)
+			s.flushPending()
+			if st := s.Status().Admission; !st.WriteBlocked || st.BacklogObservations != 1 || st.DurableObservations != 0 || st.RecoveryRequired {
+				t.Fatalf("local write failure masked: %+v", st)
+			}
+			s.flushPending()
+			if st := s.Status().Admission; st.WriteBlocked || st.BacklogObservations != 0 || st.DurableObservations != 1 {
+				t.Fatalf("successful retry did not clear write block: %+v", st)
+			}
+		})
+	}
+	t.Run("serialized_byte_capacity", func(t *testing.T) {
+		q, err := queue.NewDurableQueue(t.TempDir(), 100, 2000, 700)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s := admissionFixture(t, q, "cpu")
+		depositObservations(s, "cpu", admissionObservations(t, 3, "cpu"), nil)
+		s.flushPending()
+		if st := s.Status().Admission; !st.WriteBlocked || st.BacklogObservations == 0 || q.Stats().AtCapacity {
+			t.Fatalf("byte rejection below exact capacity not exposed: %+v queue=%+v", st, q.Stats())
+		}
+		records, err := q.ReadBatch(100, 10000)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(records) == 0 {
+			t.Fatal("capacity fixture admitted no prefix")
+		}
+		if err := q.CommitAccepted(records, records[len(records)-1].Sequence); err != nil {
+			t.Fatal(err)
+		}
+		s.flushPending()
+		if st := s.Status().Admission; st.WriteBlocked || st.BacklogObservations != 0 || st.DurableObservations != 3 {
+			t.Fatalf("capacity recovery failed: %+v", st)
+		}
+	})
+}
+
+func TestIssue302DroppedContributionCannotAnchorCycle(t *testing.T) {
+	q := newAdmissionQueue(t, 65536)
+	s := admissionFixture(t, q, "cpu")
+	valid := admissionObservations(t, 1, "cpu")
+	invalid := valid[0]
+	invalid.Value = math.NaN()
+	s.deposit(pendingContribution{name: "cpu", collectedAt: valid[0].ObservedAt.Add(-time.Hour), observations: []telemetry.Observation{invalid}})
+	if len(s.pending) != 0 || !s.cycleStart.IsZero() {
+		t.Fatal("dropped contribution retained cycle metadata")
+	}
+	depositObservations(s, "cpu", valid, nil)
+	s.flushPending()
+	_, got, _ := readCollections(t, q)
+	if !reflect.DeepEqual(valid, got) || s.Status().Admission.DroppedObservations != 1 {
+		t.Fatal("valid contribution metadata or loss accounting changed")
+	}
+}
+
+func TestIssue302InFlightFragmentCustodySnapshot(t *testing.T) {
+	q := newAdmissionQueue(t, 700)
+	f := &failingAdmissionQueue{q: q, entered: make(chan struct{}), release: make(chan struct{})}
+	s := admissionFixture(t, f, "cpu")
+	depositObservations(s, "cpu", admissionObservations(t, 1, "cpu"), nil)
+	done := make(chan struct{})
+	go func() { s.flushPending(); close(done) }()
+	<-f.entered
+	st := s.Status().Admission
+	close(f.release)
+	<-done
+	if st.BacklogObservations != 1 || st.BacklogFragments != 1 || st.DurableObservations != 0 {
+		t.Fatalf("in-flight serialized custody omitted: %+v", st)
+	}
+	st = s.Status().Admission
+	if st.BacklogObservations != 0 || st.BacklogFragments != 0 || st.DurableObservations != 1 {
+		t.Fatalf("completed custody double-counted: %+v", st)
+	}
 }

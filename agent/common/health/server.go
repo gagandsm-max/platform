@@ -388,6 +388,18 @@ func evaluateReadiness(in readinessInput) readinessDecision {
 	if snap.Admission.RecoveryRequired || snap.Admission.UncertainObservations > 0 || snap.Admission.UncertainErrors > 0 {
 		hard = appendUnique(hard, "COLLECTION_ADMISSION_RECOVERY_REQUIRED")
 	}
+	if snap.Admission.WriteBlocked {
+		hard = appendUnique(hard, "COLLECTION_ADMISSION_BLOCKED")
+	}
+	var admissionReasons []string
+	if snap.Admission.BacklogFragments > 0 {
+		admissionReasons = append(admissionReasons, "COLLECTION_ADMISSION_BACKLOG")
+	}
+	// Irreversible loss remains visible alongside a hard block and after later
+	// successful collection, for this process lifetime.
+	if snap.Admission.DroppedObservations > 0 || snap.Admission.DroppedErrors > 0 {
+		admissionReasons = append(admissionReasons, "COLLECTION_ADMISSION_LOSS")
+	}
 
 	if len(hard) == 0 {
 		degraded = appendUnique(degraded, deliveryDegradedReasons(snap.Delivery)...)
@@ -395,20 +407,13 @@ func evaluateReadiness(in readinessInput) readinessDecision {
 			degraded = appendUnique(degraded, "QUEUE_QUARANTINE_PRESENT")
 		}
 		degraded = appendUnique(degraded, collectorDegradedReasons(snap)...)
-		if snap.Admission.BacklogFragments > 0 {
-			degraded = appendUnique(degraded, "COLLECTION_ADMISSION_BACKLOG")
-		}
-		// Loss is irreversible evidence for this process lifetime. A later successful
-		// collector execution must not erase it or report fully healthy telemetry.
-		if snap.Admission.DroppedObservations > 0 || snap.Admission.DroppedErrors > 0 {
-			degraded = appendUnique(degraded, "COLLECTION_ADMISSION_LOSS")
-		}
-
+		degraded = appendUnique(degraded, admissionReasons...)
 	} else {
 		// Preserve useful secondary quarantine evidence alongside hard blocks.
 		if snap.Queue.QuarantineCount > 0 {
 			hard = appendUnique(hard, "QUEUE_QUARANTINE_PRESENT")
 		}
+		hard = appendUnique(hard, admissionReasons...)
 	}
 
 	switch {
