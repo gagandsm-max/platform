@@ -1205,7 +1205,9 @@ func TestIssue302AdmissionHealthCannotMaskLossOrRecovery(t *testing.T) {
 				t.Fatalf("healthz code=%d want=%d", w.Code, tc.code)
 			}
 			for _, evidence := range []map[string]any{readyBody, body, decodeBody(t, w)} {
-				reasons, _ := json.Marshal(evidence["reason_codes"])
+				// /ready and /healthz use reason_code alone for a single reason;
+				// reason_codes is optional until secondary reasons are present.
+				reasons, _ := json.Marshal([]any{evidence["reason_code"], evidence["reason_codes"]})
 				if tc.admission.BacklogFragments > 0 && !strings.Contains(string(reasons), "COLLECTION_ADMISSION_BACKLOG") {
 					t.Fatalf("secondary backlog evidence missing: %s", reasons)
 				}
