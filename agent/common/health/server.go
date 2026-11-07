@@ -17,6 +17,7 @@ import (
 	"platform/agent/common/collector"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
+	"platform/agent/common/scheduler"
 )
 
 const (
@@ -38,6 +39,7 @@ type RuntimeSnapshot struct {
 	Lifecycle                string
 	Queue                    queue.QueueStats
 	Delivery                 delivery.DeliveryStats
+	Admission                scheduler.AdmissionStatus
 	SchedulerRunning         bool
 	EnabledCollectors        int
 	Collectors               []CollectorSnapshot
@@ -383,6 +385,9 @@ func evaluateReadiness(in readinessInput) readinessDecision {
 
 	hard = appendUnique(hard, queueHardReasons(snap.Queue)...)
 	hard = appendUnique(hard, deliveryHardReasons(snap.Delivery)...)
+	if snap.Admission.RecoveryRequired || snap.Admission.UncertainObservations > 0 || snap.Admission.UncertainErrors > 0 {
+		hard = appendUnique(hard, "COLLECTION_ADMISSION_RECOVERY_REQUIRED")
+	}
 
 	if len(hard) == 0 {
 		degraded = appendUnique(degraded, deliveryDegradedReasons(snap.Delivery)...)
@@ -390,6 +395,15 @@ func evaluateReadiness(in readinessInput) readinessDecision {
 			degraded = appendUnique(degraded, "QUEUE_QUARANTINE_PRESENT")
 		}
 		degraded = appendUnique(degraded, collectorDegradedReasons(snap)...)
+		if snap.Admission.BacklogFragments > 0 {
+			degraded = appendUnique(degraded, "COLLECTION_ADMISSION_BACKLOG")
+		}
+		// Loss is irreversible evidence for this process lifetime. A later successful
+		// collector execution must not erase it or report fully healthy telemetry.
+		if snap.Admission.DroppedObservations > 0 || snap.Admission.DroppedErrors > 0 {
+			degraded = appendUnique(degraded, "COLLECTION_ADMISSION_LOSS")
+		}
+
 	} else {
 		// Preserve useful secondary quarantine evidence alongside hard blocks.
 		if snap.Queue.QuarantineCount > 0 {
@@ -560,15 +574,35 @@ func collectorDegradedReasons(snap RuntimeSnapshot) []string {
 
 func supportCounters(snap RuntimeSnapshot) map[string]int64 {
 	return map[string]int64{
-		"queue_active_count":     int64(maxZeroInt(snap.Queue.ActiveCount)),
-		"queue_active_bytes":     maxZeroInt64(snap.Queue.ActiveBytes),
-		"quarantine_count":       int64(maxZeroInt(snap.Queue.QuarantineCount)),
-		"quarantine_bytes":       maxZeroInt64(snap.Queue.QuarantineBytes),
-		"delivery_attempts":      maxZeroInt64(snap.Delivery.Attempts),
-		"delivery_successes":     maxZeroInt64(snap.Delivery.Successes),
-		"delivery_retry_attempt": int64(maxZeroInt(snap.Delivery.RetryAttempt)),
-		"collector_errors":       int64(maxZeroInt(snap.CollectorRunErrors)),
+		"queue_active_count":               int64(maxZeroInt(snap.Queue.ActiveCount)),
+		"queue_active_bytes":               maxZeroInt64(snap.Queue.ActiveBytes),
+		"quarantine_count":                 int64(maxZeroInt(snap.Queue.QuarantineCount)),
+		"quarantine_bytes":                 maxZeroInt64(snap.Queue.QuarantineBytes),
+		"delivery_attempts":                maxZeroInt64(snap.Delivery.Attempts),
+		"delivery_successes":               maxZeroInt64(snap.Delivery.Successes),
+		"delivery_retry_attempt":           int64(maxZeroInt(snap.Delivery.RetryAttempt)),
+		"collector_errors":                 int64(maxZeroInt(snap.CollectorRunErrors)),
+		"admission_backlog_fragments":      int64(maxZeroInt(snap.Admission.BacklogFragments)),
+		"admission_backlog_bytes":          int64(maxZeroInt(snap.Admission.BacklogBytes)),
+		"admission_backlog_observations":   int64(maxZeroInt(snap.Admission.BacklogObservations)),
+		"admission_backlog_errors":         int64(maxZeroInt(snap.Admission.BacklogErrors)),
+		"admission_durable_observations":   boundedCounter(snap.Admission.DurableObservations),
+		"admission_durable_errors":         boundedCounter(snap.Admission.DurableErrors),
+		"admission_dropped_observations":   boundedCounter(snap.Admission.DroppedObservations),
+		"admission_dropped_errors":         boundedCounter(snap.Admission.DroppedErrors),
+		"admission_uncertain_observations": boundedCounter(snap.Admission.UncertainObservations),
+		"admission_uncertain_errors":       boundedCounter(snap.Admission.UncertainErrors),
 	}
+}
+
+// SUPPORT_EVIDENCE counters must be JSON-safe integers; saturate rather than
+// wrap or silently lose precision in support consumers.
+func boundedCounter(n uint64) int64 {
+	const max = uint64(1<<53 - 1)
+	if n > max {
+		return int64(max)
+	}
+	return int64(n)
 }
 
 func deliverySupportStatus(d delivery.DeliveryStats, q queue.QueueStats) string {

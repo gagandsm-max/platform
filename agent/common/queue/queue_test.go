@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -4016,5 +4017,56 @@ func TestIssue302EmptyQueuePayloadBudget(t *testing.T) {
 		if _, err := q.Enqueue(bytes.Repeat([]byte("x"), limit)); err != nil {
 			t.Fatalf("budget %d bytes cannot fit capacity %d: %v", limit, maxBytes, err)
 		}
+	}
+}
+
+// Terminate a separate test process exactly after rename or during metadata sync.
+// This proves process-crash recovery, not power-cut/fsync hardware qualification.
+func TestIssue302AdmissionProcessCrashRecovery(t *testing.T) {
+	if phase := os.Getenv("ISSUE302_CRASH_PHASE"); phase != "" {
+		q, err := NewDurableQueue(os.Getenv("ISSUE302_CRASH_DIR"), 10, 1<<20, 65536)
+		if err != nil {
+			t.Fatal(err)
+		}
+		q.syncHook = func(got, target string) error {
+			if got == phase {
+				os.Exit(73)
+			}
+			return nil
+		}
+		_, err = q.Enqueue([]byte("crash-custody"))
+		t.Fatalf("crash hook not reached: %v", err)
+	}
+	for _, phase := range []string{syncPhaseEnqueueDir, syncPhaseMetaFile, syncPhaseMetaDir} {
+		t.Run(phase, func(t *testing.T) {
+			dir := t.TempDir()
+			q, err := NewDurableQueue(dir, 10, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream := q.AgentStreamID()
+			cmd := exec.Command(os.Args[0], "-test.run=^TestIssue302AdmissionProcessCrashRecovery$")
+			cmd.Env = append(os.Environ(), "ISSUE302_CRASH_PHASE="+phase, "ISSUE302_CRASH_DIR="+dir)
+			output, err := cmd.CombinedOutput()
+			var exit *exec.ExitError
+			if !errors.As(err, &exit) || exit.ExitCode() != 73 {
+				t.Fatalf("child: %v %s", err, output)
+			}
+			recovered, err := NewDurableQueue(dir, 10, 1<<20, 65536)
+			if err != nil {
+				t.Fatal(err)
+			}
+			records, err := recovered.ReadBatch(10, 1<<20)
+			if err != nil || len(records) != 1 || records[0].Sequence != 1 || string(records[0].Payload) != "crash-custody" || recovered.AgentStreamID() != stream {
+				t.Fatalf("recovery: %+v %v", records, err)
+			}
+			if err = recovered.CommitAccepted(records, 1); err != nil {
+				t.Fatal(err)
+			}
+			next, err := recovered.Enqueue([]byte("next"))
+			if err != nil || next.Sequence != 2 {
+				t.Fatalf("sequence reused: %+v %v", next, err)
+			}
+		})
 	}
 }

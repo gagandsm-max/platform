@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"reflect"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -378,4 +379,33 @@ func TestIssue302PendingByteBoundAccountsRejectedContribution(t *testing.T) {
 	if !reflect.DeepEqual(append(obs[1:], valid...), got) {
 		t.Fatal("large rejected contribution starved sibling or later data")
 	}
+}
+
+func TestIssue302SustainedPressureRemainsBounded(t *testing.T) {
+	enq := &mockEnqueuer{err: queue.ErrQueueFull}
+	s := admissionFixture(t, enq, "cpu")
+	obs := admissionObservations(t, 192, "cpu")
+	runtime.GC()
+	var before, after runtime.MemStats
+	runtime.ReadMemStats(&before)
+	goroutines := runtime.NumGoroutine()
+	started := time.Now()
+	const cycles = 256
+	for i := 0; i < cycles; i++ {
+		depositObservations(s, "cpu", obs, nil)
+		s.flushPending()
+	}
+	runtime.GC()
+	runtime.ReadMemStats(&after)
+	st := s.Status().Admission
+	if st.BacklogBytes > maxAdmissionBacklogBytes || st.BacklogFragments > maxAdmissionBacklogFragments || st.FailedAttempts != cycles {
+		t.Fatalf("unbounded retry/backlog %+v", st)
+	}
+	if st.DurableObservations+st.DroppedObservations+uint64(st.BacklogObservations) != cycles*192 {
+		t.Fatalf("accounting %+v", st)
+	}
+	if runtime.NumGoroutine() > goroutines+2 {
+		t.Fatal("pressure accumulated goroutines")
+	}
+	t.Logf("cycles=%d input_observations=%d elapsed_ms=%d heap_before=%d heap_after=%d goroutines_before=%d goroutines_after=%d backlog_bytes=%d dropped=%d failed_attempts=%d", cycles, cycles*192, time.Since(started).Milliseconds(), before.HeapAlloc, after.HeapAlloc, goroutines, runtime.NumGoroutine(), st.BacklogBytes, st.DroppedObservations, st.FailedAttempts)
 }

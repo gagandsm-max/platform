@@ -815,3 +815,18 @@ func (*integrityLifecycleCollector) Collect(ctx context.Context) ([]telemetry.Sa
 	}
 	return samples, nil
 }
+
+func TestIssue302RuntimeSnapshotCarriesAdmissionLoss(t *testing.T) {
+	cfg := testAgentConfig(t, "127.0.0.1:0")
+	cfg.MaxRecordBytes = 128 // Smaller than the immutable collection envelope.
+	reg := singleCollectorRegistry(t, &integrityLifecycleCollector{}, time.Hour, time.Second)
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-302"), client.NewUnavailableTransport("TEST_UNAVAILABLE"), nil, withCollectorRegistryForTest(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scheduler.RunOnce(context.Background())
+	st := svc.RuntimeSnapshot()
+	if st.Admission.DroppedObservations != 192 || st.Admission.DurableObservations != 0 || svc.QueueStats().ActiveCount != 0 {
+		t.Fatalf("health adapter hid loss: %+v", st.Admission)
+	}
+}

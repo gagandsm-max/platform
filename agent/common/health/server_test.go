@@ -15,12 +15,14 @@ import (
 	"platform/agent/common/collector"
 	"platform/agent/common/delivery"
 	"platform/agent/common/queue"
+	"platform/agent/common/scheduler"
 )
 
 type mockStatsProvider struct {
 	mu sync.Mutex
 
 	lifecycle                string
+	admission                scheduler.AdmissionStatus
 	schedulerRunning         bool
 	enabledCollectors        int
 	collectors               []CollectorSnapshot
@@ -70,6 +72,7 @@ func (m *mockStatsProvider) RuntimeSnapshot() RuntimeSnapshot {
 
 	return RuntimeSnapshot{
 		Lifecycle:          life,
+		Admission:          m.admission,
 		SchedulerRunning:   m.schedulerRunning,
 		EnabledCollectors:  m.enabledCollectors,
 		Collectors:         collectors,
@@ -563,9 +566,9 @@ func TestStaleOptionalEBPFEvidenceBecomesUnavailableWithoutAffectingReadiness(t 
 
 func TestCurrentAuthorityCapabilityDoesNotFalseStaleOnEndpoint(t *testing.T) {
 	cases := []struct {
-		name  string
-		snap  collector.ProcessNetworkCapabilitySnapshot
-		state collector.ProcessNetworkCapabilityState
+		name   string
+		snap   collector.ProcessNetworkCapabilitySnapshot
+		state  collector.ProcessNetworkCapabilityState
 		reason collector.ProcessNetworkCapabilityReason
 	}{
 		{
@@ -1167,4 +1170,40 @@ func (p *shutdownFlipProvider) callCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.calls
+}
+
+func TestIssue302AdmissionHealthCannotMaskLossOrRecovery(t *testing.T) {
+	cases := []struct {
+		name          string
+		admission     scheduler.AdmissionStatus
+		code          int
+		state, reason string
+	}{
+		{"backlog", scheduler.AdmissionStatus{BacklogFragments: 1, BacklogBytes: 512, BacklogObservations: 3}, 200, "DEGRADED", "COLLECTION_ADMISSION_BACKLOG"},
+		{"observation_loss", scheduler.AdmissionStatus{DroppedObservations: 2}, 200, "DEGRADED", "COLLECTION_ADMISSION_LOSS"},
+		{"error_loss", scheduler.AdmissionStatus{DroppedErrors: 1}, 200, "DEGRADED", "COLLECTION_ADMISSION_LOSS"},
+		{"recovery", scheduler.AdmissionStatus{RecoveryRequired: true}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
+		{"uncertain", scheduler.AdmissionStatus{UncertainObservations: 1}, 503, "NOT_READY", "COLLECTION_ADMISSION_RECOVERY_REQUIRED"},
+		{"recovered_capacity", scheduler.AdmissionStatus{FailedAttempts: 1, RejectedAttempts: 1, DurableObservations: 3}, 200, "UP", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			p := healthyProvider()
+			p.admission = tc.admission
+			s, err := NewServer("127.0.0.1:0", p, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertReady(t, s, tc.code, tc.state, tc.code == 200, tc.reason)
+			body := assertHealth(t, s, tc.code, tc.state, tc.reason)
+			counters := body["counters"].(map[string]any)
+			if counters["admission_dropped_observations"] != float64(tc.admission.DroppedObservations) || counters["admission_backlog_bytes"] != float64(tc.admission.BacklogBytes) {
+				t.Fatalf("lost counters: %v", counters)
+			}
+			assertLiveOK(t, s)
+		})
+	}
+	if boundedCounter(^uint64(0)) != int64(1<<53-1) {
+		t.Fatal("counter wrapped")
+	}
 }
