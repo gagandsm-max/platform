@@ -284,3 +284,22 @@ Roadmap inclusion is not dependency approval.
 This correction is bounded to verified source at GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`. `CURRENT_RUNTIME` identifies a dependency actually wired in a runtime source path, including an optional disabled-by-default path; it does not certify every deployment profile, activate that path, or grant commercial distribution approval. The source-admission restrictions in OSS-124 remain unchanged.
 
 OSS-004 Apicurio Registry and OSS-005/006 Avro/Protocol Buffers remain approved architecture with `APPROVED_NOT_IMPLEMENTED` current truth. Current JSON transport is not evidence that those dependencies were revoked, and their catalog approval is not evidence that a registry currently runs or that all physical messages use Avro/Protobuf. BUILD-063 and `Platform_17_API_Event_and_Data_Model_Contracts.md` own exact physical serialization, schema compatibility, migration/replay and registry-admission gates. No new runtime service or dependency is introduced by this documentation correction.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-OSS-001`
+- `REQ-OSS-002`
+- `REQ-OSS-003`
+- `REQ-OSS-004`
+- `REQ-OSS-005`
+- `REQ-OSS-006`
+- `REQ-OSS-007`
+- `REQ-OSS-008`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

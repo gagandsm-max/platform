@@ -862,3 +862,49 @@ Phase-2 closure SHALL require exact discovery/onboarding identity for vendor pac
 Phase 2.5 planning SHALL extend canonical identity to instrumented applications/services/instances/runtimes, browser/mobile application identities where governed, capture sources/interfaces/TAPs/packet brokers and decoded conversations/transactions linked back to canonical services/entities.
 
 Deep-observability sources must reconcile to existing identity authority; they may not create a parallel CMDB or service graph.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-ONB-001`
+- `REQ-ONB-002`
+- `REQ-ONB-003`
+- `REQ-ONB-004`
+- `REQ-ONB-005`
+- `REQ-ONB-006`
+- `REQ-ONB-007`
+- `REQ-ONB-008`
+- `REQ-ONB-009`
+- `REQ-ONB-010`
+- `REQ-ONB-011`
+- `REQ-ONB-012`
+- `REQ-ONB-013`
+- `REQ-ONB-014`
+- `REQ-ONB-015`
+- `REQ-ONB-016`
+- `REQ-ONB-017`
+- `REQ-ONB-018`
+- `REQ-ONB-019`
+- `REQ-ONB-020`
+- `REQ-PRV-001`
+- `REQ-PRV-002`
+- `REQ-PRV-003`
+- `REQ-PRV-004`
+- `REQ-PRV-005`
+- `REQ-PRV-006`
+- `REQ-PRV-007`
+- `REQ-PRV-008`
+- `REQ-PRV-009`
+- `REQ-PRV-010`
+- `REQ-PRV-011`
+- `REQ-PRV-012`
+- `REQ-PRV-013`
+- `REQ-PRV-014`
+- `REQ-PRV-015`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

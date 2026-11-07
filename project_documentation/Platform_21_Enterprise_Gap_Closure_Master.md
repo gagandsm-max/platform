@@ -269,3 +269,34 @@ Every recurring enterprise requirement accepted into the roadmap SHALL have a cl
 Phase 2 is responsible for enterprise ITOM/AIOps breadth and certified integration/customer-profile mechanisms. Full native APM/RUM/profiling and full native DPI/continuous packet analytics are intentionally deferred to Phase 2.5 and are therefore **planned deferments**, not unknown gaps.
 
 Customer-specific impossible absolutes such as universal 100% uptime/zero-error guarantees remain commercial acceptance-profile matters and are not normalized into unsafe platform-wide guarantees.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-EGC-001`
+- `REQ-EGC-002`
+- `REQ-EGC-003`
+- `REQ-EGC-004`
+- `REQ-EGC-005`
+- `REQ-EGC-006`
+- `REQ-EGC-007`
+- `REQ-EGC-008`
+- `REQ-EGC-009`
+- `REQ-EGC-010`
+- `REQ-EGC-011`
+- `REQ-EGC-012`
+- `REQ-EGC-013`
+- `REQ-EGC-014`
+- `REQ-EGC-015`
+- `REQ-INT-001`
+- `REQ-INT-002`
+- `REQ-INT-003`
+- `REQ-INT-004`
+- `REQ-INT-005`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

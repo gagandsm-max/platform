@@ -86,7 +86,7 @@ All applicable dashboards inherit time range, timezone, compare period, auto-ref
 
 Every screen/panel must explicitly design: Loading, Empty, Partial Data, Stale Data, Permission Restricted, Not Licensed, Query Limited, Error, Monitoring Degraded and Normal. A blank panel is never an acceptable error state.
 
-These are presentation outcomes, not one mutually exclusive resource-health enum. Permission/entitlement, query lifecycle, evidence quality, capability readiness and monitored-object lifecycle remain separate dimensions. On an authoritative denial/revocation/expiry response or a session/scope change, the UI hides protected payloads, clears no-longer-authorized cached rows and disables affected actions. The backend reauthorizes every protected request regardless of cached UI state; stale client permission data never authorizes an action. Client detection timing depends on the approved session/expiry/revocation mechanism, which must be bound before acceptance; this rule does not imply instant detection of a server-side revocation. A query error may coexist with a clearly dated last-known value only while the approved authorization/cache contract permits its display and no authority-loss trigger has occurred. Maintenance/suppression is an explicit overlay with scope/window/reason; it neither repairs telemetry nor proves the resource healthy.
+These are presentation outcomes, not one mutually exclusive resource-health enum. Permission/entitlement, query lifecycle, evidence quality, capability readiness and monitored-object lifecycle remain separate dimensions. On an authoritative denial/revocation/expiry response or a session/scope change, the UI hides protected payloads, clears no-longer-authorized cached rows and disables affected actions. The backend reauthorizes every protected request regardless of cached UI state; stale client permission data never authorizes an action. Client detection timing depends on the approved session/expiry/revocation mechanism, which must be bound before acceptance; this rule does not imply instant detection of a server-side revocation. **Bounded revalidation:** while a session remains apparently valid, the UI MAY perform bounded background revalidation of session/entitlement/scope on a governed interval and on privileged-action boundaries; detected expiry, revocation or scope loss MUST force reauthentication/reauthorization before continuing protected work, without inventing a second auth authority or bypassing server checks. A query error may coexist with a clearly dated last-known value only while the approved authorization/cache contract permits its display and no authority-loss trigger has occurred. Maintenance/suppression is an explicit overlay with scope/window/reason; it neither repairs telemetry nor proves the resource healthy.
 
 An empty authorized inventory/filter result means no matching objects. `No Data` means an existing object has no qualifying observation for the selected scope/window. An unbound/unavailable source means the data provider is unavailable; it is not an empty estate. A measured zero is shown as zero only when the source contract supplies valid evidence. `Normal` means query/data presentation completed normally, not `DEVICE_UP`/`HOST_UP`. Unknown or insufficient evidence remains explicit, including `INCONCLUSIVE` RCA and OIV `INSUFFICIENT EVIDENCE`. No missing, stale, partial, suppressed or collector-failed evidence is converted directly to DOWN.
 
@@ -6997,7 +6997,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Inspect purge/hold history, risk notifications and actual delivery outcomes
 - Preserve shared permitted view/report/export/history actions
 
-**Domain contract:** The calculator is owned by Platform_11 §9–11 and Platform_05 §37, including the approved #292 storage assurance: at least 20% uncertainty uplift, a separate 70% planned-utilization goal and fixed non-disableable 80% emergency protection. Display measured inputs, assumptions and the resulting per-volume recommendation; missing measurements remain UNKNOWN. Do not promise universal 180-day retention or a customer SLA. A policy preview shows requested/effective retention, growth/shortfall, protected data and legal-hold conflict. Apply requires current authorization and the same reviewed policy revision; a changed estimate/scope is shown before confirmation. Capacity/retention risk notifications expose generated, queued, delivered or failed/retrying outcome according to the Notification/Integration contract: generated is not delivered. Delivery failure remains visible and auditable. No action disables the 80% safety rule or silently deletes protected data.
+**Domain contract:** The calculator is owned by Platform_11 §9–11 and Platform_05 §37, including the approved #292 storage assurance: at least 20% uncertainty uplift, a separate 70% planned-utilization goal and fixed non-disableable 80% emergency protection. Display measured inputs, assumptions and the resulting per-volume recommendation with explicit `OBSERVED` / `ESTIMATED` / `UNKNOWN` / `PROJECTED` labels; missing measurements remain UNKNOWN. Backend quantities are integer bytes; UI labels decimal GB/TB versus binary GiB/TiB explicitly (`Platform_11` §9.3.1). Do not promise universal 180-day retention or a customer SLA. A version-bound policy preview shows requested/effective retention, growth/shortfall, protected data and legal-hold conflict. Apply requires current authorization and the same reviewed policy revision; a concurrent policy change or stale preview is rejected and forces re-simulation; a changed estimate/scope is shown before confirmation. Planned steady-state above the configured early-warning threshold requires an explicit authorized disposition. Capacity/retention risk notifications expose generated, queued, delivered or failed/retrying outcome according to the Notification/Integration contract: generated is not delivered. Delivery failure remains visible and auditable. No action disables the 80% safety rule or silently deletes protected/legal-held data.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -7543,3 +7543,47 @@ Phase 2 UI SHALL expose honest capability/certification state and customer-profi
 Phase 2.5 planning SHALL include role-aware deep-observability experiences for application/service transaction traces, service maps and trace-waterfall correlation, errors/exceptions, continuous profiles/flame graphs, browser/mobile experience and user journeys, packet-derived network/application response analysis, packet conversations/transactions and historical investigation, and evidence linkage from trace/profile/packet findings into Investigation/RCA.
 
 Raw payload/session-replay visibility SHALL be privacy-, tenant- and RBAC-governed and must not be exposed by default.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-UI-001`
+- `REQ-UI-002`
+- `REQ-UI-003`
+- `REQ-UI-004`
+- `REQ-UI-005`
+- `REQ-UI-006`
+- `REQ-UI-007`
+- `REQ-UI-008`
+- `REQ-UI-009`
+- `REQ-UI-010`
+- `REQ-UI-011`
+- `REQ-UI-012`
+- `REQ-UI-013`
+- `REQ-UI-014`
+- `REQ-UI-015`
+- `REQ-UI-016`
+- `REQ-UI-017`
+- `REQ-UI-018`
+- `REQ-UI-019`
+- `REQ-UI-020`
+- `REQ-UI-021`
+- `REQ-UI-022`
+- `REQ-UI-023`
+- `REQ-UI-024`
+- `REQ-UI-025`
+- `REQ-UI-026`
+- `REQ-UI-027`
+- `REQ-UI-028`
+- `REQ-UI-029`
+- `REQ-UI-030`
+- `REQ-UI-031`
+- `REQ-UI-032`
+- `REQ-SLS-008`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

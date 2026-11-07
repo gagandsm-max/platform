@@ -236,3 +236,27 @@ Required controls include least privilege, explicit enablement, audit, encryptio
 | TCP Syslog backpressure and SIEM sink outage | Source-side asynchronous logging recommendation, finite Sensor queue/horizon/loss counters; independent bounded destination quotas/retries; protected monitoring/authority priority and 80% disk safety. No absolute ZeroWindow, no-loss, 100%-isolation or infinite protected quarantine promise. |
 
 Current Phase-1 single-customer boundary remains; shared MSP Phase-1.5 requires explicit adversarial tenant-isolation certification. None of these controls are marked implemented/certified by their appearance here. PCI DSS 4.0.1 stored PAN unreadability (Requirement 3.5.1) and GDPR Article 32 risk-appropriate controls require assessed end-to-end policies; pre-spool redaction alone is **not** a compliance certification.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-GOV-001`
+- `REQ-GOV-002`
+- `REQ-GOV-003`
+- `REQ-GOV-004`
+- `REQ-GOV-005`
+- `REQ-SEC-001`
+- `REQ-SEC-002`
+- `REQ-SEC-003`
+- `REQ-SEC-004`
+- `REQ-SEC-005`
+- `REQ-SEC-006`
+- `REQ-SEC-007`
+- `REQ-SEC-008`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

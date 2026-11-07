@@ -238,17 +238,25 @@ recommended_provisioned >= round_up_to_provisioning_unit(conservative_used / pla
 
 The initial recommended `planning_utilization` is **0.70**; an authorized policy may adjust it while keeping `0 < planning_utilization < 0.80` and preserving required operational safety. A justified burst/compression/growth scenario above 20% MUST use the larger multiplier. Document the multiplier and reason rather than silently overwriting measured inputs. Byte calculations MUST detect overflow and round required provisioned capacity upward to the actual allocation unit.
 
+**Steady-state planning disposition:** do not treat planned continuous operation above the configured early-warning threshold (default warning at 70% utilization) as an accepted steady state unless an authorized policy explicitly records that disposition, its owner, expiry/review and residual risk. Raising `planning_utilization` toward—but still strictly below—0.80 does not authorize disabling warning/pre-emergency transitions or the hard 80% emergency watermark.
+
 ### 9.2 Emergency boundary and worked example
 
 `conservative_used / 0.80` is the **exact emergency-equality boundary**, not safe capacity below 80%. Strictly below 80% requires provisioned capacity greater than that boundary, rounded upward as required by the physical allocation unit. This does not replace the more conservative initial 70% planning recommendation.
 
-For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same GB unit; production results disclose bytes/unit conventions and allocation rounding.
+For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (10³); production results disclose bytes/unit conventions and allocation rounding.
 
 ### 9.3 Assurance, simulation and protected retention
 
-For each volume and data class, expose actual usage/free space, safely reclaimable versus protected bytes, growth and data-age evidence, forecast shortfall/exhaustion and expansion deadline where supported, uncertainty and measurement freshness. Simulate retention, topology and capacity-policy changes before activation. An impossible retention/capacity proposal cannot be certified as sufficient; it requires correction or an explicitly authorized and audited exception that preserves hard safety and protected-retention rules. Unknown or unstable growth yields an unknown forecast, not a guessed date.
+For each volume and data class, expose actual usage/free space, safely reclaimable versus protected bytes, growth and data-age evidence, forecast shortfall/exhaustion and expansion deadline where supported, uncertainty and measurement freshness. Values MUST be labelled `OBSERVED`, `ESTIMATED`, `UNKNOWN` or `PROJECTED` with measurement freshness; do not silently promote estimates to observed facts.
+
+Simulate retention, topology and capacity-policy changes against a **version-bound policy revision** before activation. Activation requires the same reviewed policy revision and estimate/scope identity presented in the simulation; a concurrent policy mutation or stale preview MUST be rejected (`STALE_PREVIEW` / concurrent-change conflict) and force re-simulation. An impossible retention/capacity proposal cannot be certified as sufficient; it requires correction or an explicitly authorized and audited exception that preserves hard safety and protected-retention/legal-hold rules. Unknown or unstable growth yields an unknown forecast, not a guessed date. No calculator, preview or notification may bypass protected-retention or legal-hold requirements.
 
 The normal warning/pre-emergency/emergency model remains 70% / 75% / at-or-above 80% (`Platform_05` §37); adjustable warning and planning policies do not disable the hard 80% boundary. Recovery uses safe headroom, hysteresis and bounded reclamation work to prevent oscillation and monitoring starvation. Legal holds and protected governance/security/control data are not silently deleted to satisfy a capacity target. If eligible reclamation is insufficient, enter `CRITICAL`, identify the responsible operator and escalate for authorized capacity/retention action. Sensor emergency shedding remains explicit, accounted and governed by §11.2.
+
+### 9.3.1 Integer-byte authority and unit display
+
+Backend/API storage quantities are authoritative as **non-negative integer bytes** (64-bit range with overflow detection; reject or fail closed on arithmetic overflow rather than wrapping). JSON encodings that cannot safely represent the integer in IEEE-754 Number form MUST use a decimal-string integer field (or an equivalent exact integer representation already approved for Counter64-class exactness) and MUST NOT coerce through JavaScript/`double` Number. UI and reports may display decimal **GB/TB** (10³/10⁶) and/or binary **GiB/TiB** (2¹⁰/2²⁰) but MUST label the unit system explicitly and convert only from the integer-byte authority. Mixed unlabeled GB/GiB arithmetic is prohibited.
 
 ### 9.4 Existing-owner notification and acceptance gates
 
@@ -452,3 +460,31 @@ Phase-2 customer acceptance profiles SHALL independently size device/CI count, i
 Phase-2.5 SHALL introduce separate capacity profiles for trace spans/transactions per second, unique services/resources and attribute cardinality, profile samples and symbol/storage overhead, RUM/mobile event rate, packet capture line rate, packets/bytes per second, decoded transaction rate, packet metadata retention, bounded raw-PCAP retention and query/replay concurrency.
 
 Core reference sizing MUST NOT be reused as an unqualified deep-observability sizing claim.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-DATA-001`
+- `REQ-DATA-002`
+- `REQ-DATA-003`
+- `REQ-DATA-004`
+- `REQ-DATA-005`
+- `REQ-DATA-006`
+- `REQ-DATA-007`
+- `REQ-DATA-008`
+- `REQ-DATA-009`
+- `REQ-DATA-010`
+- `REQ-DATA-011`
+- `REQ-DATA-012`
+- `REQ-DATA-013`
+- `REQ-DATA-014`
+- `REQ-DATA-015`
+- `REQ-CMDB-007`
+- `REQ-SLS-007`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

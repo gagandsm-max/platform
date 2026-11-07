@@ -1689,3 +1689,30 @@ Architecture planning SHALL preserve one canonical entity/service graph, one ten
 This reconciliation intentionally does **not** select an APM agent framework, trace store, profile store, packet decoder, capture engine, TLS-decryption mechanism or new mandatory datastore/service. Those selections require separate architecture/OSS/capacity/security change control.
 
 No Phase-2 requirement may force premature full native APM or full native DPI into the Phase-2 Core.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-A-001`
+- `REQ-A-002`
+- `REQ-A-003`
+- `REQ-A-004`
+- `REQ-A-005`
+- `REQ-A-006`
+- `REQ-A-007`
+- `REQ-A-008`
+- `REQ-A-009`
+- `REQ-A-010`
+- `REQ-A-011`
+- `REQ-A-012`
+- `REQ-CMDB-004`
+- `REQ-OTEL-002`
+- `REQ-OTEL-004`
+- `REQ-SLS-002`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

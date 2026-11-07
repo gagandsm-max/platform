@@ -2623,3 +2623,78 @@ Full native APM scope SHALL include, subject to later implementation/dependency 
 Full native DPI / Network Performance Intelligence scope SHALL include, subject to later implementation/dependency change control: SPAN/TAP/vTAP/packet-broker acquisition; continuous capture with bounded raw-PCAP retention; packet metadata, flow reconstruction and L2-L7 decoding; TCP/DNS/TLS/HTTP performance analytics; network-versus-application response decomposition; packet-to-service/trace correlation; historical investigation/replay where safe; controlled TLS decryption only where lawful and authorized; key-custody controls; payload masking/privacy filters; evidence custody and role-restricted packet access.
 
 Phase 2.5 MUST NOT redefine AmrudAi as a general SIEM/NDR replacement.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-INF-001`
+- `REQ-INF-002`
+- `REQ-INF-003`
+- `REQ-INF-004`
+- `REQ-INF-005`
+- `REQ-INF-006`
+- `REQ-INF-007`
+- `REQ-INF-008`
+- `REQ-INF-009`
+- `REQ-INF-010`
+- `REQ-INF-011`
+- `REQ-INF-012`
+- `REQ-INF-013`
+- `REQ-INF-014`
+- `REQ-INF-015`
+- `REQ-INF-016`
+- `REQ-IPAM-001`
+- `REQ-IPAM-002`
+- `REQ-IPAM-003`
+- `REQ-LIC-001`
+- `REQ-LIC-002`
+- `REQ-LIC-003`
+- `REQ-LIC-004`
+- `REQ-LIC-005`
+- `REQ-LIC-006`
+- `REQ-NCM-001`
+- `REQ-NCM-002`
+- `REQ-NCM-003`
+- `REQ-NCM-004`
+- `REQ-NCM-005`
+- `REQ-P-001`
+- `REQ-P-002`
+- `REQ-P-003`
+- `REQ-P-004`
+- `REQ-P-005`
+- `REQ-P-006`
+- `REQ-P-007`
+- `REQ-P-008`
+- `REQ-P-009`
+- `REQ-P-010`
+- `REQ-P-011`
+- `REQ-CMDB-001`
+- `REQ-CMDB-003`
+- `REQ-CMDB-005`
+- `REQ-CMDB-006`
+- `REQ-INT-006`
+- `REQ-INT-010`
+- `REQ-INT-011`
+- `REQ-INT-012`
+- `REQ-INT-013`
+- `REQ-NCM-006`
+- `REQ-NCM-008`
+- `REQ-NCM-009`
+- `REQ-NCM-010`
+- `REQ-NCM-011`
+- `REQ-NCM-012`
+- `REQ-NET-017`
+- `REQ-OTEL-001`
+- `REQ-OTEL-003`
+- `REQ-OTEL-005`
+- `REQ-OTEL-006`
+- `REQ-SLS-001`
+- `REQ-SLS-004`
+- `REQ-SLS-005`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

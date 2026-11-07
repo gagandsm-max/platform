@@ -200,7 +200,7 @@ Platform shall provide the following capability families. Each family depends on
 | 21 | Install / upgrade | Customers install without Docker mandate; upgrades are safe | Native packages, preflight |
 | 22 | Supportability | Failures are diagnosable with support bundles | Structured logs, correlation IDs |
 | 23 | Operational diagnostics | NOC verifies without context switch | Sensor/Agent paths, RBAC |
-| 24 | Licensing | Commercial continuity is deterministic and visible | Founder-reserved grace conflict |
+| 24 | Licensing | Commercial continuity is deterministic and visible | 15-day `EXPIRED_GRACE_15D`; T-7 distinct; quantities Founder-reserved |
 | 25 | UX / accessibility | Product is usable at enterprise scale | HTTPS-only, a11y |
 | 26 | Extensibility | Customers extend via packs/studios without Core forks | Capability Pack architecture |
 

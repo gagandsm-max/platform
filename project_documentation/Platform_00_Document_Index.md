@@ -645,7 +645,7 @@ Issue #269 is an additive Founder-approved roadmap reconciliation inside Mother 
 
 The authoritative phase outcome is:
 - **Phase 1:** frozen production Network & Infrastructure Observability core.
-- **Phase 1.5:** Enterprise Foundation — exactly-two-Core HA/MSP, Integration Fabric, CMDB reconciliation, bounded operational OTel spans/dependency evidence, NCM Change Assurance, selected broader technology packs and serverless.
+- **Phase 1.5:** Enterprise Foundation — exactly-two-Core HA/MSP; **advanced/full** Integration Fabric and governed bidirectional CMDB reconciliation that expands (does not relocate) the preserved Phase-1 four ITSM certification targets, Enrichment/bounded Publication, Mapping Studio/Test Sandbox and common Integration Service; bounded operational OTel spans/dependency evidence; NCM Change Assurance; selected broader technology packs and serverless.
 - **Phase 2:** **Enterprise ITOM/AIOps RFP Readiness** for heterogeneous large-enterprise estates, regulated deployments, monitoring/ITOM/AIOps integrations and enterprise-scale certification. Formal `PRD-ECR-*` / `REQ-ECR-*` authority lives in Platform_23.
 - **Phase 2.5+:** full native APM and full native always-on DPI/deep packet analytics. Phase 2 may integrate those external tools and consume their evidence without claiming native full APM/DPI.
 

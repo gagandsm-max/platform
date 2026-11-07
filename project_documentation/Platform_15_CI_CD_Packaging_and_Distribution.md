@@ -21,34 +21,34 @@ offline/air-gapped bundles and uninstall semantics.
 
 > Consolidated from `Platform_16_CI_CD_and_Release_Engineering.md` v3.1. Requirements in this section remain normative.
 
-## 1. Pipeline stages
+### 3.1 Pipeline stages
 
 Preflight → compile/build → unit → static analysis → OSS/license scan → SBOM → component tests → integration/contract → security → package → package install tests → performance smoke → sign → publish candidate → environment promotion → release evidence bundle.
 
 CI provider selection is **not** frozen by the GitHub source-of-record decision. Pipelines may run on GitHub Actions or another approved CI system after explicit evaluation; this document does not claim GitHub Actions is a fixed architecture decision.
 
-## 1.1 Source-of-record and change flow
+### 3.2 Source-of-record and change flow
 
 Canonical repository: `https://github.com/gagandsm-max/platform`.
 Material code, packaging and mother-document changes enter through short-lived branches and pull requests. Do not push normal development changes directly to the protected/default branch. Do not force-push shared/default branches. Release artifacts and documentation authority follow merged GitHub history.
 
-## 2. Reproducibility
+### 3.3 Reproducibility
 
 Build containers and base images are pinned. Language dependency lockfiles are mandatory. CI must record source commit, dependency graph, build image digest, compiler/runtime versions, package checksums and signing metadata.
 
-## 3. Artifacts
+### 3.4 Artifacts
 
 Separate versioned artifacts: Core `.deb/.rpm`, Sensor `.deb/.rpm`, Linux Agent `.deb/.rpm`, Windows Agent EXE/MSI/BAT wrappers, optional container images for engineering/test, SBOMs, notices, checksums, provenance and release notes.
 
-## 4. Signing
+### 3.5 Signing
 
 Release packages and Windows binaries/installers are signed using controlled release credentials. Signing keys do not live in source repositories or general developer containers.
 
-## 5. Promotion
+### 3.6 Promotion
 
 Development → internal alpha → beta/pilot → release candidate → GA. Promotion is evidence-driven and governed by `Platform_14_Test_Performance_and_Release_Quality.md`.
 
-## 6. OSS/security gates
+### 3.7 OSS/security gates
 
 ORT/Syft/Trivy/ScanCode or approved equivalents run according to the OSS catalogue. RED dependencies fail the build; YELLOW requires explicit approval. Critical/high vulnerabilities are dispositioned before release.
 
@@ -56,11 +56,11 @@ ORT/Syft/Trivy/ScanCode or approved equivalents run according to the OSS catalog
 
 > Consolidated from `Platform_18_Packaging_and_Distribution.md` v3.1. Requirements in this section remain normative.
 
-## 1. Linux artifacts
+### 4.1 Linux artifacts
 
 Core, Sensor and Linux Agent each produce `.deb` and `.rpm`. They are separate packages and may version independently within compatibility rules.
 
-## 2. Linux filesystem contract
+### 4.2 Linux filesystem contract
 
 Recommended layout:
 
@@ -72,11 +72,11 @@ Recommended layout:
 
 Exact final paths must remain consistent across `.deb` and `.rpm` unless OS conventions require a documented difference.
 
-## 3. Service identities
+### 4.3 Service identities
 
 Separate least-privilege service users for Core/Sensor/Agent as appropriate. No interactive shell unless required for support and explicitly controlled.
 
-### 3.1 Runtime service continuity
+#### 4.3.1 Runtime service continuity
 
 **Staged package installation versus deliberate activation are separate states.** A staged/unconfigured native package install places binaries, unit/service definitions, filesystem layout and least-privilege identities on disk in a disabled/inactive state. Staged packages must not silently enable mandatory services, enroll identity, join Sensor pools, or claim an active deployment profile. After a supported host reboot, a staged/unconfigured install remains staged/inactive until valid authorized configuration/enrollment deliberately activates a certified profile. Intentional maintenance/disablement by an authorized operator must also be respected and must not be overridden by package scripts or unsupervised boot enablement.
 
@@ -86,7 +86,7 @@ Once valid authorized configuration/enrollment deliberately activates a certifie
 
 Package scripts must be idempotent and must not require a customer to run ad-hoc start commands after a supported reboot or recoverable process crash **once a certified profile is deliberately activated**. Automatic restart must not force-start known-unsafe/corrupt/incompatible local state or treat process existence as recovery success; if safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable evidence and a governed operator/runbook path. Optional, scheduled or on-demand workers may remain disabled/inactive until their capability or workload requires them. Repeated crash loops must remain observable and diagnosable.
 
-## 4. Windows Agent
+### 4.4 Windows Agent
 
 Runtime: `PlatformAgent.exe` (name subject to branding freeze), compiled and code-signed. GA installer: code-signed MSI. Convenience wrappers: `install-agent.bat`, `uninstall-agent.bat`, optionally parameterized for silent enterprise deployment. BAT is not the runtime binary.
 
@@ -95,15 +95,15 @@ Windows MSI/SCM packaging (BUILD-018) shall version and attest: exact service id
 Service-control stop/drain and file replacement shall tolerate Windows sharing/lock contention using bounded retries and Windows Installer/Restart Manager semantics. No package step may delete unacknowledged Agent spool segments or purge enrollment/customer state as a workaround. Suppressed unattended reboot, explicit `3010` reboot-required (where returned), safe post-reboot resume and negative cases for an irreducible file-in-use condition must be tested; neither MSI success nor silently returned success may falsely guarantee that every deployment is reboot-free. Package logs are secret-safe and actionable.
 
 
-## 5. Offline bundles
+### 4.5 Offline bundles
 
 Air-gapped release bundle contains packages, dependencies/repository metadata as required, SBOMs, notices, checksums, signatures/certificates, upgrade/rollback metadata and documentation. No runtime internet download is required.
 
-## 6. Uninstall semantics
+### 4.6 Uninstall semantics
 
 Normal uninstall removes binaries/service but preserves customer state/config unless explicit purge is requested. Purge is separately confirmed/audited.
 
-## 7. Linux Agent eBPF packaging and compatibility (conditional)
+### 4.7 Linux Agent eBPF packaging and compatibility (conditional)
 
 `github.com/cilium/ebpf` (`OSS-124`) is engineering-admitted under `Platform_07` Decision=`USE/WRAP` / Truth state=`CURRENT_RUNTIME` for the merged optional bounded Linux source path (`agent/go.mod`, `agent/linux/ebpf/`, `agent/linux/cmd/optional_ebpf.go`). Physical structured Agent evidence delivery remains a separate BUILD-016/062 gate. **Engineering dependency admission is not release/runtime certification** and does not authorize customer support claims, signed-package completeness claims, or certified-matrix expansion by itself.
 
@@ -115,7 +115,7 @@ For release packaging of the implemented optional OSS-124 path (or a separately 
 - **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation. Engineering admission does not claim these release signing/SBOM gates are already complete.
 - **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.
 
-### 7.1 Native base-Linux Agent legacy qualification targets (Issue #189)
+#### 4.7.1 Native base-Linux Agent legacy qualification targets (Issue #189)
 
 Issue #189 (2026-11-04 Linux-only sequencing decision) promotes the following **native base-Agent** legacy qualification targets into the current Linux completion campaign while retaining modern certification profiles. Status for each exact profile remains **`TARGET` / `CERTIFICATION_PENDING`** until dimensional evidence closes the profile. These statements do **not** claim blanket old-Linux support, do **not** require eBPF on legacy systems, do **not** substitute agentless monitoring for native-Agent completion, do **not** weaken TLS/certificate validation or modern service hardening, and do **not** authorize installing obsolete compilers/toolchains on the developer host.
 
@@ -140,7 +140,7 @@ Container fixtures may assist packaging smoke tests but do not replace isolated 
 
 ---
 
-## 7.2 Native package acceptance evidence binding
+### 4.8 Native package acceptance evidence binding
 
 Native `.deb` / `.rpm` / Windows MSI acceptance evidence for Core, Sensor and Agent packages must bind, for the exact artifact under test:
 
@@ -148,7 +148,7 @@ Native `.deb` / `.rpm` / Windows MSI acceptance evidence for Core, Sensor and Ag
 - builder identity (CI job/runner/image digest or governed equivalent);
 - binary and package hashes (and signatures where the release-signing gate applies);
 - exact commands executed, true exit codes and sanitized logs;
-- staged-install versus deliberately activated lifecycle evidence (see §3.1);
+- staged-install versus deliberately activated lifecycle evidence (see §4.3.1);
 - upgrade and supported rollback paths with identity/certificate continuity and unacknowledged spool continuity;
 - permissions/hardening posture for service identity, config, spool and credential paths;
 - resource behavior under the declared profile (including non-interference with protected monitoring workloads where applicable);
@@ -158,7 +158,7 @@ Container fixtures and staged-only evidence remain bounded helpers and do not by
 
 ---
 
-## 8. v3.3.0 governed Pack and privileged artifact distribution
+### 4.9 v3.3.0 governed Pack and privileged artifact distribution
 
 Capability Packs shipped by Platform are versioned release artifacts with declared provenance, integrity/signing metadata, compatibility range, licence/redistribution evidence, SBOM/third-party notices where applicable and promotion/rollback metadata. A pack cannot become Official Certified merely because it is packaged or signed; certification evidence remains Platform_23/14 authority.
 
@@ -168,13 +168,13 @@ Selecting a browser-runtime package for Phase-1.5 synthetics requires separate P
 
 ---
 
-## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+## 5. Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
 Phase-2 Enterprise/Regulated profiles shall be distributable through the existing signed reproducible native package and offline/air-gap model. New Capability/Integration Packs must carry version/provenance/compatibility metadata and be admitted into release evidence. No Phase-2 customer deployment may require a public SaaS control plane for core monitoring. Full native APM/DPI agent/packet-engine packaging is not part of Phase 2.
 
 ---
 
-## Issue #272 packaging/release roadmap
+## 6. Issue #272 packaging/release roadmap
 
 Phase-2.5 native instrumentation, RUM/mobile components and packet-capture/decoder components SHALL be independently versioned, signed, SBOM-covered and compatibility-tested where they become distributable artifacts.
 
@@ -182,7 +182,7 @@ Offline/air-gap distribution SHALL remain supported for certified regulated prof
 
 A Phase-2.5 component SHALL NOT silently auto-update outside the governed package/update/rollback model.
 
-## Current artifact and pipeline truth — 2026-11-06
+## 7. Current artifact and pipeline truth — 2026-11-06
 
 The pipeline stages above are normative release requirements, not a claim that every stage is automated or passed. The actual four-job workflow and its evidence limits are recorded in Platform_14 under “Current CI evidence boundary”. This correction changes no workflow, runner, dependency, installer or signing configuration.
 

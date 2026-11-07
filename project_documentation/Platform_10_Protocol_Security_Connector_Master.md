@@ -372,3 +372,54 @@ Phase 2 closure contracts SHALL require exact product/version/API/protocol/privi
 Phase 2.5 planning adds governed protocol families for approved APM instrumentation/OTel-compatible trace interoperability, browser/mobile telemetry, profiling transport, SPAN/TAP/vTAP/packet-broker capture, packet protocol decoding and optional controlled TLS decryption.
 
 No TLS decryption or payload capture may be enabled without explicit authorization, key-custody controls, audit, privacy policy and bounded retention.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-NET-001`
+- `REQ-NET-002`
+- `REQ-NET-003`
+- `REQ-NET-004`
+- `REQ-NET-005`
+- `REQ-NET-006`
+- `REQ-NET-007`
+- `REQ-NET-008`
+- `REQ-NET-009`
+- `REQ-NET-010`
+- `REQ-NET-011`
+- `REQ-NET-012`
+- `REQ-NET-013`
+- `REQ-NET-014`
+- `REQ-NET-015`
+- `REQ-NET-016`
+- `REQ-SNMP-001`
+- `REQ-SNMP-002`
+- `REQ-SNMP-003`
+- `REQ-SNMP-004`
+- `REQ-SNMP-005`
+- `REQ-SNMP-006`
+- `REQ-SNMP-007`
+- `REQ-SNMP-008`
+- `REQ-SNMP-009`
+- `REQ-SNMP-010`
+- `REQ-SNMP-011`
+- `REQ-SNMP-012`
+- `REQ-SNMP-013`
+- `REQ-SNMP-014`
+- `REQ-SNMP-015`
+- `REQ-SNMP-016`
+- `REQ-SNMP-017`
+- `REQ-SNMP-018`
+- `REQ-SNMP-019`
+- `REQ-SNMP-020`
+- `REQ-SNMP-021`
+- `REQ-SNMP-022`
+- `REQ-SNMP-023`
+- `REQ-SLS-006`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

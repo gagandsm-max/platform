@@ -1855,9 +1855,9 @@ Every emergency deletion records volume, usage before/after, bytes freed, data c
 
 This is a logical contract within existing BUILD-061/064/074/086/094/097/130 owners, not new DDL, API route or service. `Platform_11` §9 owns the arithmetic and units. Each assessment MUST identify physical volume and owning node/deployment, observation time/source, policy/model versions, capacity/used/free bytes, attributed workload/storage components, protected versus safely reclaimable bytes, growth basis and uncertainty. A replica, archive or backup is attributed to the volume actually holding that copy; shared-volume components are not double-counted.
 
-The calculator MUST use overflow-safe byte arithmetic, a justified uncertainty multiplier of at least 1.20 and an explicitly selected planning utilization below 0.80 (initial recommendation 0.70). It returns conservative demand, rounded required provisioned capacity, shortfall/headroom and the 80% boundary separately. Missing/stale/contradictory measurements remain `UNKNOWN` with reasons; a timestamp is returned only when growth and forecast confidence support it. The same rule applies to data-age, shortage/exhaustion forecasts and the expansion deadline derived from procurement lead time.
+The calculator MUST use overflow-safe **integer-byte** arithmetic, a justified uncertainty multiplier of at least 1.20 and an explicitly selected planning utilization below 0.80 (initial recommendation 0.70). It returns conservative demand, rounded required provisioned capacity, shortfall/headroom and the 80% boundary separately, each labelled `OBSERVED` / `ESTIMATED` / `UNKNOWN` / `PROJECTED` as applicable. Missing/stale/contradictory measurements remain `UNKNOWN` with reasons; a timestamp is returned only when growth and forecast confidence support it. The same rule applies to data-age, shortage/exhaustion forecasts and the expansion deadline derived from procurement lead time. JSON/API fields that cannot safely use IEEE-754 Number MUST carry exact integer-byte decimal strings (or an already-approved exact-integer encoding); display GB/TB versus GiB/TiB follows `Platform_11` §9.3.1.
 
-Retention, topology and capacity policy changes MUST be simulated against the affected physical volumes before activation. An infeasible proposal cannot receive a positive capacity/sufficiency result. It requires correction or an explicitly authorized, audited exception that preserves non-disableable safety and protected-retention obligations. Forecast calculations do not mutate retention, holds or volumes. Hysteresis, recovery and bounded work budgets prevent repeated purge/alert oscillation or starvation of monitoring.
+Retention, topology and capacity policy changes MUST be simulated against the affected physical volumes on a **version-bound policy revision** before activation. Activation binds that same revision; stale preview or concurrent policy change MUST fail closed and require re-simulation. An infeasible proposal cannot receive a positive capacity/sufficiency result. It requires correction or an explicitly authorized, audited exception that preserves non-disableable safety and protected-retention/legal-hold obligations. Forecast calculations do not mutate retention, holds or volumes. Planned steady-state operation above the configured early-warning threshold requires explicit authorized policy disposition (`Platform_11` §9.1). Hysteresis, recovery and bounded work budgets prevent repeated purge/alert oscillation or starvation of monitoring.
 
 Acceptance evidence MUST cover 1000→1200 GB uncertainty arithmetic and 70%/80% separation, provisioning-unit upward rounding/overflow, mixed-volume/copy accounting, missing measurements, burst/compression drift exceeding 20%, impossible retention/capacity proposals, 70/75/80 transition/recovery behavior, policy simulation/rollback and protected retention across partitions and backup copies. These are required cases, not tests claimed executed.
 
@@ -1907,25 +1907,33 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 
 ### 40.1 States
 
+Canonical lifecycle (Founder decision 2026-09-30; `Platform_01` §34.2 / `Platform_02` §33 / `Platform_12` §22):
+
+`VALID → EXPIRING_30D → EXPIRING_7D_BANNER → EXPIRED_GRACE_15D → POLLING_SUSPENDED`
+
+Normative persisted/wire state names:
+
 - `VALID`;
 - `EXPIRING_30D`;
-- `EXPIRING_7D`;
-- `EXPIRED_GRACE` / `EXPIRED_GRACE_15D` (duration = **15 days** per Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`);
-- `EXPIRED_POLLING_STOPPED`;
-- `MANUAL_EXTENSION`;
+- `EXPIRING_7D_BANNER` (T-7 **pre-expiry** banner window; distinct from post-expiry grace);
+- `EXPIRED_GRACE_15D` (duration = **15 days**; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`);
+- `POLLING_SUSPENDED` (post-grace; Scheduler stops new/renewed monitoring jobs);
+- `MANUAL_EXTENSION` (authorized signed extension/renewal accepted without Core/Sensor reinstall);
 - `INVALID`.
+
+Specification aliases only (non-normative synonyms; do not invent additional commercial states): historical prose `EXPIRED_GRACE` means `EXPIRED_GRACE_15D`; `EXPIRING_7D` means `EXPIRING_7D_BANNER`; `EXPIRED_POLLING_STOPPED` means `POLLING_SUSPENDED`. Any pre-migration local enum that still emits an alias MUST map 1:1 onto the canonical names above before certification; do not treat alias and canonical as distinct concurrent states.
 
 ### 40.2 Behavior
 
-- 30d notification job.
-- 7d dashboard banner globally (T-7 **pre-expiry** warning; distinct from post-expiry grace).
+- 30d notification job (`EXPIRING_30D`).
+- 7d dashboard banner globally (T-7 **pre-expiry** warning under `EXPIRING_7D_BANNER`; distinct from post-expiry grace).
 - post-expiry: polling remains enabled for **15 days** (`EXPIRED_GRACE_15D`).
-- grace elapsed: scheduler stops new polling jobs; Sensors receive signed polling-disabled policy while remaining manageable.
+- grace elapsed: enter `POLLING_SUSPENDED`; Scheduler stops new polling jobs; Sensors receive signed polling-disabled policy while remaining manageable.
 - historical queries remain available.
 - licence admin endpoint remains available.
-- licence extension re-enables polling through normal assignment/policy synchronization.
+- licence extension (`MANUAL_EXTENSION` → return to `VALID`) re-enables polling through normal assignment/policy synchronization.
 
-Do not delete telemetry due to licence state.
+Do not delete telemetry due to licence state. Commercial quantities, packaging, pricing and SKUs remain Founder-reserved.
 
 ---
 
@@ -2788,7 +2796,7 @@ The exact internal replication technology is P0 spike, but code must satisfy the
 
 ## 83. License timer implementation
 
-Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`). T-7 pre-expiry banner remains distinct. At post-grace suspension, Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available.
+Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`). T-7 pre-expiry banner remains distinct (`EXPIRING_7D_BANNER`). At post-grace suspension (`POLLING_SUSPENDED`), Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available. Canonical state names and alias mapping are owned by §40.1.
 
 ## 84. Query safety
 
@@ -3412,6 +3420,79 @@ Use paginated/incremental discovery; reconcile create/delete/recreate and versio
 
 ---
 
+## 97. Current-source backend implementation truth — pinned main `36e1513f`
+
+**Authority:** documentation reconciliation against exact current source at GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`. This section records **implemented reality**, not certification. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. It does not invent DDL, routes or services.
+
+### 97.1 PostgreSQL tenancy — application predicates; RLS not installed
+
+Current `core/src/main/resources/db/migrations/V001`–`V018` create tenant-scoped tables and constraints. **No migration enables PostgreSQL `ROW LEVEL SECURITY` or creates `CREATE POLICY` objects.** Runtime repositories enforce tenancy with explicit `WHERE tenant_id = :tenantId` (and equivalent) predicates in Core persistence/control/ingestion code. Application-level tenant predicates remain the current implemented control. PostgreSQL RLS remains an **admissible future hardening** after role/`BYPASSRLS`, transaction-bound tenant context and pooled-connection reuse are validated; it is not declared installed by current source. Negative tenant-isolation tests remain mandatory regardless of RLS selection.
+
+### 97.2 MigrationRunner locking, checksum and concurrency
+
+`com.platform.core.migration.MigrationRunner` is the Platform-owned SQL migration runner (Spring JDBC; not Flyway/Liquibase). Behavior verified in source:
+
+- acquires PostgreSQL advisory lock keys `0x504C5446` / `0x4D475254` (`platform.core.schema.migrate`) before applying;
+- records applied versions in `platform.schema_history` with `version`, `description`, `checksum`, `applied_at`, `application_version`;
+- refuses checksum mismatch (`MIGRATION_CHECKSUM_MISMATCH`) when a previously applied version's checksum differs from the catalog;
+- skips already-applied matching checksums; concurrent runners block on the advisory lock rather than double-apply;
+- releases the advisory lock in `finally`.
+
+Ordered catalog authority is `core/src/main/resources/db/migrations/manifest.txt` listing **V001–V018** adjacent SQL files. Do not treat logical table names elsewhere as substitute DDL.
+
+### 97.3 ClickHouse and Valkey client dependencies
+
+| Dependency | Current implemented client | Notes |
+|---|---|---|
+| ClickHouse | `com.platform.core.ingestion.ClickHouseClient` over JDK `HttpClient` + `deploy/docker/clickhouse/init.sql` | No separate ClickHouse JDBC/official Java client dependency in `core/pom.xml`. Writer/reader contracts remain source-bound, not full retention/HA certification. |
+| Valkey | `spring-boot-starter-data-redis` in `core/pom.xml` against the Valkey service | Catalogue product name remains Valkey (`Platform_07` OSS-009). Redis protocol compatibility is an implementation detail; authoritative state must not live only in cache. |
+
+### 97.4 Implemented REST / machine controllers (non-exhaustive inventory)
+
+Current source exposes these Spring controllers (package paths abbreviated). Presence is not product-feature completeness:
+
+- API: `CapabilityPackController`, `DiscoveryController`, `EntityController`, `EntityManagementEndpointController`, `EntityMetricObservationController`, `GroupController`, `SiteController`, `TagController`, `TenantController`
+- Sensor/machine: `SensorAgentAuthorityController`, `SensorCapabilityPackController`, `SensorControlDesiredStateController`, `SensorIngestionController`, `SensorAgentIngestionController`, `VersionController`
+
+### 97.5 Enrollment and Agent desired-state maturity
+
+| Capability | Current source truth |
+|---|---|
+| Sensor enrollment service | Internal `SensorControlService.enrollSensor` + credential bind/rotate/revoke; V011 enrollment authority schema |
+| Public/customer Sensor enrollment REST | **Not implemented** as a general customer enrollment API; `DevSensorEnrollmentBootstrap` is development-only (`platform.sensor-control.dev-bootstrap-enrollment=true`) |
+| Fail-closed ingestion authority | `FailClosedSensorAuthorityResolver` rejects when authoritative Sensor Control/enrollment resolution is unavailable |
+| Sensor desired-state | `GET /api/v1/sensor/control/desired-state` and applied-state ACK implemented (`SensorControlDesiredStateController`, V014); not full production scheduler certification |
+| Capability-pack desired-state | `SensorCapabilityPackController` desired-state/ACK path implemented for pack assignment metadata |
+| Agent enrollment | Internal `AgentControlService.enrollAgent` + credential lifecycle; **no** public Agent enrollment/desired-state REST controller equivalent to Sensor control in current source |
+| Agent desired-state distribution REST | **Not implemented** as a customer/machine REST surface in current controllers |
+
+### 97.6 Ingress reserve → publisher lease → Kafka → PostgreSQL finalize → ACK
+
+Both Sensor telemetry and Agent-ingress paths at `36e1513f`:
+
+1. validate complete source batch;
+2. PostgreSQL durable pending reservation;
+3. claim bounded publisher lease (owner/epoch; lease window 60s);
+4. Kafka transactional publish + commit;
+5. PostgreSQL finalize for matching reservation/owner/epoch;
+6. ACK (`accepted_through_sequence` / `acceptedThroughIngressSequence`).
+
+Semantics remain **at-least-once** (not XA). Publisher-lease contention returns HTTP **429** with error code `ERR_BATCH_PUBLICATION_IN_PROGRESS` (`PublisherClaimResult.busy()`); Sensors/Agents MUST retry with bounded backoff and must not treat 429 as durable ACK. Exact wire/version bounds remain `Platform_17` §10 and `schemas/edge/`.
+
+### 97.7 Linux eBPF privilege boundary
+
+Linux Agent eBPF preflight requires `CAP_BPF` and `CAP_PERFMON` (Linux ≥5.8 capability model) or fails closed to `PRIVILEGE_DENIED` with reasons `CAP_BPF_MISSING` / `CAP_PERFMON_MISSING` (`agent/linux/ebpf/preflight.go`). Live privileged kernel certification remains Antigravity HUT-owned; unprivileged preflight is read-only and never activates collection. Protected workloads retain precedence; eBPF must shed/suspend before harming primary monitoring.
+
+### 97.8 Agent wire field naming
+
+Agent→Sensor/Core JSON v1 uses **camelCase** primary field names on CollectionBatch/delivery envelopes (for example `schemaVersion`, `agentId`, `tenantId`, `batchId`, `firstSequence`, `lastSequence`, `acceptedThroughIngressSequence`). Dual camelCase/snake_case ACK compatibility remains intentional where already frozen (`Platform_17` / edge schemas). Do not “normalize” live wire names in documentation independently of the frozen schema.
+
+### 97.9 Schema/migration manifest bound
+
+Verified migration set through pinned main: **V001–V018** under `core/src/main/resources/db/migrations/` per `manifest.txt`. Later migrations require additive change control; this section does not allocate V019+.
+
+---
+
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
 Phase-2 implementation shall reuse canonical identity, evidence, relationship, telemetry-quality, change, incident and integration contracts. External APM/NPM/DPI/CMDB/SIEM evidence must carry at least tenant, source-system identity, source-object identity, event/ingest time, quality/provenance, correlation identity and bounded raw/reference payload metadata. External source IDs are identifiers/evidence, never tenant/entity authority.
@@ -3427,3 +3508,27 @@ No physical schema in Phase 2 may assume full native APM span retention or full 
 Phase-2.5 implementation design SHALL explicitly bound per-tenant trace/profile/packet cardinality and ingest rate, sampling/capture policies and backpressure, durable storage classes and retention, PII/secret/payload redaction, raw-packet access and chain-of-custody, TLS-key handling where decryption is enabled, collector/agent failure semantics, service identity reconciliation, replay/idempotency and upgrade compatibility of instrumentation/capture components.
 
 No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unrestricted payload visibility, or mandatory TLS decryption.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-SCHED-001`
+- `REQ-SCHED-002`
+- `REQ-SCHED-003`
+- `REQ-SCHED-004`
+- `REQ-SCHED-005`
+- `REQ-SCHED-006`
+- `REQ-SCHED-007`
+- `REQ-SCHED-008`
+- `REQ-SCHED-009`
+- `REQ-CMDB-002`
+- `REQ-INT-009`
+- `REQ-NCM-007`
+- `REQ-SLS-003`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

@@ -23,7 +23,7 @@ Kafka/PostgreSQL/ClickHouse faults, Sensor/Agent failures, certificate rotation,
 
 ## 1. Core installation
 
-Required release procedure, subject to implemented/signed installer evidence. Install signed native package. Staged/unconfigured package installation is distinct from deliberate authorized activation (see §4 and `Platform_15` §3.1). Wizard/CLI selects the certified topology profile to activate. The installer must not expose uncertified HA activation or improvise promotion/failover. A planned wizard/CLI flow is not evidence that an accepted current installer exists.
+Required release procedure, subject to implemented/signed installer evidence. Install signed native package. Staged/unconfigured package installation is distinct from deliberate authorized activation (see §4 and `Platform_15` §4.3.1). Wizard/CLI selects the certified topology profile to activate. The installer must not expose uncertified HA activation or improvise promotion/failover. A planned wizard/CLI flow is not evidence that an accepted current installer exists.
 
 ### 1.1 Phase 1 — standalone Core installation, upgrade, rollback, restart/reboot and recovery
 
@@ -51,7 +51,7 @@ Install Sensor package in staged/inactive form until authorized enrollment/confi
 
 Linux Agent native package or Windows MSI/BAT wrapper installs in staged/inactive form until authorized enrollment activates the service path. After deliberate activation, the Agent enrolls against current Master Core, receives identity and is directed by Core to the appropriate Sensor. Agent retains enough information to reconnect after reboot while Core may revise assignment.
 
-Native base-Linux Agent legacy qualification targets from Issue #189 (**Ubuntu 16.04 LTS amd64** and individually pinned **RHEL/CentOS 7.x amd64**) remain `TARGET` / `CERTIFICATION_PENDING` with profile dimensions and unresolved exact minor/image blockers recorded in `Platform_15` §7.1. Modern Linux/Windows Agent profiles remain required. Operations must not claim blanket old-Linux support, require eBPF on legacy systems, relabel agentless results as native-Agent completion, or weaken TLS/security for compatibility.
+Native base-Linux Agent legacy qualification targets from Issue #189 (**Ubuntu 16.04 LTS amd64** and individually pinned **RHEL/CentOS 7.x amd64**) remain `TARGET` / `CERTIFICATION_PENDING` with profile dimensions and unresolved exact minor/image blockers recorded in `Platform_15` §4.7.1. Modern Linux/Windows Agent profiles remain required. Operations must not claim blanket old-Linux support, require eBPF on legacy systems, relabel agentless results as native-Agent completion, or weaken TLS/security for compatibility.
 
 ## 4. Auto-start and supervised recovery
 
@@ -67,7 +67,7 @@ After a supported host reboot or recoverable process crash **of an activated pro
 
 If safe automatic recovery cannot be established in either envelope, the component remains FAILED/DEGRADED/RECOVERING with actionable health/diagnostic evidence and a governed operator/runbook path. Dependency-aware health/readiness governs startup order and recovery. Optional, scheduled or on-demand workers need not remain resident when no enabled workload requires them. Repeated crash loops must surface in Platform Health/diagnostics and must not be hidden by infinite restart.
 
-Installation certification requires both cold-reboot auto-start and process-kill/fault-injection recovery tests for the mandatory runtime set of the activated profile, including proof that recovery does not bypass authority/fencing/durability safety applicable to that phase envelope. Staged-only evidence is insufficient for activated-lifecycle certification; see `Platform_15` §7.2 native package acceptance binding.
+Installation certification requires both cold-reboot auto-start and process-kill/fault-injection recovery tests for the mandatory runtime set of the activated profile, including proof that recovery does not bypass authority/fencing/durability safety applicable to that phase envelope. Staged-only evidence is insufficient for activated-lifecycle certification; see `Platform_15` §4.8 native package acceptance binding.
 
 ## 5. Upgrade
 
@@ -83,7 +83,7 @@ Rollback restores compatible package/config/schema state where supported. One-wa
 
 ## 7. Failure diagnostics
 
-Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance. Native package acceptance evidence must bind exact source commit/tree, builder identity, binary/package hashes, commands, true exits and logs, activated lifecycle, upgrade/rollback, identity/certificate continuity, unacknowledged spool continuity, permissions/hardening, resource behavior and relevant failure/recovery evidence per `Platform_15` §7.2. Container fixtures and staged-only evidence remain bounded; unsigned internal development evidence is not release signing certification.
+Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance. Native package acceptance evidence must bind exact source commit/tree, builder identity, binary/package hashes, commands, true exits and logs, activated lifecycle, upgrade/rollback, identity/certificate continuity, unacknowledged spool continuity, permissions/hardening, resource behavior and relevant failure/recovery evidence per `Platform_15` §4.8. Container fixtures and staged-only evidence remain bounded; unsigned internal development evidence is not release signing certification.
 
 For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required outcomes and blocked in-use binaries must be surfaced to the deployment operator with bounded retry/reboot procedure; an unattended install must not schedule an unapproved forced reboot. After any approved reboot, verify SCM start, identity/cert continuity, spool replay/ACK safety and actual telemetry freshness; MSI success alone is not recovery proof. An irreducible blocked native call/EDR lock requires explicit degraded state and operator path, not an infinite stop wait or silent deletion of queue segments.
 
@@ -256,9 +256,30 @@ Every completed runbook must include trigger and affected profile, preconditions
 This is a specified procedure and acceptance delta under [Issue #292](https://github.com/gagandsm-max/platform/issues/292) and its [source mapping adjudication](https://github.com/gagandsm-max/platform/issues/292#issuecomment-6576078417); it is not a currently implemented capacity/notification workflow. Reuse the existing Storage Lifecycle, Platform Operations, Notification/ITSM, retention and legal-hold owners. Quality scenarios are in Platform_14 “Storage assurance A+B+C acceptance — Issue #292”; sizing arithmetic and measurement ownership remain in Platform_11 and the existing contract owners.
 
 1. **Establish physical scope and evidence.** Identify tenant/resource, node, physical mount/volume, data classes, actual allocation/used/free, observed time and quality, protected versus eligible bytes, replica/backup/archive copies and authoritative measurement owner. If unavailable or stale, state UNKNOWN; do not infer a reliable exhaustion date or contractual retention coverage.
-2. **Explain capacity and thresholds.** Keep the >=20% estimation uncertainty margin separate from the initial adjustable 70% planning goal and fixed non-disableable 80% emergency watermark. Higher measured uncertainty requires a higher multiplier. Existing 70/75/80 operational transitions and approved hysteresis remain visible; 1500 GB for 1200 GB conservative used is at the emergency boundary, not safely below it. Disclose units and allocation rounding.
+2. **Explain capacity and thresholds.** Keep the >=20% estimation uncertainty margin separate from the initial adjustable 70% planning goal and fixed non-disableable 80% emergency watermark. Higher measured uncertainty requires a higher multiplier. Existing 70/75/80 operational transitions and approved hysteresis remain visible; 1500 GB for 1200 GB conservative used is at the emergency boundary, not safely below it. Disclose integer-byte authority, decimal GB/TB versus binary GiB/TiB labels, `OBSERVED`/`ESTIMATED`/`UNKNOWN`/`PROJECTED` classification and allocation rounding. Reject stale preview or concurrent policy-revision activation; re-simulate before apply. Do not operate planned steady-state above the configured early-warning threshold without an explicit authorized disposition.
 3. **Diagnose retention/protection conflict before deletion.** Preview requested retention/profile/topology change and physical capacity; customer 180/365-day requirements are scoped contracts, not global defaults. Reclaim only eligible data under the existing audited lifecycle. Preserve held/contractually protected records across partitions/archive/backup. If no eligible reclamation exists, enter CRITICAL with owner, incident/escalation and explicit degraded/ingest fail-safe outcome; do not silently shorten retention, override legal hold or promise unlimited durability.
 4. **Notify through existing authorized channels.** After BUILD-086 and tenant/RBAC/audit/connector prerequisites, create one deduplicated operational case per resource/policy, apply configured procurement lead time and escalation/maintenance/ack/reopen/closure policy, and expose actual delivery and retry/poison status. Do not treat a queued notification as delivered. 60/30/14/7-day examples are not globally frozen defaults. Missing connector or authorization is actionable failure, not delivery success.
 5. **Verify remedy and custody.** After approved expansion, retention change, restore or rollback, remeasure physical capacity, protected/reclaimable accounting, data-age/retrieval obligations, Kafka/ClickHouse replay, Sensor spool horizon, queue/lag/drop metrics and case state. Preserve deletion/audit evidence. Never reset volumes/spools or regenerate identities to hide a recovery defect.
 
 The future executable runbook must bind these steps to accepted source paths/UI/API actions and test evidence; those bindings remain blocked where the storage estimator, measurement authority or notification workflow is absent. This task supplies no unverified host command or customer compliance promise.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-LC-001`
+- `REQ-LC-002`
+- `REQ-LC-003`
+- `REQ-LC-004`
+- `REQ-LC-005`
+- `REQ-LC-006`
+- `REQ-LC-007`
+- `REQ-LC-008`
+- `REQ-LC-009`
+- `REQ-LC-010`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->

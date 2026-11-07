@@ -283,7 +283,7 @@ The v3.3.0 requirements are architecture/product authority only. Runtime impleme
 
 Non-negotiable execution rules:
 - Phase 1 remains the frozen production Network & Infrastructure Observability core; do not pull Phase-2 breadth into Phase 1 merely because a customer RFP asks for it.
-- Phase 1.5 is the enterprise foundation: exactly-two-Core HA/MSP certification, Integration Fabric/CMDB reconciliation, bounded operational OTel span/dependency evidence, NCM Change Assurance, selected broader packs and serverless.
+- Phase 1.5 is the enterprise foundation: exactly-two-Core HA/MSP certification, **advanced/full** Integration Fabric and governed bidirectional CMDB reconciliation (expanding the preserved Phase-1 four ITSM rails, Enrichment/bounded Publication, Mapping Studio/Test Sandbox and common Integration Service — not relocating them), bounded operational OTel span/dependency evidence, NCM Change Assurance, selected broader packs and serverless.
 - Phase 2 is the Enterprise ITOM/AIOps RFP-readiness envelope. Its exit gate is `ECRP-P2-v1`, not feature presence.
 - Full native APM (bytecode/auto-instrumentation, method/line-level tracing, continuous profiling, full RUM/session replay) and full native always-on DPI/deep packet analytics are prohibited from Phase 2 and require Phase 2.5+ change control.
 - Phase 2 MAY integrate with external APM/NPM/DPI/SIEM/CMDB/ITSM tools and ingest their evidence through governed Integration Packs; external-tool evidence never bypasses tenant identity, provenance, confidence, RBAC, audit, rate/cardinality controls or Platform RCA safety.

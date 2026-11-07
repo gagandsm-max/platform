@@ -279,7 +279,7 @@ Shared six-area acceptance and unresolved-gate disposition remain `Platform_00` 
 
 ### 4.8 Storage assurance contract binding — accepted Issue #292
 
-Capacity/retention assessment is a logical extension of existing Storage Lifecycle, Platform Operations and Notification Center/ITSM/email ownership. Exact arithmetic, physical-volume provenance, uncertainty/UNKNOWN, protected/reclaimable accounting, simulation and delivery lifecycle are normative in `Platform_11` §9 and `Platform_05` §37.6–37.7/§38. This document allocates no new route, schema file, migration number or service; the responsible BUILD-061/064/074/086/094/097/130 contract gates must bind concrete API/schema/test artifacts before implementation claims.
+Capacity/retention assessment is a logical extension of existing Storage Lifecycle, Platform Operations and Notification Center/ITSM/email ownership. Exact arithmetic, physical-volume provenance, uncertainty/`OBSERVED`/`ESTIMATED`/`UNKNOWN`/`PROJECTED`, protected/reclaimable accounting, version-bound simulation/activation, stale-preview/concurrent-change rejection, integer-byte API authority (safe JSON exact-integer encoding where Number is unsafe), GB/TB versus GiB/TiB display semantics and delivery lifecycle are normative in `Platform_11` §9 and `Platform_05` §37.6–37.7/§38. This document allocates no new route, schema file, migration number or service; the responsible BUILD-061/064/074/086/094/097/130 contract gates must bind concrete API/schema/test artifacts before implementation claims.
 
 ## 5. Display timezone and calendar-query contracts — v3.2.2 handoff baseline
 
@@ -320,7 +320,7 @@ validate complete source batch
 → Sensor ACK
 ```
 
-Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. **Current source reconciliation (`36e1513f`):** `SensorIngestionService` and `AgentIngestionService` now claim a bounded PostgreSQL publisher lease with owner/epoch after reservation, publish transactionally and require the matching fence for finalization (V012). This bounds concurrent publisher ownership; it does not make Kafka/PostgreSQL one XA transaction, eliminate the commit/finalize replay window or solve HA fencing. Both Core ingress paths use reservation/lease/commit/finalize before ACK. Physical consumer/read deduplication and durability certification remain separate gates.
+Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. **Current source reconciliation (`36e1513f`):** `SensorIngestionService` and `AgentIngestionService` now claim a bounded PostgreSQL publisher lease with owner/epoch after reservation, publish transactionally and require the matching fence for finalization (V012). This bounds concurrent publisher ownership; it does not make Kafka/PostgreSQL one XA transaction, eliminate the commit/finalize replay window or solve HA fencing. Both Core ingress paths use reservation/lease/commit/finalize before ACK. When another publisher already holds the exact pending-batch lease, Core returns HTTP **429 Too Many Requests** with stable code `ERR_BATCH_PUBLICATION_IN_PROGRESS` (see `PublisherClaimResult.busy()`). Clients MUST retry with bounded exponential backoff + jitter and MUST NOT treat 429 as an ACK or as a permanent conflict; `Retry-After` MAY be supplied when implemented and MUST be honoured when present. Physical consumer/read deduplication and durability certification remain separate gates.
 
 **Deletion-authorizing ACK durability (Issue #200 — shared contract shape, envelope-specific matrices):**
 
@@ -1050,3 +1050,19 @@ Keep exact existing Platform_17 §10.3 ACK fields and boundaries: Agent→Sensor
 OTLP receiver budgets apply to exact tenant/source/metric-series identity and decoded resource cost **before spooling**, with deterministic oversize/invalid/overbudget rejection and protocol-correct `partial_success.rejected_data_points` / `rejected_log_records` where supported. Preserve Resource/Scope/attributes, Sum monotonicity, temporality and histogram semantics; **never** make a rejected series into a Gauge, silently merge distinct series after stripping identity dimensions or retain excluded PII in an unindexed raw JSON overflow column. Estimates/sketches may inform a pre-admission budget but cannot prove exact new-series membership by themselves. Accounting separates accepted, rejected, sampled/shed and upstream continuity gaps; no sensitive values appear in reason details/metrics.
 
 An outbound SIEM destination has independently bounded tenant-scoped queue/backlog/retry/dead-letter and terminal delivered-or-expired status, with message/batch identity and acknowledged delivery recorded only when the sink protocol actually supplies it. Destination status does not change primary Core ingest ACK. After expiry/quota exhaustion, expose irreversible export loss and relevant evidence uncertainty; do not claim lossless forwarding, infinite legal-hold quarantine, or "100% unaffected" shared resource operation.
+
+
+<!-- RTM FORMAL-ID OWNERSHIP INDEX -->
+## RTM formal-ID ownership index
+
+This section is a structural ownership index for `Platform_08` primary-owner validation. It does **not** invent requirements, change maturity, or replace normative prose elsewhere in this document or in specialized masters. Detailed behavior remains in the governing sections cited by the RTM source locator / evidence pointers.
+
+Owned formal IDs:
+
+- `REQ-TIME-001`
+- `REQ-TIME-002`
+- `REQ-TIME-003`
+- `REQ-TIME-004`
+- `REQ-TIME-005`
+
+<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->
