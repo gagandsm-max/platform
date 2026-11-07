@@ -23,37 +23,67 @@ Kafka/PostgreSQL/ClickHouse faults, Sensor/Agent failures, certificate rotation,
 
 ## 1. Core installation
 
-Required release procedure, subject to implemented/signed installer evidence: Phase 1 installs one standalone Core with mandatory recovery/backup/DR. The Phase-1.5 HA profile additionally requires exactly two Core nodes, authenticated peer identity, verified state synchronization and fenced Active/Standby authority under BUILD-120–124. The installer must not expose uncertified HA activation or improvise promotion/failover. A planned wizard/CLI flow is not evidence that an accepted current installer exists.
+Required release procedure, subject to implemented/signed installer evidence. Install signed native package. Staged/unconfigured package installation is distinct from deliberate authorized activation (see §4 and `Platform_15` §3.1). Wizard/CLI selects the certified topology profile to activate. The installer must not expose uncertified HA activation or improvise promotion/failover. A planned wizard/CLI flow is not evidence that an accepted current installer exists.
+
+### 1.1 Phase 1 — standalone Core installation, upgrade, rollback, restart/reboot and recovery
+
+Phase 1 certifies **one authoritative standalone Core**. Standalone installation, upgrade, rollback, restart/reboot and recovery obligations are mandatory and separate from Phase 1.5 two-Core HA obligations. Phase 1 preserves:
+
+- standalone durability for the certified standalone failure matrix (process/service crash/restart, governed host reboot and other explicitly certified recoverable failures);
+- security/hardening and identity/certificate continuity;
+- Sensor assignment generation/fencing, lease ownership and stale privileged-work rejection (multi-Sensor estates remain Phase 1 mandatory even with a standalone Core);
+- backup/restore of authoritative state/config;
+- site-loss DR for the declared Phase-1 DR profile (redeploy/endpoint redirection where applicable).
+
+Catastrophic single-Core/storage destruction is not Phase-1 zero-RPO HA; recovery uses backup/restore and the declared Phase-1 DR profile. HA ≠ DR. A Phase 1 standalone certificate must not imply Core-HA service continuity. Cross-reference `Platform_03`, `Platform_12` Issue #200/#202 entries and `Platform_14` quality gates.
+
+### 1.2 Phase 1.5 — exactly-two-Core HA installation and pairing
+
+Phase 1.5 certifies exactly two full Core nodes Active/Standby. In HA, first Core receives HA/peer addressing, starts as initial Active and waits for second Core. Second Core is installed with peer/current-master information; mutual identity/certificate handshake completes, state synchronization is verified, and one node remains Active while the other is Standby.
+
+Phase 1.5 HA obligations remain mandatory for that envelope and include positive fencing before automatic promotion, peer-partition fail-closed / `SPLIT_BRAIN_PREVENTED` behavior, former-Active rejoin protection, survivor-durability for the certified permanent single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those HA scenarios; distinct from site/DR RPO), Sensor reconnect/re-anchor and push-protocol continuity. Do not invent a third Core, witness, quorum product or new topology. Physical HA mechanisms remain owned by BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE` and are not selected by this operations document.
 
 ## 2. Sensor installation
 
-Install Sensor package, provide current Master Core address/enrollment material and role/site/pool inputs. Sensor performs secure handshake, receives identity/certificate/configuration and joins the appropriate Sensor Pool. Core remains authoritative for assignment/policy.
+Install Sensor package in staged/inactive form until authorized enrollment/configuration activates it. Provide current Master Core address/enrollment material and role/site/pool inputs. Sensor performs secure handshake, receives identity/certificate/configuration and joins the appropriate Sensor Pool. Core remains authoritative for assignment/policy. Sensor assignment fencing remains Phase 1 mandatory under standalone Core; Core-HA re-anchor continuity is a Phase 1.5 obligation.
 
 ## 3. Agent installation
 
-Linux Agent native package or Windows MSI/BAT wrapper installs service, enrolls against current Master Core, receives identity and is directed by Core to the appropriate Sensor. Agent retains enough information to reconnect after reboot while Core may revise assignment.
+Linux Agent native package or Windows MSI/BAT wrapper installs in staged/inactive form until authorized enrollment activates the service path. After deliberate activation, the Agent enrolls against current Master Core, receives identity and is directed by Core to the appropriate Sensor. Agent retains enough information to reconnect after reboot while Core may revise assignment.
+
+Native base-Linux Agent legacy qualification targets from Issue #189 (**Ubuntu 16.04 LTS amd64** and individually pinned **RHEL/CentOS 7.x amd64**) remain `TARGET` / `CERTIFICATION_PENDING` with profile dimensions and unresolved exact minor/image blockers recorded in `Platform_15` §7.1. Modern Linux/Windows Agent profiles remain required. Operations must not claim blanket old-Linux support, require eBPF on legacy systems, relabel agentless results as native-Agent completion, or weaken TLS/security for compatibility.
 
 ## 4. Auto-start and supervised recovery
 
-Installers enable every mandatory runtime service required by the selected deployment profile automatically. Core, Sensor and Linux Agent services use `systemd` boot enablement and bounded supervised recovery; Windows Agent uses automatic SCM start and configured recovery actions. Where PostgreSQL, ClickHouse, Kafka or Valkey run as separate mandatory Core services, they are included in the same automatic enable/start/recovery contract.
+**Staged versus activated:** a staged/unconfigured package remains disabled/inactive across reboot. Installers must not auto-enable mandatory services solely because the package is present. Once valid authorized configuration/enrollment deliberately activates a certified deployment profile, installers enable every mandatory runtime service required by that profile automatically, while respecting intentional authorized maintenance/disablement.
 
-After a supported host reboot or recoverable process crash, the platform shall restore the required monitoring/control profile without routine customer process-start commands. Automatic boot/start and supervised recovery preserve authority/role/fencing/replication/durability/rejoin contracts and must not self-promote Standby, bypass Core Active/Standby fencing, bypass PostgreSQL/Kafka/ClickHouse replication/durability/safe-rejoin rules, create dual-active authority, repeatedly force-start known-unsafe local state, or treat process existence as recovery success. If safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable health/diagnostic evidence and a governed operator/runbook path; standalone/non-HA bounded supervised restart remains mandatory. BUILD-120–124 own exactly-two-Core HA authority/fencing and stateful failover/rejoin. Dependency-aware health/readiness governs startup order and recovery. Optional, scheduled or on-demand workers need not remain resident when no enabled workload requires them. Repeated crash loops must surface in Platform Health/diagnostics and must not be hidden by infinite restart.
+After activation, Core, Sensor and Linux Agent services use `systemd` boot enablement and bounded supervised recovery; Windows Agent uses automatic SCM start and configured recovery actions. Where PostgreSQL, ClickHouse, Kafka or Valkey run as separate mandatory Core services, they are included in the same automatic enable/start/recovery contract for the activated profile.
 
-Installation certification requires both cold-reboot auto-start and process-kill/fault-injection recovery tests for the mandatory runtime set, including proof that recovery does not bypass authority/fencing/durability safety.
+After a supported host reboot or recoverable process crash **of an activated profile**, the platform shall restore the required monitoring/control profile without routine customer process-start commands.
+
+**Phase 1 standalone recovery:** bounded supervised restart, dependency-aware readiness, configuration/state continuity, Sensor assignment fencing preservation, standalone deletion-ACK durability for the certified standalone failure matrix, and backup/DR recovery paths remain mandatory. Standalone/non-HA bounded supervised restart must not be deferred to Phase 1.5.
+
+**Phase 1.5 HA recovery:** automatic boot/start and supervised recovery additionally preserve Active/Standby authority/role/fencing/replication/durability/rejoin contracts and must not self-promote Standby, bypass Core Active/Standby fencing, bypass PostgreSQL/Kafka/ClickHouse replication/durability/safe-rejoin rules, create dual-active authority, repeatedly force-start known-unsafe local state, or treat process existence as recovery success. BUILD-120–124 own exactly-two-Core HA authority/fencing and stateful failover/rejoin.
+
+If safe automatic recovery cannot be established in either envelope, the component remains FAILED/DEGRADED/RECOVERING with actionable health/diagnostic evidence and a governed operator/runbook path. Dependency-aware health/readiness governs startup order and recovery. Optional, scheduled or on-demand workers need not remain resident when no enabled workload requires them. Repeated crash loops must surface in Platform Health/diagnostics and must not be hidden by infinite restart.
+
+Installation certification requires both cold-reboot auto-start and process-kill/fault-injection recovery tests for the mandatory runtime set of the activated profile, including proof that recovery does not bypass authority/fencing/durability safety applicable to that phase envelope. Staged-only evidence is insufficient for activated-lifecycle certification; see `Platform_15` §7.2 native package acceptance binding.
 
 ## 5. Upgrade
 
-Preflight → capacity/free-space check → package signature → state/config backup → drain/standby orchestration → package update → schema migration → service start → health verification → compatibility verification → completion.
+Preflight → capacity/free-space check → package signature → state/config backup → drain/standby orchestration (HA only) → package update → schema migration → service start → health verification → compatibility verification → completion.
 
-HA Core upgrades are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active. Exact data-service upgrade sequencing follows component version compatibility.
+**Phase 1 standalone upgrades** exercise backup/restore prerequisites, signature/provenance checks, schema migration safety, identity/certificate continuity, unacknowledged spool continuity and post-upgrade health without Core-HA switchover claims.
+
+**Phase 1.5 HA Core upgrades** are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active, with fencing/rejoin safety preserved. Exact data-service upgrade sequencing follows component version compatibility.
 
 ## 6. Rollback
 
-Rollback restores compatible package/config/schema state where supported. One-way data migrations require explicit release note and pre-upgrade backup/restore plan.
+Rollback restores compatible package/config/schema state where supported. One-way data migrations require explicit release note and pre-upgrade backup/restore plan. Phase 1 rollback/restore evidence remains mandatory independently of Phase 1.5 HA rollback/rejoin evidence.
 
 ## 7. Failure diagnostics
 
-Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance.
+Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance. Native package acceptance evidence must bind exact source commit/tree, builder identity, binary/package hashes, commands, true exits and logs, activated lifecycle, upgrade/rollback, identity/certificate continuity, unacknowledged spool continuity, permissions/hardening, resource behavior and relevant failure/recovery evidence per `Platform_15` §7.2. Container fixtures and staged-only evidence remain bounded; unsigned internal development evidence is not release signing certification.
 
 For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required outcomes and blocked in-use binaries must be surfaced to the deployment operator with bounded retry/reboot procedure; an unattended install must not schedule an unapproved forced reboot. After any approved reboot, verify SCM start, identity/cert continuity, spool replay/ACK safety and actual telemetry freshness; MSI success alone is not recovery proof. An irreducible blocked native call/EDR lock requires explicit degraded state and operator path, not an infinite stop wait or silent deletion of queue segments.
 
@@ -64,7 +94,7 @@ For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required out
 
 ## 1. Required runbooks
 
-Core process failure; repeated crash loop; HA failover; Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **SNMP poll backlog/degradation; SNMPv3 authentication/engine/time-window failure; SNMP credential rotation; GETBULK/tooBig incompatibility; counter reset/discontinuity anomaly; trap/inform storm or receiver failure; MIB/Capability Pack mapping failure; interface-identity reconciliation conflict**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation.
+Core process failure; repeated crash loop; **Phase 1 standalone Core recovery/backup/restore/site-loss DR**; **Phase 1.5 HA failover/fencing/peer-partition/former-Active rejoin** (distinct from Phase 1 standalone recovery); Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **SNMP poll backlog/degradation; SNMPv3 authentication/engine/time-window failure; SNMP credential rotation; GETBULK/tooBig incompatibility; counter reset/discontinuity anomaly; trap/inform storm or receiver failure; MIB/Capability Pack mapping failure; interface-identity reconciliation conflict**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation; staged-versus-activated lifecycle misconfiguration.
 
 ## 2. Runbook structure
 
@@ -106,8 +136,8 @@ Support bundles include sanitized SNMP component health, poll-plan/profile/versi
 - Host timezone does not define product semantics for telemetry, alerts, SLAs or schedules.
 - Schedule and timezone preference changes are auditable.
 - Scheduler recovery does not mass-catch-up missed history or fabricate samples.
-- Two-Core HA remains uncertified until Platform_14 gates pass; operators must not treat documentation as production HA certification.
-- No new infrastructure service is introduced by this baseline.
+- Two-Core HA remains a Phase 1.5 certification envelope and remains uncertified until Platform_14 gates pass; operators must not treat documentation as production HA certification and must not treat Phase 1 standalone recovery evidence as HA continuity.
+- No new infrastructure service is introduced by this baseline. No third Core, witness, quorum product or alternate HA topology is selected here.
 
 ## 5. Linux Agent eBPF and active-path operational runbook supplement — v3.2.2
 

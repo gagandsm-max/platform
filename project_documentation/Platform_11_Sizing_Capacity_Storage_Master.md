@@ -77,14 +77,16 @@ Priority 4  local LLM interactive assistance
 Priority 5  model recalibration / training / challenger evaluation
 ```
 
-A Core release fails resource certification if enabling the supported local-intelligence profile causes the certified monitoring workload to miss ingestion, alerting, query, durability, failover or storage-protection objectives.
+A Core release fails resource certification if enabling the supported local-intelligence profile causes the certified monitoring workload to miss ingestion, alerting, query, durability, phase-applicable failover/recovery targets or storage-protection objectives. Phase 1 applicability covers standalone Core interruption/recovery, Sensor Pool/reassignment/failover where applicable, Sensor buffering/replay and DR; Phase 1.5 applicability additionally covers Core Active/Standby HA failover. Phase-1 standalone certification does not require two-Core Core HA.
 
 ## 3. Network Sensor planning
 
 Current safe planning baseline retained from prior deployments:
 
-- **4 vCPU / 16 GB RAM / 150 GB SSD ≈ 800 normal network devices** under representative SNMP/ICMP workload and reasonable RTT.
-- **8 vCPU / 32 GB RAM ≈ 2,000–2,500 normal network devices** is an engineering benchmark objective, **not certified** and not a product guarantee.
+- **4 vCPU / 16 GB RAM / 150 GB SSD ≈ 800 normal network devices** under representative SNMP/ICMP/reference workload assumptions and reasonable RTT.
+- **8 vCPU / 32 GB RAM** targeting approximately **2,000–2,500 normal network devices** where workload permits is an **engineering benchmark objective / planning target** until benchmark-certified (**NOT CERTIFIED**). It is **not** a product guarantee, hard device-count entitlement, installer rejection threshold, blanket workload guarantee, or certified capacity result. No additional SSD requirement is invented for this high-density profile by this statement.
+
+Device count alone remains insufficient for Sensor sizing. Apply Monitoring Work Units (MWU) and workload-based sizing including interfaces, metrics, intervals, protocol cost, RTT/timeouts, Flow, syslog, streaming, NCM, users/query/report load, backlog/spool and retention (see §1 and §6). Core compute targets in §2 are unchanged by this Sensor planning target; planning-versus-certified distinction remains mandatory.
 
 Under Issue #206, **4 GB RAM/vCPU** is the internal recommended Sensor sizing/benchmark ratio. Installers, APIs/CLI, startup, deployment and licence checks MUST NOT reject solely because RAM is below this ratio; they provide a nonblocking sizing warning, workload/capacity risk disclosure and authorized-operator proceed. The 4C/16G/150GB baseline remains; no disk specification is invented for the 8C/32G objective.
 
@@ -198,7 +200,7 @@ For each overlay profile, benchmarks must measure incremental:
 - alert qualification and incident creation latency;
 - investigation and deterministic RCA response latency.
 
-**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or HA failover targets) to be violated or degraded. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
+**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or phase-applicable failover/recovery targets) to be violated or degraded. Phase-applicable targets mean Phase 1 standalone Core interruption/recovery, Sensor Pool/reassignment/failover where applicable, Sensor buffering/replay and DR; and, when certifying Phase 1.5, Core Active/Standby HA failover. They do not make Phase-1 standalone certification depend on two-Core Core HA. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
 
 
 ## 9. Core storage sizing model
@@ -285,7 +287,7 @@ Incident/investigation legal holds protect selected time windows/entities/eviden
 
 Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
 
-For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
+For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and phase-applicable failover/recovery targets. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
 ## 13. Development workstation resource behavior — v3.1
 
