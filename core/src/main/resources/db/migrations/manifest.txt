@@ -16,3 +16,4 @@ V015__sensor_poll_grant_authority.sql|Issue 229 G0 inert tenant-scoped Sensor po
 V016__platform_identity_and_permission_grants.sql|Platform identity provider trust, subject mapping, tenant membership and permission-grant directory (Issue #249; V015 retained by Sensor G0)
 V017__sensor_poll_grant_audit_intent.sql|Issue 294 G1b-C2 inert same-transaction sensor_poll_grant issuance audit intent (append-only; survives parent grant deletion; not BUILD-073)
 V018__sensor_execution_incarnation_authority.sql|Issue 288 G1b-C3 inert Core-side Sensor execution incarnation authority (no legacy backfill; not credential/bootEpoch; CASCADE on Sensor delete)
+V019__entity_agent_binding.sql|Platform20 current canonical Agent entity certificate binding; no inferred legacy backfill

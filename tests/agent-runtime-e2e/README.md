@@ -53,3 +53,21 @@ drain `POST /api/v1/sensor/agent-telemetry` → Core → Kafka `telemetry.numeri
 
 Agent enrollment uses test-only SQL against the existing Agent Control tables
 because no public enroll/assign HTTP API exists on this branch.
+
+## Canonical authority and numeric semantics
+
+V019 fixtures explicitly bind A (`agent-e2e-01`, entity suffix `ae01`,
+`host-e2e-agent-01`) and B (`agent-e2e-probe-01`, entity suffix `ae02`,
+`host-e2e-probe-01`) to separate certificate fingerprints. Legitimate scalar
+readback verifies each canonical entity. `identity_probe.py` authenticates both
+spoof directions at the Sensor, then obtains an independent typed Core HTTP409
+response for each exact forged delivery record. It verifies no Core watermark
+reservation; the harness also checks Kafka and ClickHouse absence for both
+metrics. Sensor local-custody ACK remains distinct from Core acceptance.
+
+The Master ruling permits at most one ULP for ordinary finite Float64 operational
+values. `readback.py` uses an explicit IEEE-754 ordered-bit distance, never a loose
+absolute/relative epsilon. Counter64 uses exact unsigned integer comparison and
+rejects float coercion. The scalar readback does not establish a raw-Counter64
+physical path. Timestamp truncation to existing DateTime64(3) is recorded
+separately and never described as nanosecond preservation.

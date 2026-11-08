@@ -128,6 +128,43 @@ public class AgentControlService {
         return credential;
     }
 
+    /** Internal authorized onboarding operation; never derives authority from telemetry hostId. */
+    @Transactional("transactionManager")
+    public EntityAgentBinding establishEntityBinding(UUID tenantId, String agentId, UUID entityId,
+                                                     String fingerprint, String systemName, String osIdentity,
+                                                     boolean approved) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(entityId, "entityId");
+        AgentPrincipal principal = requirePrincipal(agentId);
+        if (!tenantId.equals(principal.tenantId())) {
+            throw new AgentControlException("ERR_AGENT_BINDING_TENANT_MISMATCH", "Agent tenant mismatch");
+        }
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(tenantId, principal.agentId()));
+        var credential = repository.findCredentialByFingerprint(fingerprint)
+                .orElseThrow(() -> new AgentControlException("ERR_AGENT_BINDING_CERTIFICATE_INVALID", "Unknown credential"));
+        Instant now = Instant.now();
+        if (!tenantId.equals(credential.tenantId()) || !principal.agentId().equals(credential.agentId())
+                || credential.status() != AgentCredentialStatus.ACTIVE
+                || now.isBefore(credential.notBefore()) || now.isAfter(credential.notAfter())) {
+            throw new AgentControlException("ERR_AGENT_BINDING_CERTIFICATE_INVALID", "Inactive or mismatched credential");
+        }
+        if (systemName == null || systemName.isBlank() || systemName.length() > 255
+                || (osIdentity != null && osIdentity.length() > 512)) {
+            throw new AgentControlException("ERR_AGENT_BINDING_INVALID", "Invalid host identity evidence bounds");
+        }
+        var binding = new EntityAgentBinding(tenantId, entityId, principal.agentId(), fingerprint,
+                systemName.trim(), osIdentity, now, now, approved ? "ACTIVE" : "PENDING_APPROVAL", 1);
+        // Same-tenant entity/Agent/certificate FKs and uniqueness enforce fail-closed insertion.
+        // Existing bindings require governed reconciliation, never an implicit upsert.
+        repository.insertEntityBinding(binding);
+        auditEmitter.emitControlEvent(AuditCategory.SECURITY_ADMINISTRATION, AuditActions.AGENT_ENROLL,
+                AuditOutcome.SUCCESS, tenantId, "AGENT_ENTITY_BOUND",
+                Map.of("agent_id", principal.agentId(), "entity_id", entityId.toString(),
+                        "binding_state", binding.bindingState()));
+        return binding;
+    }
+
     /**
      * Rotate certificate for the same agent. Supersedes prior ACTIVE credentials then inserts the new binding.
      * On insert failure the whole transaction rolls back so prior credentials remain ACTIVE.
@@ -168,6 +205,10 @@ public class AgentControlService {
                 now
         );
         repository.insertCredential(bound);
+        for (AgentCertificateCredential existing : active) {
+            repository.rotateEntityBindingCertificate(principal.tenantId(), principal.agentId(),
+                    existing.fingerprintSha256(), fingerprint);
+        }
         auditEmitter.emitControlEvent(
                 AuditCategory.CREDENTIAL,
                 AuditActions.AGENT_CREDENTIAL_ROTATE,

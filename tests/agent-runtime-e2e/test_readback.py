@@ -1,7 +1,8 @@
 import copy
 import json
+import math
 import unittest
-from readback import entity_binding_result, expected_observation, verify, verify_health
+from readback import entity_binding_result, expected_observation, verify, verify_health, float64_within_one_ulp, counter64_exact
 
 
 class ReadbackTests(unittest.TestCase):
@@ -18,6 +19,25 @@ class ReadbackTests(unittest.TestCase):
             with self.assertRaises(ValueError): verify(expected, json.dumps(changed))
         with self.assertRaises(ValueError): verify(expected, "")
         with self.assertRaises(ValueError): verify(expected, "\n".join([json.dumps(expected["stored_fields"])] * 2))
+
+    def test_float64_semantics_are_bounded_to_one_ulp(self):
+        for value in (0.0, -0.0, 1e-300, -1e-300, 1.0, -1.0, 1e300, -1e300):
+            adjacent = math.nextafter(value, math.inf)
+            farther = math.nextafter(adjacent, math.inf)
+            self.assertTrue(float64_within_one_ulp(value, adjacent))
+            self.assertFalse(float64_within_one_ulp(value, farther))
+        self.assertTrue(float64_within_one_ulp(-0.0, 0.0))
+        for bad in (math.inf, -math.inf, math.nan, True, "1"):
+            self.assertFalse(float64_within_one_ulp(bad, bad))
+
+    def test_counter64_never_uses_float_tolerance(self):
+        for value in (0, 2**53 + 1, 2**64 - 1):
+            self.assertTrue(counter64_exact(value, value))
+            self.assertFalse(counter64_exact(value, float(value)))
+            self.assertFalse(counter64_exact(value, value - 1))
+        self.assertFalse(counter64_exact(True, 1))
+        self.assertFalse(counter64_exact(-1, -1))
+        self.assertFalse(counter64_exact(2**64, 2**64))
 
     def test_missing_agent_rejected(self):
         with self.assertRaises(ValueError): expected_observation("{}", "agent-e2e-01")

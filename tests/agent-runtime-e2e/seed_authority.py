@@ -76,6 +76,7 @@ def main() -> int:
 
     sql = f"""
 BEGIN;
+DELETE FROM platform.entity_agent_binding WHERE tenant_id = '{TENANT}' AND agent_id = '{AGENT_ID}';
 DELETE FROM platform.agent_sensor_assignment
  WHERE tenant_id = '{TENANT}' AND agent_id = '{AGENT_ID}';
 DELETE FROM platform.agent_certificate_credential
@@ -113,9 +114,15 @@ INSERT INTO platform.entity (
     entity_id, tenant_id, entity_type, display_name, lifecycle_state,
     first_seen_at, last_seen_at, created_at, updated_at
 ) VALUES (
-    '{ENTITY_ID}', '{TENANT}', 'HOST', 'agent-e2e-01', 'ACTIVE',
+    '{ENTITY_ID}', '{TENANT}', 'HOST', '{AGENT_ID}', 'ACTIVE',
     now(), now(), now(), now()
 );
+
+INSERT INTO platform.entity_agent_binding (
+    tenant_id, entity_id, agent_id, certificate_identity, system_name, os_identity,
+    first_enrolled_at, last_heartbeat_at, binding_state, reinstall_generation
+) VALUES ('{TENANT}', '{ENTITY_ID}', '{AGENT_ID}', '{fp}', '{HOST_ID}', 'linux-e2e',
+          now(), now(), 'ACTIVE', 1);
 
 INSERT INTO platform.entity_identifier (
     identifier_id, tenant_id, entity_id, identifier_type, namespace, identifier_value,

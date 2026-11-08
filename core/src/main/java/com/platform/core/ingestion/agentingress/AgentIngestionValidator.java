@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.agentcontrol.AgentAssignmentStatus;
 import com.platform.core.agentcontrol.AgentControlRepository;
 import com.platform.core.agentcontrol.AgentSensorAssignment;
+import com.platform.core.agentcontrol.EntityAgentBinding;
 import com.platform.core.domain.inventory.EntityIdentifier;
 import com.platform.core.ingestion.IngestionException;
 import com.platform.core.ingestion.IngestionMetrics;
@@ -312,6 +313,18 @@ public class AgentIngestionValidator {
         return s == null ? "" : s;
     }
 
+    private void validateHostEvidence(UUID tenantId, UUID entityId, String hostId) {
+        if (hostId.isBlank()) {
+            return;
+        }
+        Optional<EntityIdentifier> observed = entityIdentifierRepository.findByResolutionKey(
+                tenantId, AGENT_ENTITY_NAMESPACE, AGENT_HOST_ID_TYPE, hostId);
+        if (observed.isPresent() && !entityId.equals(observed.get().entityId())) {
+            throw new IngestionException(HttpStatus.CONFLICT,
+                    "ERR_AGENT_IDENTITY_CONFLICT", "Observed host identity conflicts with canonical Agent binding");
+        }
+    }
+
     public List<CanonicalObservation> extractCanonicalObservations(
             AgentTelemetryBatchRequest batch,
             SensorScope scope
@@ -367,9 +380,18 @@ public class AgentIngestionValidator {
                 );
             }
 
+            var binding = agentControlRepository.findActiveEntityBinding(recordTenantId, ingress.agentId().trim())
+                    .orElseThrow(() -> new IngestionException(HttpStatus.FORBIDDEN,
+                            "ERR_AGENT_ENTITY_BINDING_INACTIVE", "Active canonical Agent binding is required"));
+            if (!recordTenantId.equals(binding.tenantId()) || !ingress.agentId().trim().equals(binding.agentId())) {
+                throw new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_IDENTITY_CONFLICT", "Canonical Agent binding scope mismatch");
+            }
+
             for (JsonNode deliveryRecord : ingress.records()) {
                 results.addAll(extractFromDeliveryRecord(
                         deliveryRecord,
+                        binding,
                         ingress,
                         authoritativeSensorId,
                         recordTenantId,
@@ -474,6 +496,7 @@ public class AgentIngestionValidator {
 
     private List<CanonicalObservation> extractFromDeliveryRecord(
             JsonNode deliveryRecord,
+            EntityAgentBinding binding,
             AgentIngressRecord ingress,
             String authoritativeSensorId,
             UUID tenantId,
@@ -528,25 +551,25 @@ public class AgentIngestionValidator {
                 hostId = observations.get(0).path("hostId").asText("").trim();
             }
         }
-        if (hostId.isBlank()) {
-            throw new IngestionException(
-                    HttpStatus.BAD_REQUEST,
-                    "ERR_AGENT_HOST_ID_REQUIRED",
-                    "Agent hostId is required for entity resolution"
-            );
+        // Collect evidence first so hostile distinct host IDs cannot cause one
+        // database roundtrip per observation. Memory remains record-byte bounded.
+        Set<String> checkedHosts = new HashSet<>();
+        if (!hostId.isBlank()) checkedHosts.add(hostId);
+        JsonNode hostObservations = collection.path("observations");
+        if (hostObservations.isArray()) {
+            for (JsonNode obs : hostObservations) {
+                String observedHost = obs.path("hostId").asText("").trim();
+                if (!observedHost.isBlank()) checkedHosts.add(observedHost);
+            }
         }
-
-        Optional<EntityIdentifier> resolved = entityIdentifierRepository.findByResolutionKey(
-                tenantId, AGENT_ENTITY_NAMESPACE, AGENT_HOST_ID_TYPE, hostId
-        );
-        if (resolved.isEmpty()) {
-            throw new IngestionException(
-                    HttpStatus.UNPROCESSABLE_ENTITY,
-                    "ERR_AGENT_ENTITY_UNRESOLVED",
-                    "No entity identifier for Agent hostId under platform.agent/HOST_ID"
-            );
+        if (checkedHosts.size() == 1) {
+            validateHostEvidence(tenantId, binding.entityId(), checkedHosts.iterator().next());
+        } else if (!checkedHosts.isEmpty() && entityIdentifierRepository.hasConflictingHostEvidence(
+                tenantId, binding.entityId(), List.copyOf(checkedHosts))) {
+            throw new IngestionException(HttpStatus.CONFLICT, "ERR_AGENT_IDENTITY_CONFLICT",
+                    "Observed host identity conflicts with canonical Agent binding");
         }
-        String entityId = resolved.get().entityId().toString();
+        String entityId = binding.entityId().toString();
         String correlation = ingress.correlationId() != null && !ingress.correlationId().isBlank()
                 ? ingress.correlationId()
                 : batchCorrelationId;

@@ -1,5 +1,7 @@
 """Compare a real Agent Kafka observation with the existing ClickHouse contract."""
 import json
+import math
+import struct
 from pathlib import Path
 import sys
 
@@ -26,10 +28,45 @@ def expected_observation(text, agent_id):
     raise ValueError("No real Agent observation in retained Kafka output")
 
 
+def float64_within_one_ulp(expected, actual):
+    """Master ruling: finite operational Float64 values permit <=1 ULP.
+
+    Counter64 never uses this comparison. Signed zero has equal numeric semantics;
+    NaN/infinity are not valid operational measurements.
+    """
+    if isinstance(expected, bool) or isinstance(actual, bool):
+        return False
+    if not isinstance(expected, (int, float)) or not isinstance(actual, (int, float)):
+        return False
+    expected, actual = float(expected), float(actual)
+    if not math.isfinite(expected) or not math.isfinite(actual):
+        return False
+    if expected == actual:
+        return True
+
+    def ordered(value):
+        bits = struct.unpack(">Q", struct.pack(">d", value))[0]
+        return (1 << 63) - (bits & ((1 << 63) - 1)) if bits >> 63 else (1 << 63) + bits
+
+    return abs(ordered(expected) - ordered(actual)) <= 1
+
+
+def counter64_exact(expected, actual):
+    # Reject floats (including values rounded beyond 2**53), bools and strings.
+    return (type(expected) is int and type(actual) is int
+            and 0 <= expected <= (1 << 64) - 1 and expected == actual)
+
+
 def verify(expected, text):
     rows = [json.loads(line) for line in text.splitlines() if line.strip()]
-    if len(rows) != 1 or rows[0] != expected["stored_fields"]:
-        raise ValueError(f"Canonical readback differs: expected={expected['stored_fields']} actual={rows}")
+    fields = expected["stored_fields"]
+    if len(rows) != 1:
+        raise ValueError(f"Expected exactly one canonical row, got {len(rows)}")
+    row = rows[0]
+    if (row.keys() != fields.keys()
+            or any(row[k] != v for k, v in fields.items() if k != "value")
+            or not float64_within_one_ulp(fields["value"], row["value"])):
+        raise ValueError(f"Canonical readback differs: expected={fields} actual={rows}")
 
 
 def entity_binding_result(text, metric, tenant, agent, entity):

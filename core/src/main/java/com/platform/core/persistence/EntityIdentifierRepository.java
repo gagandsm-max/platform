@@ -74,6 +74,16 @@ public class EntityIdentifierRepository {
         return rows.stream().findFirst();
     }
 
+    /** One tenant-scoped query for the bounded host evidence in one ingress record. */
+    public boolean hasConflictingHostEvidence(UUID tenantId, UUID entityId, List<String> hostIds) {
+        if (hostIds.isEmpty()) return false;
+        return Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM platform.entity_identifier
+                 WHERE tenant_id=:tenantId AND namespace='platform.agent' AND identifier_type='HOST_ID'
+                   AND identifier_value IN (:hostIds) AND entity_id<>:entityId)
+                """, Map.of("tenantId", tenantId, "entityId", entityId, "hostIds", hostIds), Boolean.class));
+    }
+
     public List<EntityIdentifier> listByEntity(UUID tenantId, UUID entityId, int limit, long offset) {
         return jdbc.query("""
                 SELECT * FROM platform.entity_identifier

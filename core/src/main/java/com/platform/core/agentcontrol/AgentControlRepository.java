@@ -63,6 +63,56 @@ public class AgentControlRepository {
         this.jdbc = jdbc;
     }
 
+    /**
+     * Core custody uses explicit active identity authority, never host evidence.
+     * The Sensor authenticated the credential at admission. Do not re-evaluate its
+     * current expiry/status here: accepted historical spool records must remain
+     * drainable after certificate expiry/rotation. New admissions use the existing
+     * AgentAuthorityQueryService credential checks.
+     */
+    public Optional<EntityAgentBinding> findActiveEntityBinding(UUID tenantId, String agentId) {
+        return jdbc.query("""
+                SELECT b.* FROM platform.entity_agent_binding b
+                JOIN platform.agent a ON a.tenant_id=b.tenant_id AND a.agent_id=b.agent_id
+                JOIN platform.agent_certificate_credential c
+                  ON c.tenant_id=b.tenant_id AND c.agent_id=b.agent_id
+                 AND c.fingerprint_sha256=b.certificate_identity
+                WHERE b.tenant_id=:tenantId AND b.agent_id=:agentId
+                  AND b.binding_state='ACTIVE' AND a.status='ACTIVE'
+                """, Map.of("tenantId", tenantId, "agentId", agentId), (rs, rowNum) ->
+                new EntityAgentBinding(rs.getObject("tenant_id", UUID.class),
+                        rs.getObject("entity_id", UUID.class), rs.getString("agent_id"),
+                        rs.getString("certificate_identity"), rs.getString("system_name"),
+                        rs.getString("os_identity"), toInstant(rs.getTimestamp("first_enrolled_at")),
+                        toInstant(rs.getTimestamp("last_heartbeat_at")), rs.getString("binding_state"),
+                        rs.getLong("reinstall_generation"))).stream().findFirst();
+    }
+
+    public void insertEntityBinding(EntityAgentBinding binding) {
+        jdbc.update("""
+                INSERT INTO platform.entity_agent_binding
+                    (tenant_id, entity_id, agent_id, certificate_identity, system_name, os_identity,
+                     first_enrolled_at, last_heartbeat_at, binding_state, reinstall_generation)
+                VALUES (:tenant, :entity, :agent, :certificate, :name, :os, :first, :heartbeat, :state, :generation)
+                """, new MapSqlParameterSource().addValue("tenant", binding.tenantId())
+                .addValue("entity", binding.entityId()).addValue("agent", binding.agentId())
+                .addValue("certificate", binding.certificateIdentity()).addValue("name", binding.systemName())
+                .addValue("os", binding.osIdentity()).addValue("first", Timestamp.from(binding.firstEnrolledAt()))
+                .addValue("heartbeat", Timestamp.from(binding.lastHeartbeatAt()))
+                .addValue("state", binding.bindingState()).addValue("generation", binding.reinstallGeneration()));
+    }
+
+    public int rotateEntityBindingCertificate(UUID tenantId, String agentId, String oldFingerprint,
+                                              String newFingerprint) {
+        // Called under the same principal lock/transaction as credential rotation.
+        // No entity, generation or approval-state change is permitted here.
+        return jdbc.update("""
+                UPDATE platform.entity_agent_binding SET certificate_identity=:next
+                 WHERE tenant_id=:tenant AND agent_id=:agent AND certificate_identity=:previous
+                """, Map.of("tenant", tenantId, "agent", agentId,
+                "previous", oldFingerprint, "next", newFingerprint));
+    }
+
     public void insertPrincipal(AgentPrincipal principal) {
         jdbc.update("""
                 INSERT INTO platform.agent

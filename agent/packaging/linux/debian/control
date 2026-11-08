@@ -1,0 +1,15 @@
+Package: platform-agent
+Version: @VERSION@
+Architecture: @DEB_ARCH@
+Maintainer: Platform Release Engineering <support@amrudai.com>
+Section: admin
+Priority: optional
+Pre-Depends: bash (>= 5), coreutils, util-linux, passwd, systemd (>= 245)
+Depends: adduser
+Description: Platform (AmrudAi) Linux Agent native package
+ Ships the Linux Agent binary, systemd unit and packaging helpers under
+ /opt/platform/agent. Fresh installs without /etc/platform/agent.env remain
+ STAGED/UNCONFIGURED and do not fabricate enrollment, certificates or
+ tenant/agent identity. Artifacts from this recipe are UNSIGNED/INTERNAL_ONLY
+ until separate signing/release gates pass. eBPF enrichment is never enabled
+ by package scripts.

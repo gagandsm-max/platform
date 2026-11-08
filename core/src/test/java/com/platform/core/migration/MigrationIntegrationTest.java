@@ -55,7 +55,7 @@ class MigrationIntegrationTest {
                                      'sensor_telemetry_watermark','sensor_agent_ingress_watermark',
                                      'discovery_request','discovery_target','discovery_evidence','discovery_candidate',
                                      'sensor','sensor_certificate_credential','sensor_allowed_entity',
-                                     'agent','agent_certificate_credential','agent_sensor_assignment',
+                                     'agent','agent_certificate_credential','agent_sensor_assignment','entity_agent_binding',
                                      'tenant_capability_pack','tenant_capability_pack_activation',
                                      'sensor_capability_pack_assignment','sensor_capability_pack_state',
                                      'entity_management_endpoint','sensor_enrollment_authority',
@@ -66,12 +66,12 @@ class MigrationIntegrationTest {
                 """,
                 Integer.class
         );
-        assertEquals(38, tables);
+        assertEquals(39, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(18, history.size());
+        assertEquals(19, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -90,11 +90,12 @@ class MigrationIntegrationTest {
         assertEquals("V016", history.get(15).get("version"));
         assertEquals("V017", history.get(16).get("version"));
         assertEquals("V018", history.get(17).get("version"));
+        assertEquals("V019", history.get(18).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(18, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(19, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -204,7 +205,7 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(18, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(19, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
         // 11. V001→V018 combined upgrade must materialize Sensor/Agent Control/Capability Pack,
@@ -278,12 +279,12 @@ class MigrationIntegrationTest {
                 """
                 SELECT COUNT(*) FROM information_schema.tables
                 WHERE table_schema='platform'
-                  AND table_name IN ('agent','agent_certificate_credential','agent_sensor_assignment',
+                  AND table_name IN ('agent','agent_certificate_credential','agent_sensor_assignment','entity_agent_binding',
                                      'sensor_agent_ingress_watermark')
                 """,
                 Integer.class
         );
-        assertEquals(4, agentControlTables);
+        assertEquals(5, agentControlTables);
         Integer capabilityPackTables = jdbc.queryForObject(
                 """
                 SELECT COUNT(*) FROM information_schema.tables
@@ -1276,7 +1277,7 @@ class MigrationIntegrationTest {
         // Full catalogue migrate advances the V015 checkpoint through IAM V016, audit-intent V017
         // and incarnation V018.
         pg.migrate();
-        assertEquals(18, jdbc.queryForObject(
+        assertEquals(19, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
@@ -1493,7 +1494,7 @@ class MigrationIntegrationTest {
 
         pg.migrate();
 
-        assertEquals(18, jdbc.queryForObject(
+        assertEquals(19, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V018'", Integer.class));
@@ -1524,9 +1525,9 @@ class MigrationIntegrationTest {
         assertTrue(v018Checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(18, jdbc.queryForObject(
+        assertEquals(19, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
-                "Successful repeat must remain idempotent at eighteen history rows");
+                "Successful repeat must remain idempotent at nineteen history rows");
     }
 
     private static void assertLegacyWatermarkConserved(Map<String, Object> before, Map<String, Object> after) {
@@ -1552,6 +1553,41 @@ class MigrationIntegrationTest {
                 String.valueOf(after.get("pending_publisher_claimed_at")));
         assertEquals(String.valueOf(before.get("pending_publisher_lease_until")),
                 String.valueOf(after.get("pending_publisher_lease_until")));
+    }
+
+    @Test
+    void v019UpgradePreservesLegacyAgentWithoutInventingBinding() {
+        pg.runner(catalogThroughVersion("V018")).applyPendingMigrations();
+        UUID tenant = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.tenant VALUES (?, 'Legacy agent', 'SINGLE', 'ACTIVE', 'UTC', now(), now())
+                """, tenant);
+        pg.jdbc().update("""
+                INSERT INTO platform.agent (tenant_id, agent_id, status, created_at, updated_at)
+                VALUES (?, 'legacy-unbound', 'ACTIVE', now(), now())
+                """, tenant);
+        pg.migrate();
+        assertEquals(0, pg.jdbc().queryForObject("SELECT count(*) FROM platform.entity_agent_binding", Integer.class));
+        assertEquals(1, pg.jdbc().queryForObject("SELECT count(*) FROM platform.agent WHERE agent_id='legacy-unbound'", Integer.class));
+        pg.migrate();
+        assertEquals(1, pg.jdbc().queryForObject("SELECT count(*) FROM platform.schema_history WHERE version='V019'", Integer.class));
+    }
+
+    @Test
+    void v019FailureRollsBackAddedConstraintAndCanRetryAfterFixtureRepair() {
+        pg.runner(catalogThroughVersion("V018")).applyPendingMigrations();
+        // Deliberate fixture collision after V019's ALTER but before CREATE can commit.
+        pg.jdbc().execute("CREATE TABLE platform.entity_agent_binding (fixture_marker integer)");
+        assertThrows(MigrationException.class, pg::migrate);
+        assertEquals(0, pg.jdbc().queryForObject("SELECT count(*) FROM platform.schema_history WHERE version='V019'", Integer.class));
+        assertEquals(0, pg.jdbc().queryForObject("SELECT count(*) FROM pg_constraint WHERE conname='uq_agent_cert_tenant_agent_identity'", Integer.class));
+        assertEquals(1, pg.jdbc().queryForObject("""
+                SELECT count(*) FROM information_schema.columns
+                 WHERE table_schema='platform' AND table_name='entity_agent_binding' AND column_name='fixture_marker'
+                """, Integer.class));
+        pg.jdbc().execute("DROP TABLE platform.entity_agent_binding");
+        pg.migrate();
+        assertEquals(1, pg.jdbc().queryForObject("SELECT count(*) FROM platform.schema_history WHERE version='V019'", Integer.class));
     }
 
     private static void assertConstraintViolation(Throwable error, String constraintName) {

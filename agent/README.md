@@ -108,8 +108,10 @@ beneath protected directories owned by root or that service user. Symlinks,
 foreign directory owners and unsafe writable directories are rejected (sticky
 shared ancestors are allowed). Identity metadata must be private, owned, regular,
 single-linked and at most 16KiB. Publication never replaces a concurrent winner;
-file and directory-ancestry synchronization must succeed before identity loading
-or creation reports success. An uncertain sync preserves the published identity
+file and immediate state-directory synchronization must succeed before identity loading
+or creation reports success. Parent ancestry is validated, never recursively fsynced.
+The installer/systemd must provision the durable state-directory hierarchy.
+An uncertain sync preserves the published identity
 for reconciliation. Unsupported filesystem operations fail closed; native
 filesystem/reboot qualification is separate from these implementation checks.
 
@@ -151,9 +153,10 @@ Startup/shutdown exit codes: `1` configuration, `2` identity, `3` service init, 
 
 ## Linux service lifecycle
 
-`agent/linux/systemd/platform-agent.service` is the Mother LLD §85.3 unit contract (also published under `deploy/systemd/` for later installer packaging; `.deb`/`.rpm` packaging remains BUILD-018):
+`agent/linux/systemd/platform-agent.service` is the Mother LLD §85.3 unit contract (also published under `deploy/systemd/` for installer packaging; native recipes are under `agent/packaging/linux` and require separate native lifecycle evidence):
 
 - dedicated `platform-agent` user/group created by the Linux package (this unit does not create them)
+- packaged executable `/opt/platform/agent/platform-agent-linux`
 - required `EnvironmentFile=/etc/platform/agent.env` (missing file fails the unit; fail-closed)
 - `StateDirectory=platform/agent` with working directory `/var/lib/platform/agent`
 - `Restart=on-failure` with bounded `RestartSec=5`
@@ -162,7 +165,7 @@ Startup/shutdown exit codes: `1` configuration, `2` identity, `3` service init, 
 - `NoNewPrivileges=true`
 - SIGTERM graceful stop
 
-Real host `systemd` install/enable/reboot certification is **NOT_RUN — REQUIRES HOST CERTIFICATION** on a real systemd-capable Linux host. Cursor Cloud / Docker-only environments cannot complete that gate.
+Native `systemd` install/enable/reboot qualification requires exact-artifact evidence from an admitted Linux VM/testbed. Docker-only content tests cannot establish that gate. The optional `agent/linux/systemd/ebpf/20-ebpf.conf` grants only CAP_BPF/CAP_PERFMON to this non-root service on qualified modern Linux profiles; it is shipped inactive and is not applied to legacy base-Agent installations.
 
 ## Health
 

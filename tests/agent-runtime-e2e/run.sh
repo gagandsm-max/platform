@@ -694,22 +694,35 @@ done
 record "health-ready-probe" "PASS" "HTTP200 UP/ready=true with recovered Sensor transport (loopback probe inside Agent container)"
 sample_agent_resources recovered
 
-# Authenticated Agent A must not select Agent B's canonical entity by claiming B's
-# hostId. Both identities here are private fixtures in the same isolated tenant.
-# A downstream authority failure is a real FAIL, not an Agent-side workaround.
+# Explicit A/B private identities, each authenticated at Sensor before the same
+# forged record is challenged at Core. Sensor custody is distinct from Core accept.
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-forged-host.txt"
-python3 "${E2E_DIR}/build_envelope.py" \
-    --envelope-tenant "$TENANT" --payload-tenant "$TENANT" \
-    --agent-id "$AGENT_ID" --host-id host-e2e-agent-01 \
-    --sequence 900101 --metric-key "e2e.forged.host.${RUN_ID}" --value 123 \
-    > "${EVIDENCE_DIR}/forged-host.json"
-post_envelope "${EVIDENCE_DIR}/forged-host.json" > "${EVIDENCE_DIR}/forged-host-ack.json"
-FORGED_HOST_EVENTS=$(consume_since_offsets "${EVIDENCE_DIR}/offsets-forged-host.txt" 8)
-printf '%s\n' "$FORGED_HOST_EVENTS" > "${EVIDENCE_DIR}/forged-host-kafka.txt"
-BINDING_RESULT=$(python3 "${E2E_DIR}/readback.py" entity-binding \
-    "${EVIDENCE_DIR}/forged-host-kafka.txt" "${EVIDENCE_DIR}/entity-binding-result.json" \
-    "e2e.forged.host.${RUN_ID}" "$TENANT" "$AGENT_ID" "018f0e0a-0000-7000-8000-00000000ae02")
-record "agent-canonical-entity-binding" "$BINDING_RESULT" "Canonical tenant/Agent/entity comparison in entity-binding-result.json; absence is NOT_RUN, incorrect attribution is FAIL"
+python3 "${E2E_DIR}/identity_probe.py" "$PLATFORM_E2E_PREFIX" \
+    "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" "$RUN_ID" "$EVIDENCE_DIR" \
+    || fail_closed "agent-canonical-entity-binding" "See retained Sensor ACK and Core typed rejection evidence"
+consume_since_offsets "${EVIDENCE_DIR}/offsets-forged-host.txt" 8 > "${EVIDENCE_DIR}/forged-host-kafka.txt"
+docker exec "${PLATFORM_E2E_PREFIX}-clickhouse" sh -c \
+    'exec clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"' sh \
+    "SELECT tenant_id, entity_id, metric_id FROM platform.metric_numeric WHERE startsWith(metric_id,'e2e.forged.') FORMAT JSONEachRow" \
+    > "${EVIDENCE_DIR}/forged-host-clickhouse.jsonl"
+if python3 - "$EVIDENCE_DIR" <<'PYPROBE'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+evidence = json.loads((p / 'identity-fixtures.json').read_text())
+metrics = {r['metric'] for r in evidence['results']}
+for file, key in (('forged-host-kafka.txt', 'metricId'), ('forged-host-clickhouse.jsonl', 'metric_id')):
+    for line in (p / file).read_text().splitlines():
+        try: row = json.loads(line.split('|', 1)[-1])
+        except ValueError: continue
+        assert row.get(key) not in metrics, row
+assert len(evidence['results']) == 2
+PYPROBE
+then
+    record "agent-canonical-entity-binding" "PASS" "A claims HostB and B claims HostA: Core409 ERR_AGENT_IDENTITY_CONFLICT, no Core reservation/Kafka/ClickHouse metric for either entity; Sensor custody ACK preserved"
+else
+    fail_closed "agent-canonical-entity-binding" "Forged metric reached downstream storage"
+fi
 
 dump_evidence
 

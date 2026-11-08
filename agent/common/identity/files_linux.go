@@ -46,18 +46,10 @@ func trustedIdentityDirectory(info os.FileInfo) bool {
 }
 
 func syncIdentityPath(path string, syncDir func(string) error) error {
-	// MkdirAll may have created several directory entries. Reconcile the
-	// entire validated ancestry, including after an uncertain prior attempt.
-	for {
-		if err := syncDir(path); err != nil {
-			return err
-		}
-		parent := filepath.Dir(path)
-		if parent == path {
-			return nil
-		}
-		path = parent
-	}
+	// The identity file is fsynced before no-replace publication. Its rename
+	// boundary is this state directory, not the machine's ancestor hierarchy.
+	// Production StateDirectory provisioning belongs to systemd/the installer.
+	return syncDir(path)
 }
 
 func publishIdentity(temp, target string) error {
