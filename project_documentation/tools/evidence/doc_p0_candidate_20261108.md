@@ -5,6 +5,8 @@
 **Immutable audited starting head:** `63e4581664f02dbe1b7b866ca6b753d083eb77f3`  
 **Audited starting tree:** `e7e43b5ae90ff46795e261b8a69378f62c58404b`  
 **Canonical main/base:** `92f0fb37805c234be2869619abcc01ad26b5f30b`  
+**Candidate head after corrective commit:** `10c4ca3885a16a5191294d9f5571c198b274a8f1`  
+**Candidate tree after corrective commit:** `d425422ae3045ce3bc6a37438726a8332194784b`  
 
 This file is **writer evidence for the second independent exact-SHA audit**. It is not `DOC_P0_ACCEPTANCE` and does not certify product runtime.
 
