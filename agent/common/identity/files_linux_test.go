@@ -3,12 +3,100 @@
 package identity
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 )
+
+type identityDirectoryOwner struct {
+	os.FileInfo
+	uid uint32
+}
+
+func (d identityDirectoryOwner) Sys() any {
+	stat := *d.FileInfo.Sys().(*syscall.Stat_t)
+	stat.Uid = d.uid
+	return &stat
+}
+
+func TestIdentityDirectoryRejectsForeignOwner(t *testing.T) {
+	info, err := os.Lstat(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, uid := range []uint32{0, uint32(os.Geteuid()), ^uint32(0)} {
+		want := uid == 0 || uid == uint32(os.Geteuid())
+		if got := trustedIdentityDirectory(identityDirectoryOwner{info, uid}); got != want {
+			t.Fatalf("directory owner %d trusted=%v, want %v", uid, got, want)
+		}
+	}
+}
+
+func TestIdentitySyncIncludesDirectoryAncestors(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "new", "state")
+	var got, want []string
+	_, err := loadOrGenerate(dir, "a", "t", func(path string) error {
+		got = append(got, path)
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for path := dir; ; path = filepath.Dir(path) {
+		want = append(want, path)
+		if path == filepath.Dir(path) {
+			break
+		}
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("directory publication syncs = %v, want %v", got, want)
+	}
+}
+
+func TestIdentityParentSyncFailureRetainsPublishedIdentity(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "new", "state")
+	want := errors.New("parent sync uncertainty")
+	var calls []string
+	id, err := loadOrGenerate(dir, "", "t", func(path string) error {
+		calls = append(calls, path)
+		if path == filepath.Dir(dir) {
+			return want
+		}
+		return nil
+	})
+	if id != nil || !errors.Is(err, want) || len(calls) != 2 {
+		t.Fatalf("parent uncertainty did not stop publication success: id=%v err=%v calls=%v", id, err, calls)
+	}
+	before, err := os.ReadFile(filepath.Join(dir, identityFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrGenerate(dir, "", "t"); err != nil {
+		t.Fatal(err)
+	}
+	after, err := os.ReadFile(filepath.Join(dir, identityFileName))
+	if err != nil || string(before) != string(after) {
+		t.Fatalf("parent uncertainty recovery replaced identity: %v", err)
+	}
+}
+
+func TestIdentityRejectsWritableStateDirectory(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0777); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadOrGenerate(dir, "a", "t"); err == nil {
+		t.Fatal("writable state directory accepted")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, identityFileName)); !os.IsNotExist(err) {
+		t.Fatal("unsafe state directory was written")
+	}
+}
 
 func TestConcurrentIdentityInitializationNeverReplacesWinner(t *testing.T) {
 	dir := t.TempDir()

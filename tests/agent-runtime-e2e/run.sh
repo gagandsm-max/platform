@@ -692,11 +692,10 @@ python3 "${E2E_DIR}/build_envelope.py" \
 post_envelope "${EVIDENCE_DIR}/forged-host.json" > "${EVIDENCE_DIR}/forged-host-ack.json"
 FORGED_HOST_EVENTS=$(consume_since_offsets "${EVIDENCE_DIR}/offsets-forged-host.txt" 8)
 printf '%s\n' "$FORGED_HOST_EVENTS" > "${EVIDENCE_DIR}/forged-host-kafka.txt"
-if printf '%s\n' "$FORGED_HOST_EVENTS" | grep -q "e2e.forged.host.${RUN_ID}"; then
-    record "agent-canonical-entity-binding" "FAIL" "Core accepted another Agent's hostId into canonical telemetry; downstream authority blocker"
-else
-    record "agent-canonical-entity-binding" "NOT_RUN" "No canonical forgery observed in bounded window; absence alone is not proof of authoritative rejection"
-fi
+BINDING_RESULT=$(python3 "${E2E_DIR}/readback.py" entity-binding \
+    "${EVIDENCE_DIR}/forged-host-kafka.txt" "${EVIDENCE_DIR}/entity-binding-result.json" \
+    "e2e.forged.host.${RUN_ID}" "$TENANT" "$AGENT_ID" "018f0e0a-0000-7000-8000-00000000ae02")
+record "agent-canonical-entity-binding" "$BINDING_RESULT" "Canonical tenant/Agent/entity comparison in entity-binding-result.json; absence is NOT_RUN, incorrect attribution is FAIL"
 
 dump_evidence
 

@@ -32,6 +32,25 @@ def verify(expected, text):
         raise ValueError(f"Canonical readback differs: expected={expected['stored_fields']} actual={rows}")
 
 
+def entity_binding_result(text, metric, tenant, agent, entity):
+    rows = []
+    for line in text.splitlines():
+        try:
+            row = json.loads(line.split("|", 1)[-1])
+        except ValueError:
+            continue
+        if row.get("metricId") == metric:
+            rows.append(row)
+    # Absence cannot prove rejection. A server may safely ignore the claimed
+    # host and use the authenticated Agent's entity instead of rejecting it.
+    status = "NOT_RUN"
+    if rows:
+        status = "PASS" if all(row.get("tenantId") == tenant and row.get("agentId") == agent
+                               and row.get("entityId") == entity for row in rows) else "FAIL"
+    return {"status": status, "expected_tenant": tenant, "expected_agent": agent,
+            "expected_entity": entity, "observed": rows}
+
+
 if __name__ == "__main__":
     action, source, target = sys.argv[1:4]
     if action == "prepare":
@@ -42,5 +61,9 @@ if __name__ == "__main__":
         print("SELECT tenant_id, entity_id, metric_id, sensor_id, toString(ts) AS ts, value, sequence_id, source_protocol FROM platform.metric_numeric WHERE " + predicates + " FORMAT JSONEachRow")
     elif action == "verify":
         verify(json.loads(Path(source).read_text()), Path(target).read_text())
+    elif action == "entity-binding":
+        result = entity_binding_result(Path(source).read_text(), *sys.argv[4:8])
+        Path(target).write_text(json.dumps(result, indent=2) + "\n")
+        print(result["status"])
     else:
         raise SystemExit("Unknown readback operation")

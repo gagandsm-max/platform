@@ -13,3 +13,5 @@ func singleIdentityLink(info os.FileInfo) bool       { return true }
 
 // Linux durability qualification does not establish Windows directory semantics.
 func syncIdentityDir(path string) error { return nil }
+
+func syncIdentityPath(path string, syncDir func(string) error) error { return syncDir(path) }

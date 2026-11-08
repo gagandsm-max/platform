@@ -1,6 +1,6 @@
 import json
 import unittest
-from readback import expected_observation, verify
+from readback import entity_binding_result, expected_observation, verify
 
 
 class ReadbackTests(unittest.TestCase):
@@ -20,3 +20,12 @@ class ReadbackTests(unittest.TestCase):
 
     def test_missing_agent_rejected(self):
         with self.assertRaises(ValueError): expected_observation("{}", "agent-e2e-01")
+
+    def test_entity_binding_checks_canonical_identity_not_just_presence(self):
+        row = {"metricId": "probe", "tenantId": "t", "agentId": "a", "entityId": "e"}
+        def result(value):
+            return entity_binding_result("key|" + json.dumps(value), "probe", "t", "a", "e")["status"]
+        self.assertEqual(result(row), "PASS")
+        for field in ("tenantId", "agentId", "entityId"):
+            self.assertEqual(result(dict(row, **{field: "forged"})), "FAIL")
+        self.assertEqual(result({}), "NOT_RUN")

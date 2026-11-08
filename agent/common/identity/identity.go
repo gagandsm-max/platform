@@ -100,6 +100,10 @@ func loadOrGenerate(stateDir, configuredID, tenantID string, syncDir func(string
 	} else {
 		return nil, fmt.Errorf("IDENTITY_STAT_FAILED: %w", err)
 	}
+	// Recheck directories created (or raced) during MkdirAll before writing.
+	if err := validateIdentityAncestors(absDir); err != nil {
+		return nil, err
+	}
 
 	idPath := filepath.Join(absDir, identityFileName)
 
@@ -161,7 +165,7 @@ func loadOrGenerate(stateDir, configuredID, tenantID string, syncDir func(string
 		existing.OS = runtime.GOOS
 		existing.Arch = runtime.GOARCH
 		// Also reconcile a prior publication whose directory sync failed.
-		if err := syncDir(absDir); err != nil {
+		if err := syncIdentityPath(absDir, syncDir); err != nil {
 			return nil, err
 		}
 		return &existing, nil
@@ -228,7 +232,7 @@ func loadOrGenerate(stateDir, configuredID, tenantID string, syncDir func(string
 	if err := publishIdentity(tmpName, idPath); err != nil {
 		return nil, fmt.Errorf("IDENTITY_PUBLISH_FAILED: %w", err)
 	}
-	if err := syncDir(absDir); err != nil {
+	if err := syncIdentityPath(absDir, syncDir); err != nil {
 		return nil, err
 	}
 
