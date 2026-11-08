@@ -1,6 +1,7 @@
+import copy
 import json
 import unittest
-from readback import entity_binding_result, expected_observation, verify
+from readback import entity_binding_result, expected_observation, verify, verify_health
 
 
 class ReadbackTests(unittest.TestCase):
@@ -29,3 +30,22 @@ class ReadbackTests(unittest.TestCase):
         for field in ("tenantId", "agentId", "entityId"):
             self.assertEqual(result(dict(row, **{field: "forged"})), "FAIL")
         self.assertEqual(result({}), "NOT_RUN")
+
+    def test_health_preserves_local_safety_contract_and_checks_body(self):
+        ready = {"status": "DEGRADED", "ready": True, "http_semantic": 200}
+        health = {"component_state": "DEGRADED", "queue_depth": 2, "delivery_status": "FAILED",
+                  "dependency_status": {"sensor_transport": "DOWN"}, "reason_codes": ["SENSOR_TRANSPORT_UNAVAILABLE"]}
+        self.assertTrue(verify_health(ready, health, 200, 2, True))
+        self.assertFalse(verify_health(ready, health, 503, 2, True))
+        self.assertFalse(verify_health(ready, health, 200, 0, True))
+        for key, value in (("status", "UP"), ("ready", False), ("http_semantic", 503)):
+            self.assertFalse(verify_health(dict(ready, **{key: value}), health, 200, 2, True))
+        for key, value in (("component_state", "UP"), ("queue_depth", 0), ("delivery_status", "OK"),
+                           ("dependency_status", {"sensor_transport": "UP"}), ("reason_codes", [])):
+            changed = copy.deepcopy(health); changed[key] = value
+            self.assertFalse(verify_health(ready, changed, 200, 2, True))
+        ready["status"] = "UP"
+        health.update(component_state="UP", delivery_status="OK", dependency_status={"sensor_transport": "UP"})
+        self.assertTrue(verify_health(ready, health, 200, 0, False))
+        health["delivery_status"] = "FAILED"
+        self.assertFalse(verify_health(ready, health, 200, 0, False))

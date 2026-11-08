@@ -51,6 +51,21 @@ def entity_binding_result(text, metric, tenant, agent, entity):
             "expected_entity": entity, "observed": rows}
 
 
+def verify_health(ready, health, http_code, queue_count, outage):
+    if not isinstance(ready, dict) or not isinstance(health, dict):
+        return False
+    if http_code != 200 or ready.get("ready") is not True or ready.get("http_semantic") != 200:
+        return False
+    expected = "DEGRADED" if outage else "UP"
+    if ready.get("status") != expected or health.get("component_state") != expected:
+        return False
+    transport = health.get("dependency_status", {}).get("sensor_transport")
+    if outage:
+        return (queue_count > 0 and health.get("queue_depth", 0) > 0 and transport == "DOWN"
+                and health.get("delivery_status") == "FAILED" and bool(health.get("reason_codes")))
+    return transport == "UP" and health.get("delivery_status") in ("OK", "BACKLOG")
+
+
 if __name__ == "__main__":
     action, source, target = sys.argv[1:4]
     if action == "prepare":
@@ -65,5 +80,9 @@ if __name__ == "__main__":
         result = entity_binding_result(Path(source).read_text(), *sys.argv[4:8])
         Path(target).write_text(json.dumps(result, indent=2) + "\n")
         print(result["status"])
+    elif action in ("health-outage", "health-recovered"):
+        valid = verify_health(json.loads(Path(source).read_text()), json.loads(Path(target).read_text()),
+                              int(sys.argv[4]), int(sys.argv[5]), action == "health-outage")
+        raise SystemExit(0 if valid else 1)
     else:
         raise SystemExit("Unknown readback operation")

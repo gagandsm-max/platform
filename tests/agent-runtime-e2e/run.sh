@@ -511,16 +511,20 @@ kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-down.txt"
 docker stop ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
 Q_HELD=0
 READY_DOWN=""
+HEALTH_DOWN_OK=0
 for i in $(seq 1 12); do
     sleep 3
     READY_DOWN="$(agent_ready_code)"
     Q_HELD="$(queue_count)"
-    if [[ "${Q_HELD}" -ge 1 && "${READY_DOWN}" == "503" ]]; then
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/ready > "${EVIDENCE_DIR}/ready-down-${i}.json" || true
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/health > "${EVIDENCE_DIR}/health-down-${i}.json" || true
+    if python3 "${E2E_DIR}/readback.py" health-outage "${EVIDENCE_DIR}/ready-down-${i}.json" "${EVIDENCE_DIR}/health-down-${i}.json" "${READY_DOWN:-0}" "$Q_HELD"; then
+        HEALTH_DOWN_OK=1
         break
     fi
 done
-if [[ "${Q_HELD}" -ge 1 && "${READY_DOWN}" == "503" ]]; then
-    record "sensor-unavailable-retain" "PASS" "queue=${Q_HELD} ready_http=${READY_DOWN}"
+if [[ "$HEALTH_DOWN_OK" == 1 ]]; then
+    record "sensor-unavailable-retain" "PASS" "queue=${Q_HELD}; HTTP200 DEGRADED/ready=true, failed/down transport, safe durable buffering"
 else
     record "sensor-unavailable-retain" "FAIL" "queue=${Q_HELD} ready_http=${READY_DOWN}"
 fi
@@ -675,9 +679,19 @@ else
 fi
 record "sigterm-via-docker-stop" "PASS" "docker stop exited Agent with 0; exact durable record hashes survived restart; this is not host reboot"
 
-READY_UP="$(agent_ready_code)"
-[[ "$READY_UP" == "200" ]] || fail_closed "health-ready-probe" "HTTP=$READY_UP"
-record "health-ready-probe" "PASS" "ready_http=${READY_UP} (loopback probe inside Agent container)"
+HEALTH_UP_OK=0
+for i in $(seq 1 10); do
+    READY_UP="$(agent_ready_code)"
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/ready > "${EVIDENCE_DIR}/ready-up-${i}.json" || true
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/health > "${EVIDENCE_DIR}/health-up-${i}.json" || true
+    if python3 "${E2E_DIR}/readback.py" health-recovered "${EVIDENCE_DIR}/ready-up-${i}.json" "${EVIDENCE_DIR}/health-up-${i}.json" "${READY_UP:-0}" 0; then
+        HEALTH_UP_OK=1
+        break
+    fi
+    sleep 2
+done
+[[ "$HEALTH_UP_OK" == 1 ]] || fail_closed "health-ready-probe" "HTTP=$READY_UP; inspect retained readiness/support bodies"
+record "health-ready-probe" "PASS" "HTTP200 UP/ready=true with recovered Sensor transport (loopback probe inside Agent container)"
 sample_agent_resources recovered
 
 # Authenticated Agent A must not select Agent B's canonical entity by claiming B's

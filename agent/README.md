@@ -29,6 +29,18 @@ Default registered collectors (`cpu`, `memory`, `filesystem`, `pressure`, `diski
 - bounded NIC counters from `/proc/net/dev` (hard ceiling 64 interfaces; loopback excluded) plus operstate vocabulary label (`up|down|unknown|dormant|lowerlayerdown|testing|notpresent|other`);
 - OS scalar facts: boot time (epoch seconds), processes running, processes blocked.
 
+CPU warmup, counter resets and missing intervals omit utilization and emit
+`system.cpu.utilization.available` with a bounded reason. Malformed or unreadable
+CPU/memory sources are explicit collection failures. Missing swap evidence omits
+swap gauges and emits `system.memory.swap.available_evidence=0`.
+
+Filesystem collection excludes remote/FUSE sources by default, caps mount work at
+256 entries, and uses at most two process-wide statfs workers. A blocked syscall
+retains its worker slot until it actually returns; timeout/cancellation never
+starts unbounded replacements. `system.filesystem.available_evidence` carries the
+mount/fstype and a bounded reason for missing capacity evidence. These are local
+producer semantics; current Core scalar storage does not preserve those labels.
+
 BUILD-011 Slice 3 adds a **local, unwired** Linux process/service source (`LinuxProcessServiceSource`) that reads bounded `/proc` identity/runtime facts and optional read-only systemd unit evidence. It reuses the Slice-1 selector/catalogue contracts, never registers as a `HostCollector`, never encodes the catalogue into scalar metric labels, and does not claim Agent→Sensor structured delivery (BUILD-016/062). Customer alert/policy evaluation remains BUILD-070.
 
 ### Bounded Linux eBPF process-network (BUILD-011 Slice 8)
@@ -90,6 +102,16 @@ The fixed Sensor/Core 80% storage watermark is **not** copied to Agent because P
 ## Configuration
 
 Configuration is explicit environment input. Unknown `PLATFORM_AGENT_*` settings fail closed.
+
+For persisted Linux identity, use a private service-user-owned state directory
+beneath protected directories owned by root or that service user. Symlinks,
+foreign directory owners and unsafe writable directories are rejected (sticky
+shared ancestors are allowed). Identity metadata must be private, owned, regular,
+single-linked and at most 16KiB. Publication never replaces a concurrent winner;
+file and directory-ancestry synchronization must succeed before identity loading
+or creation reports success. An uncertain sync preserves the published identity
+for reconciliation. Unsupported filesystem operations fail closed; native
+filesystem/reboot qualification is separate from these implementation checks.
 
 Required runtime inputs:
 
