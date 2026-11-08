@@ -318,27 +318,31 @@ Valkey is reconstructable ephemeral/cache state **ONLY** and must never become a
 
 ## 7. Exactly-two-Core HA and stateful-service strategy
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-A -->
-#### Formal requirements — `REQ-A` family
+### 7.0 Normative requirements — `REQ-A` family
 
-Governing locator: §1 Architecture mandate; §4 Deployment; §7 Exactly-two-Core HA; §34 Backup/DR. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-A-001` | Standalone = one Core; HA = exactly two full Core nodes |
-| `REQ-A-002` | One Active Core and one Standby; continuous state synchronization |
-| `REQ-A-003` | Core HA failover under 60 seconds in certified scenario |
-| `REQ-A-004` | Sensors continue polling during Core failover |
-| `REQ-A-005` | Core is brain; Sensors/Agents enroll through Core |
-| `REQ-A-006` | All Core components run on Core nodes for standard deployments |
-| `REQ-A-007` | Sensor-to-Core HTTPS/gRPC mTLS ingestion; Kafka internal |
-| `REQ-A-008` | DR architecture mandatory in v1.0; exact RPO/RTO TBD until business freeze |
-| `REQ-A-009` | Ubuntu and RHEL Core/Sensor; no Windows Core/Sensor initially |
-| `REQ-A-010` | Separate signed Core, Sensor, Windows Agent, Linux Agent builds |
-| `REQ-A-011` | VM/bare metal Linux first; Kubernetes not mandatory |
-| `REQ-A-012` | Future regional/multi-Core + Master Core architecture is future scalability extension only |
+This subsection is the **primary normative owner contract** for the `REQ-A` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
 
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-A -->
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members. This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-A-001` | Platform SHALL enforce: Standalone = one Core; HA = exactly two full Core nodes. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-002` | Platform SHALL enforce: One Active Core and one Standby; continuous state synchronization. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-003` | Platform SHALL enforce: Core HA failover under 60 seconds in certified scenario. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-004` | Platform SHALL enforce: Sensors continue polling during Core failover. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-005` | Platform SHALL enforce: Core is brain; Sensors/Agents enroll through Core. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-006` | Platform SHALL enforce: All Core components run on Core nodes for standard deployments. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-007` | Platform SHALL enforce: Sensor-to-Core HTTPS/gRPC mTLS ingestion; Kafka internal. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-008` | Platform SHALL enforce: DR architecture mandatory in v1.0; exact RPO/RTO TBD until business freeze. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-009` | Platform SHALL enforce: Ubuntu and RHEL Core/Sensor; no Windows Core/Sensor initially. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-010` | Platform SHALL enforce: Separate signed Core, Sensor, Windows Agent, Linux Agent builds. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-011` | Platform SHALL enforce: VM/bare metal Linux first; Kubernetes not mandatory. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-A-012` | Platform SHALL enforce: Future regional/multi-Core + Master Core architecture is future scalability extension only. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members.
 
 This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
@@ -1069,20 +1073,24 @@ Emergency deletion must use efficient partition/TTL operations rather than billi
 
 ## 29. Security, IAM and audit architecture
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
-#### Formal requirements — `REQ-SEC` family
+### 29.0 Normative requirements — `REQ-SEC` family
 
-Governing locator: §29 Security, IAM and audit architecture. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-SEC-003` | mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support |
-| `REQ-SEC-005` | PKI/certificate lifecycle management |
-| `REQ-SEC-006` | Proxy/no-proxy support |
-| `REQ-SEC-007` | Data sovereignty/regional placement architecture |
-| `REQ-SEC-008` | Tenant isolation enforced server/API/query layers |
+This subsection is the **primary normative owner contract** for the `REQ-SEC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
 
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-SEC-003` | Platform SHALL enforce: mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-SEC-005` | Platform SHALL enforce: PKI/certificate lifecycle management. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-SEC-006` | Platform SHALL enforce: Proxy/no-proxy support. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-SEC-007` | Platform SHALL enforce: Data sovereignty/regional placement architecture. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-SEC-008` | Platform SHALL enforce: Tenant isolation enforced server/API/query layers. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 ### 29.1 Trust boundaries
 
 - Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.

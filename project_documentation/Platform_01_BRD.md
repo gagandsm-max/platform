@@ -433,17 +433,21 @@ Business outcome: day-2 administration is UI-complete for tenants, sites/groups,
 
 ## 26. IAM and security (business)
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
-#### Formal requirements — `REQ-SEC` family
+### 26.0 Normative requirements — `REQ-SEC` family
 
-Governing locator: Security/business readiness outcomes. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-SEC-001` | Security-by-design for banks/defence/global enterprises |
-| `REQ-SEC-002` | Design for ISO27001/SOC2/PCI/RBI/FIPS/STIG/CIS readiness; no certification claim before achieved |
+This subsection is the **primary normative owner contract** for the `REQ-SEC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
 
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-SEC -->
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Platform is intended for banks, defence and global enterprises. Security architecture must be designed from Day 1 for strong enterprise controls, including: - TLS everywhere appropriate and mTLS between trusted Platform components - HTTPS-only UI - OIDC/SAML/LDAP/AD/Entra integration; MFA - Resource-scoped RBAC and explicit deny semantics - Secrets encrypted at rest and never sent to browsers unnecessarily - Certificate/PKI lifecycle management - Scoped API tokens/service accounts - Signed software/packages and Device Packs; SBOM and dependency provenance - Vulnerability and licence scanning - Tamper-evident audit capabilities (target) - Break-glass and temporary elevation controls - NCM/CLI maker-checker and command guardrails - Sensitive-data masking before storage/AI where configured Architecture must support alignment with high-assurance expectations (ISO 27001 controls, SOC 2 control families, PCI-oriented controls, RBI/BFSI expectations, defence hardening, FIPS-capable cryptography where required). **No certification may be claimed until formally achieved.** Exact certification roadmap is TBD.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-SEC-001` | Platform SHALL enforce: Security-by-design for banks/defence/global enterprises. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-SEC-002` | Platform SHALL enforce: Design for ISO27001/SOC2/PCI/RBI/FIPS/STIG/CIS readiness; no certification claim before achieved. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 
 Platform is intended for banks, defence and global enterprises. Security architecture must be designed from Day 1 for strong enterprise controls, including:
 

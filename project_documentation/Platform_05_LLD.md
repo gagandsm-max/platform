@@ -578,7 +578,7 @@ A Sensor deletes a local segment only after Core returns a durable acceptance ac
 
 Physical HA durability mechanisms remain unselected (`HA_DURABILITY_DESIGN_GATE` / BUILD-120–124).
 
-**Current source (`36e1513f`), Sensor→Core telemetry ACK boundary:**
+**Current source truth (`92f0fb37`; path unchanged since historical reconciliation at `36e1513f`), Sensor→Core telemetry ACK boundary:**
 
 1. Sensor writes batch durably to local spool.
 2. Core validates identity/schema.
@@ -591,7 +591,7 @@ Physical HA durability mechanisms remain unselected (`HA_DURABILITY_DESIGN_GATE`
 
 ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK. CURRENT_IMPLEMENTED_V1 does not by itself certify Phase 1 standalone durability-matrix evidence or Phase 1.5 HA ACK RPO=0.
 
-**Current source (`36e1513f`), Sensor→Core agent-ingress:** `AgentIngestionService` and `PostgresAgentIngressWatermarkStore` implement pending reservation → bounded publisher lease with owner/epoch → Kafka transaction commit → fenced PostgreSQL finalize → `acceptedThroughIngressSequence` ACK. V012 supplies the Agent-ingress reservation/stream and publisher-lease schema. Both Core ingest paths remain **at-least-once**: PostgreSQL/Kafka are not one XA transaction, and a Kafka-commit/PG-finalize crash can require replay. This source correction does not certify structured Agent evidence, physical ClickHouse deduplication or HA durability. Exact wire and version bounds remain `Platform_17` §10 and `schemas/edge/`.
+**Current source truth (`92f0fb37`; path unchanged since historical reconciliation at `36e1513f`), Sensor→Core agent-ingress:** `AgentIngestionService` and `PostgresAgentIngressWatermarkStore` implement pending reservation → bounded publisher lease with owner/epoch → Kafka transaction commit → fenced PostgreSQL finalize → `acceptedThroughIngressSequence` ACK. V012 supplies the Agent-ingress reservation/stream and publisher-lease schema. Both Core ingest paths remain **at-least-once**: PostgreSQL/Kafka are not one XA transaction, and a Kafka-commit/PG-finalize crash can require replay. This source correction does not certify structured Agent evidence, physical ClickHouse deduplication or HA durability. Exact wire and version bounds remain `Platform_17` §10 and `schemas/edge/`.
 
 **CURRENT_IMPLEMENTED_V1 Agent→Sensor:** ACK means authz + contract validation + durable Sensor Agent spool accept + durable replay accounting. Agent advances/deletes only after batch-bound application ACK.
 
@@ -3491,6 +3491,12 @@ Agent→Sensor/Core JSON v1 uses **camelCase** primary field names on Collection
 
 Verified migration set through pinned main: **V001–V018** under `core/src/main/resources/db/migrations/` per `manifest.txt`. Later migrations require additive change control; this section does not allocate V019+.
 
+### 97.10 Agent telemetry fragmentation and durable queue custody — Issue #302 / PR #303
+
+Issue #302 is **CLOSED/COMPLETED** as a bounded telemetry-custody defect repair. PR #303 merged to main `92f0fb37805c234be2869619abcc01ad26b5f30b`; post-main Platform CI run `42459975722` passed 4/4. The repair fragments oversized encoded Agent collection batches before durable queue admission, preserves ownership of unaccepted fragments, distinguishes definite rejection / durable admission-with-error / uncertain custody, and propagates admission backlog/loss/recovery into Agent health (`NOT_READY` while known local write/capacity rejection persists).
+
+**Maturity boundary:** this is exact-SHA evidence for the bounded Agent scheduler/queue/shared-health custody path only. It does **not** certify the whole Linux Agent, BUILD-016 end-to-end durable delivery, Network Sensor production runtime, or Phase-1 GA. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
@@ -3502,14 +3508,6 @@ Capability Packs shall declare exact product/version support, collection mode, r
 No physical schema in Phase 2 may assume full native APM span retention or full packet-payload warehousing. Phase 2.5+ change control owns those physical storage contracts.
 
 ---
-
-
-### 97.10 Agent telemetry fragmentation and durable queue custody — Issue #302 / PR #303
-
-Issue #302 is **CLOSED/COMPLETED** as a bounded telemetry-custody defect repair. PR #303 merged to main `92f0fb37805c234be2869619abcc01ad26b5f30b`; post-main Platform CI run `42459975722` passed 4/4. The repair fragments oversized encoded Agent collection batches before durable queue admission, preserves ownership of unaccepted fragments, distinguishes definite rejection / durable admission-with-error / uncertain custody, and propagates admission backlog/loss/recovery into Agent health (`NOT_READY` while known local write/capacity rejection persists).
-
-**Maturity boundary:** this is exact-SHA evidence for the bounded Agent scheduler/queue/shared-health custody path only. It does **not** certify the whole Linux Agent, BUILD-016 end-to-end durable delivery, Network Sensor production runtime, or Phase-1 GA. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
-
 
 ## 98. v3.3.0 database/storage audit adjudication — 2026-10-30
 

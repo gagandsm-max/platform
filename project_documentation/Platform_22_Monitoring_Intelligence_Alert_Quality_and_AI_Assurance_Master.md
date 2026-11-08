@@ -145,27 +145,31 @@ For eBPF process-network and active-path domains, telemetry trust evaluation mus
 
 ## 6. Alert-policy lifecycle and false-alert quality gates
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-ALT -->
-#### Formal requirements — `REQ-ALT` family
+### 6.0 Normative requirements — `REQ-ALT` family
 
-Governing locator: Alert policy / qualification / incident quality contracts (Platform_22 normative sections). Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-ALT-001` | Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric |
-| `REQ-ALT-002` | Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds |
-| `REQ-ALT-003` | Adaptive polling with triggers, cooldown and capacity guardrails |
-| `REQ-ALT-004` | Alert qualification state machine; failed SNMP poll != device down |
-| `REQ-ALT-005` | Multi-protocol/multi-vantage validation and confidence |
-| `REQ-ALT-006` | Event vs Alert vs Incident distinction |
-| `REQ-ALT-007` | Alert storm protection/dedup/rate-limit/compression |
-| `REQ-ALT-008` | Flapping detection and reopen windows |
-| `REQ-ALT-009` | Maintenance, notification mute and dependency suppression separated |
-| `REQ-ALT-010` | Recovery qualification before auto-resolution |
-| `REQ-ALT-011` | Alert ownership/assignment/escalation/shift handover |
-| `REQ-ALT-012` | Alert-policy effectiveness analytics |
+This subsection is the **primary normative owner contract** for the `REQ-ALT` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
 
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-ALT -->
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`. - **DRAFT:** authoring/validation only; no production customer alert effect. - **BACKTEST:** replay against deterministic historical/synthetic fixtures and labelled incidents where available. - **SHADOW:** evaluate live evidence without authoritative customer alerting; compare to active policy and operator outcomes. - **ACTIVE:** only after required review/evidence gates; version remains rollback-capable. Promotion evidence is class-specific. It shall include representative positive/negative cases, maintenance/expected-state cases, collection-degradation cases, storm conditions where relevant and known difficult edge cases. Metrics may include false-positive rate, false-negative/missed-event rate, precision/recall, detection latency, alert volume/cardinality, correlation compression and operator-confirmation rate. This document does not invent a universal numeric acceptance threshold; release criteria must be justified per class and deployment risk.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-ALT-001` | Platform SHALL enforce: Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-002` | Platform SHALL enforce: Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-003` | Platform SHALL enforce: Adaptive polling with triggers, cooldown and capacity guardrails. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-004` | Platform SHALL enforce: Alert qualification state machine; failed SNMP poll != device down. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-005` | Platform SHALL enforce: Multi-protocol/multi-vantage validation and confidence. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-006` | Platform SHALL enforce: Event vs Alert vs Incident distinction. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-007` | Platform SHALL enforce: Alert storm protection/dedup/rate-limit/compression. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-008` | Platform SHALL enforce: Flapping detection and reopen windows. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-009` | Platform SHALL enforce: Maintenance, notification mute and dependency suppression separated. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-010` | Platform SHALL enforce: Recovery qualification before auto-resolution. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-011` | Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-ALT-012` | Platform SHALL enforce: Alert-policy effectiveness analytics. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 
 Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`.
 

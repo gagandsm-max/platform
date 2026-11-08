@@ -67,7 +67,7 @@ This dated checkpoint is preserved as provenance from the pre-#302 documentation
 | Last updated | **2026-11-02 — narrowly scoped factual progress checkpoint** for verified G1a issuance foundation, outstanding G1b/G2 and existing Draft PR holds. Preserves all historical Build Register evidence and Mother Reference v3.3.0; no BUILD renumbering, product code, architecture/phase changes, new product certification or customer release. Source snapshot main `29d21afa95475efdbfe41162c589c6f6d1d6c644`; later GitHub main/CI/laptop status must be freshly verified. |
 | Sequencing authority | Master Chat only |
 
-## Rolling execution checkpoint — 2026-10-27 (Issue #211; verified status only)
+## Historical execution checkpoint — 2026-10-27 (Issue #211; verified status only)
 
 This 2026-10-27 checkpoint supersedes **only** earlier *current-state* assertions; the 2026-10-26 and 2026-10-15 checkpoints and original BUILD/certification trails remain preserved as historical provenance. Source: directly verified GitHub `main=a0b7d061e29b3306dd3ec2bee34d389493866e77` after PR #245. Mother References remain v3.3.0. `SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED != DEPLOYED`. Do not infer programme completion from bounded PR counts.
 
@@ -84,7 +84,7 @@ This 2026-10-27 checkpoint supersedes **only** earlier *current-state* assertion
 
 **Maintenance control:** Each consequential PR publication, merge, failed/passed post-main CI, issue closure/reopening or source-breaking blocker must be reconciled into this root register through a separately reviewed, status-only GitHub change referencing Issue #211. GitHub `main` is canonical; local `/home/gagan/nms/Platform_Master_Build_Sequence_Register_v1.0.md` must be fast-forward synced only after checking local branch/worktree/dirty state. Issue comments alone do not update the register or the laptop copy. Preserve historical rows rather than silently rewriting or recertifying completed BUILD units.
 
-## Rolling execution checkpoint — 2026-10-26 (Issue #211; verified status only)
+## Historical execution checkpoint — 2026-10-26 (Issue #211; verified status only)
 
 This 2026-10-26 checkpoint supersedes **only** earlier *current-state* assertions; the 2026-10-15 checkpoint and original BUILD/certification trails remain preserved as historical provenance. Source: directly verified GitHub `main=8c3c684dcde8347c61bba3f5b68eda954ff7f872` after PR #247. Mother References remain v3.3.0. `SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED != DEPLOYED`. Do not infer programme completion from bounded PR counts.
 
@@ -106,7 +106,7 @@ This 2026-10-26 checkpoint supersedes **only** earlier *current-state* assertion
 
 **Maintenance control:** Each consequential PR publication, merge, failed/passed post-main CI, issue closure/reopening or source-breaking blocker must be reconciled into this root register through a separately reviewed, status-only GitHub change referencing Issue #211. GitHub `main` is canonical; local `/home/gagan/nms/Platform_Master_Build_Sequence_Register_v1.0.md` must be fast-forward synced only after checking local branch/worktree/dirty state. Issue comments alone do not update the register or the laptop copy. Preserve historical rows rather than silently rewriting or recertifying completed BUILD units.
 
-## Rolling execution checkpoint — 2026-10-15 (Issue #211; status only)
+## Historical execution checkpoint — 2026-10-15 (Issue #211; status only)
 
 This is a dated **execution/evidence snapshot**, not a change to BUILD IDs, dependencies, Mother References, Issue #200 Phase-1/Phase-1.5 certification envelopes, or the eventual Tranche-D phase mapping. Status on unmerged branches and local work must be revalidated at every handoff; GitHub `main` remains canonical. **SPECIFIED ≠ IMPLEMENTED ≠ TESTED ≠ CERTIFIED ≠ DEPLOYED.**
 
@@ -516,7 +516,7 @@ Current documentation acceptance is governed by Platform_00 §10.1, Platform_08 
 
 These are source allocations and dependency constraints, not a substitute for the fully populated per-module/slice records required by Platform_13. Existing completed units retain their accepted scope and immutable evidence. Planned units remain blocked where their exact schema/API/event, failure-state, test, rollout or rollback contract is unclosed. Do not announce all executable module plans complete from this table.
 
-**Executable module-plan ledger status (documentation gate):** Platform_13 “Executable module plan record” remains the required template. Certified historical BUILD units (000–005, 010–011 and their accepted slices) retain immutable plan/evidence provenance in their certification trails above and MUST NOT be rewritten. Active/planned units (notably BUILD-020 onward and unclosed 012–019/021+ profiles) remain `MODULE_PLAN_INCOMPLETE` until each supplies the Platform_13 seven-point record against exact source paths. Strengthening owners and slice records inside this Register and the owning Mother sections is mandatory; creating 106 disconnected new plan documents is prohibited. Incomplete executable plans keep `DOC_P0_BLOCKED` for Area 6.
+**Executable module-plan ledger status (documentation gate):** Platform_13 “Executable module plan record” remains the required template. Certified historical BUILD units (000–005, 010–011 and their accepted slices) retain immutable plan/evidence provenance in their certification trails above and MUST NOT be rewritten. Active/planned units BUILD-012..019, 020–026, 030–037, 040–054, 060–075, 080–086, 090–098, 100–103, 110–118, 120–134 now carry seven-point executable records in the section **Executable module plan records** below (`SPEC_CONTRACT=FROZEN`; `IMPLEMENTATION=PENDING`). Creating 106 disconnected new plan documents remains prohibited. Area 6 documentation incompleteness (`MODULE_PLAN_INCOMPLETE`) is closed for the current committed programme IDs; independent exact-SHA semantic audit and implementation evidence remain separate from this documentation ledger. `DOC_P0_BLOCKED` persists until all six areas pass independent acceptance together.
 
 ### Required record and closure evidence
 
@@ -533,3 +533,184 @@ The historical ≥90–95% AWS condition is retained as a deferral instruction, 
 ### Storage assurance cross-cutting plan — Issue #292
 
 Issue #292 remains specification/acceptance work under existing BUILD-061/064/074/086/094/097/130: contract/authoritative per-volume source mapping first; inert calculator only under a separately frozen source plan; reliable measured input/forecast next; existing authorized Notification/ITSM delivery after 086 and RBAC/audit; retention/hold/restore certification last. Platform_11 §§9.1–9.4, Platform_05 §§37.6–37.7/38, Platform_14 “Storage assurance A+B+C acceptance — Issue #292” and Platform_16 “Storage assurance A+B+C runbook delta — Issue #292” own the contract and gates. No new module/service/database/queue/BUILD ID, customer-wide 180-day default, fabricated forecast or silent legal-hold override is introduced. No storage implementation is activated by this documentation correction.
+
+## Executable module plan records — BUILD-012..019, 020–026, 030–037, 040–054, 060–075, 080–086, 090–098, 100–103, 110–118, 120–134
+
+**Status:** `SPEC_CONTRACT=FROZEN` (effective on independent exact-head acceptance) · `IMPLEMENTATION=PENDING`. This ledger fills the seven-point record of `Platform_13` ("Executable module plan record"). **BUILD-000–005 and BUILD-010–011 are historical CERTIFIED records and are not rewritten, re-scoped or re-certified here.** No BUILD ID is added or renumbered. Records do not create certification; `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Test presence is not a passing test. Numeric budgets belong to `Platform_11`/BUILD-130 and are not invented.
+
+**Live execution checkpoint (2026-11-08):** the Linux Agent production-closure lane (Linux profiles of BUILD-012/016/017/018/019 under existing owners) runs **in parallel with** the P0 Mother Reference documentation correction (`DOC_P0_BLOCKED` until Master + independent audit accept all six areas together); neither lane claims the other complete. Product order afterwards: **Network + Flow** (BUILD-020/021/040 family + 050–054 prerequisites, authenticated authority/transport) → **Infrastructure** (BUILD-024/030–037) → **Syslog/Log** (BUILD-050/053 LOG, 094) — via existing BUILD ownership. Bounded slice progress is not whole-BUILD or Phase-1 GA certification.
+
+**Dispatch state legend:** `LIVE-LANE` = currently active lane under the checkpoint; `READY-AFTER-GATE` = Phase 1, eligible for writer dispatch only after the DOC_P0 gate and its predecessors; `P1.5-NOT ACTIVE`; `ROADMAP-NOT ACTIVE`; `MIXED` = Phase-1 baseline eligible, Phase-1.5 slice not active.
+
+### Seven-point legend
+
+① scope / REQ·PRD / owning design / DF / UI / phase+profile / dispatch · ② source paths, current presence vs runtime evidence vs certified scope · ③ inputs/outputs/contract/authority/idempotency/replay/limits (family template + delta) · ④ **D**esign / **I**mplementation / **C**ertification predecessors · ⑤ finite acceptance (positive/negative/failure/security/tenant/migration/capacity/UI) · ⑥ config / observability / install / rollout / rollback / runbook · ⑦ evidence status, unresolved gates, independent reviewer scope, integration order.
+
+### Family templates (common gates; each BUILD row adds its own deltas)
+
+| Template | Applies to | Common ③ contract | Common ⑤ gates | Common ⑥ ops | Common ⑦ evidence |
+|---|---|---|---|---|---|
+| **FT-AGT** | 012–019 | mTLS identity via BUILD-002/017; scalar `CollectionBatch` path is not faked as structured; typed evidence via BUILD-016 envelope; bounded queue/local durability; idempotent replay by sequence; privacy minimization | fixture + live correctness; privilege/negative; resource non-interference (routine monitoring/authority precede enrichment); power/network-loss durability; Linux vs Windows profile separation; reboot recovery | systemd (Linux) / MSI+SCM (Windows, isolated Windows VM runner required, `Platform_13` §11); previous-package rollback; structured logs/error codes/health | exact-head CI + real-host evidence; independent Antigravity audit; writer cannot self-certify |
+| **FT-SEN** | 020–026 | Sensor↔Core authority/grants/fencing/generation; spool before ACK; Core-issued execution authority; bounded scheduling | race/revocation; crash/disk-pressure matrix; overload/recovery; stale-privileged-work rejection; 80% storage protection | systemd/Compose; supervised recovery; no self-promotion | exact-head CI; runtime.Runtime ownership evidence; audit |
+| **FT-INF** | 030–037 | Pack-driven collectors; Credential Profile USE only; read-only fixed safe query packs; connector health separated from target status | coverage/security matrix; least privilege; tenant isolation; failure-mode; dimensional certification only (listing ≠ certified) | Capability Pack lifecycle; cardinality/API-rate limits | fixture + (where lab permits) real-product evidence; exact product/version dimension record |
+| **FT-NET** | 040–054 | protocol-correct collectors/receivers; typed observation families; No Data/path fault ≠ Device Down; ACK only after durable acceptance | protocol fixtures/negative/security; loss/storm/spoof; cardinality/noisy-neighbour; ACK-integrity; replay | Sensor profile config; drop/loss counters | exact-head CI + failure injection; independent audit |
+| **FT-CORE** | 060–075 | tenant-scoped authoritative PostgreSQL/Kafka/ClickHouse contracts (Platform_17 §15); same-tenant constraints; idempotent ingest | tenant-isolation adversarial; migration/upgrade; failure/recovery; throughput/replay (BUILD-130 sizing) | migrations via `manifest.txt`; backup/restore | exact-head CI incl. mandatory PostgreSQL suite; independent audit |
+| **FT-SEM** | 080–086 | deterministic semantic state / alert / incident engines; evidence contracts; severity ≠ confidence | No Data ≠ Down; false-alert/backtest/shadow; contradiction handling; AI-disabled operation | policy lifecycle config; self-monitoring | ground-truth fixtures + exact-head CI |
+| **FT-DOM** | 090–098 | domain services on existing Core/Sensor/ClickHouse paths; RBAC/audit/idempotency | RBAC/approval/audit; domain correctness; tenant isolation; bounded query/report | domain config; runbooks | exact-head CI + domain certification evidence |
+| **FT-RCA** | 100–103 | deterministic RCA first; INCONCLUSIVE valid; AI/GNN advisory only | ground-truth benchmark; non-authority; all-AI-disabled operation | model registry/provenance (102/103) | benchmark corpus + audited feedback isolation |
+| **FT-UI** | 110–118 | UI consumes shared DAF/OP (Platform_09 §16); no unique endpoints; server-side authorization | states/accessibility/keyboard; live-API integration; scale UX; permission negative | build/pack; Core-unavailable resilience | UI tests + screenshots + exact-head CI; UI finish-gate review |
+| **FT-HA** | 120–124 | exactly-two-Core Active/Standby; positive fencing; no dual-active/no self-promotion; durability barrier before deletion-ACK | deterministic failover (<60s target is a certification **target**); split-brain negative; rejoin; replay | HA profile (`ha` compose + hardware) | HA matrix evidence; **Phase 1.5 only** |
+| **FT-REL** | 125–134 | release/ops gates over certified substrate | restore drills; upgrade matrix; adversarial security; soak/capacity; chaos | packaging/runbooks/support bundle | signed artifacts + measured evidence |
+
+### BUILD-012..019 — Agent (Linux profile in LIVE lane; Windows profiles READY-AFTER-GATE)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 012 | Linux Diagnostic Job/EDS runtime; built-ins `EDS_CPU_PRESSURE`, `…_MEMORY_PRESSURE`, `…_FILESYSTEM_CAPACITY`, `…_BLOCK_IO_PRESSURE`, `…_PROCESS_FAILURE`, `…_PROCESS_RESTART_LOOP`, `…_PROCESS_UNRESPONSIVE`, `…_NETWORK_DEGRADATION`; P1; LIVE-LANE (Linux) | target: `agent/common/*` (new diagnostics package), `agent/linux/ebpf`; Core side per Platform_17 §15 diagnostics; **Specified/partial; no runtime evidence** | factual indicators only; bounded Top-N/deadline/cooldown; no endpoint causal authority | D: 010/011 certified, Platform_17 EDS §4.6, §119.13 · I: 011, MIG-PLAN-009 · C: 019 Linux | privilege-denied/partial/suppressed/resource/storm negative; ground-truth negatives; no routine-monitor interference | feature flag per definition; disable → no capture; no schema change on rollback | PENDING; audit EDS definitions + resource-guard tests |
+| 013 | Windows Agent runtime: native service, config/cert state, health, scheduler, installer lifecycle; P1; READY-AFTER-GATE | `agent/windows/cmd`; **skeleton** | SCM lifecycle; code-signed service | D: 002/005 · I: — · C: Windows VM runner | service/reboot recovery; crash-loop diagnostics | MSI+BAT wrappers; previous-MSI rollback | PENDING; requires isolated Windows runner evidence |
+| 014 | Windows collectors (CPU/mem/disk/NIC/process/service/OS/events/perf counters), selector primitives, installed-software source + `software_inventory_snapshot` boundary; P1 | `agent/windows` (none yet) | stable service/executable selectors; PID runtime-only | D: REQ-INF-014/015, Platform_17 inventory · I: 013 · C: 019 Win | live Windows matrix; inventory source/resource/security; PID-reuse safety | per-collector enable; rollback = disable collector | PENDING; no physical structured delivery claim |
+| 015 | Windows diagnostics/EDS (PDH/SCM/Event Log/WHEA/IP Helper/storage/WMI-CIM; no arbitrary PowerShell); P1 | none | semantic parity with 012 families | D: 012 semantics · I: 013/014 · C: 019 Win | security/evidence/resource/storm/ground-truth | per-definition flag | PENDING |
+| 016 | Agent durable queue/delivery incl. typed envelope (ProcessNetworkEvidence / `software_inventory_snapshot`); Linux profile in LIVE lane; P1 | `agent/common/{queue,delivery,client,scheduler}`; **PR #303 scheduler/queue/health custody repair merged — bounded, not whole-BUILD** | no second transport; shared envelope frozen; idempotent replay | D: 002, Platform_17 §11.2, BUILD-062 contract · I: 011 (Linux) / 013+014 (Win) · C: 019 | power/network loss; no silent loss; typed durability/replay; Linux profile may certify without Windows | queue size/disk caps config; rollback = previous package (queue format forward-compatible check) | whole-BUILD needs both profiles; **not certified** (#302/#303 bounded only) |
+| 017 | Agent PKI/lifecycle: bootstrap, cert storage/rotation/revocation, reassignment, decommission; Linux/Windows separate native custody; P1 | `agent/common/identity`; Core `agentcontrol` | CSR/SAN binding; revocation fail-closed | D: 002, DF-ONB-002 · I: 010 / 013 · C: 019 | race/revocation matrix; clone detection | rotation overlap; rollback = prior cert | partial; profile-scoped plan |
+| 018 | Agent packaging/upgrade: Linux `.deb/.rpm`, Windows MSI, config migration, version reporting, eBPF object signing; P1; Linux first | `deploy/systemd/platform-agent.service`, `agent/linux/systemd` | signed artifacts; BTF/CO-RE verification | D: Platform_15/16 · I: 011/016/017 artifact contracts · C: 019 | clean install/upgrade/rollback/reboot; signing | package rollback; config migration reversible | Linux package ≠ Windows certification |
+| 019 | Agent production certification: CPU/mem, security, soak, disconnect/recovery, upgrade; eBPF guardrails; Linux and Windows separate; P1 | `tests/agent-runtime-e2e` | resource budgets from BUILD-130 | D: 130 sizing · I: 010/011/012/016/017/018 · C: self | Linux + Windows certified separately; whole BUILD needs both | n/a | **NOT certified**; Linux slice may advance without whole-BUILD claim |
+
+### BUILD-020..026 — Sensor runtime (BUILD-020 IMPLEMENTING / LIVE-LANE; rest READY-AFTER-GATE)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 020 | Universal Sensor runtime; roles NETWORK/INFRASTRUCTURE/FLOW/LOG; P1; LIVE-LANE | `sensor/cmd`, `sensor/internal/{runtime,control,config,health,identity,coreclient}`; **G1a PR #287, slot/audit/incarnation foundations merged; G1b delivery/execution identity + typed admission HOLD/DISABLED** | production entrypoint governed by `runtime.Runtime`; execution grants; no legacy backfill | D: 003/004/005 · I: #229 G1b, #218 typed ICMP admission · C: 021–025 integration | runtime.Runtime production ownership; grant issuance→execution→admission; recovery tests | feature gate remains DISABLED until G2; rollback = disable role | IMPLEMENTING / NOT_CERTIFIED; G1B_RUNTIME=HOLD; G2_ADMISSION=DISABLED; RELEASE=NO_GO |
+| 021 | Sensor scheduler/MWU: recurring work, pools, admission, jitter, retry hierarchy, storm prevention | `sensor/internal/scheduler` (lifecycle by BUILD-004 S6; work migration here) | due-time + jitter; bounded concurrency | D: 004 · I: 020 · C: 048 | overload/recovery; fairness; storm prevention | config; rollback = prior scheduler config | Partial; READY-AFTER-GATE |
+| 022 | Sensor durable spool: segments, priority, watermarks, restart recovery, buffer horizon | `sensor/internal/spool` | spool before ACK; 80% protection | D: 003 · I: 020 · C: 023 | crash/disk-pressure matrix; no loss within policy | disk cap config | Partial |
+| 023 | Sensor uploader/Core ACK: priority upload, batching, strict ACK, retry, late data | `sensor/internal/{uploader,coreclient}` | deletion-authorizing ACK only after durable acceptance | D: 003, Platform_17 §7/§10 · I: 022 · C: 075 | durability/replay certification; duplicate/late | retry/backoff config | Partial |
+| 024 | Infra Sensor Agent gateway: receive/auth/source identity/durability/drain/forward/replay | `sensor/internal/{agentreceiver,agentdrain}` | Agent identity validation; gap-free drain | D: 002 · I: 020/022 · C: 037 | Agent→Sensor→Core slice certified | config | Significant partial |
+| 025 | Sensor PKI/authority/assignment: enrollment, local key, rotation, principal authority, lease/fencing | `sensor/internal/identity`; Core `sensorcontrol`; V004/V011/V015/V017/V018 | generation/fence; stale-work rejection | D: 004 · I: 020/003 · C: 048 | race/revocation/assignment | rotation overlap | Partial |
+| 026 | Capability/Device Pack runtime: sync/checksum/version/compat/desired state/rollback; Phase-1.5 Serverless declarations consume it | `sensor/internal/packsync`; Core `domain/capabilitypack`; V007/V008 | pack lifecycle; dimensional certification | D: 004 · I: 020 · C: 037/071 | lifecycle tests; listing ≠ CERTIFIED | pack rollback | Partial |
+
+### BUILD-030..037 — Infrastructure (READY-AFTER-GATE after Network+Flow; certification targets only)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 030 | Linux agentless (SSH inventory/metrics/services/processes; fixed safe query packs); P1 optional producer | none | read-only fixed queries; no shell | D: 026 · I: 020/021 · C: 037 | coverage/security matrix | pack disable | Not implemented |
+| 031 | Windows agentless (WinRM/WMI/CIM); P1 optional | none | least privilege | D: 026 · I: 020/021 · C: 037 | coverage/privilege matrix | pack disable | Not implemented |
+| 032 | Hardware/OOB (Redfish/iDRAC/iLO/CIMC/IPMI), independent vantage; P1 generic Redfish, vendors per dimension | none | OOB evidence ≠ OS evidence | D: 026 · I: 020/021 · C: 037 | multi-vendor normalization + provenance/correlation fixtures | pack disable | Not implemented |
+| 033 | Virtualization: VMware first-GA deep VM cross-vantage evidence; Hyper-V/Nutanix/Proxmox **P1.5-NOT ACTIVE** | none | version-specific API support | D: 026 · I: 020/021 · C: 037 | topology/metric cert + VMware negative fixtures | pack disable | Not implemented |
+| 034 | Storage/SAN: **P1.5-NOT ACTIVE** (major storage families) | none | storage vantage evidence | D: 026 · I: 020/021 · C: 037 | vendor-independent cert | pack disable | Not implemented |
+| 035 | Database monitoring: PostgreSQL + SQL Server P1; other engines P1.5 | none | extensible DB packs; read-only | D: 026 · I: 020/021 · C: 037 | security/load/semantic | pack disable | Not implemented |
+| 036 | Kubernetes/Cloud/OTLP: K8s, AWS/Azure P1; GCP, Serverless (`REQ-SLS-*`), bounded spans **P1.5-NOT ACTIVE** | none | OTLP tenant authority server-derived | D: 026, Platform_17 §13.5 · I: 020/021 · C: 037 | cardinality/tenancy/API-rate; serverless false-alert gates | connector disable | MIXED; Not implemented |
+| 037 | Infra Sensor certification: agent-fed + agentless isolation, continuity, scale, failure modes | `tests/` | bounded domain/profile acceptance only | D: 024, claimed 030–036 · I: same · C: self | Infra Sensor capacity profile | n/a | Not certified |
+
+### BUILD-040..054 — Network, Flow, Syslog (Network+Flow is the next product lane after Linux closure)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 040 | ICMP/path: reachability, loss, jitter, multi-vantage flow-stable path tracing (REQ-NET-016); P1 | `sensor/internal/{protocol,collector}`; typed ICMP #218 gap | ICMP typed observation (§13.7); path quality fields; non-O(N²) | D: Platform_17 §11.3/§13.7 · I: 020/021, #218 · C: 048 | No Data/path fault ≠ DOWN; unpinned path never emits change | probe rate/target caps | Partial |
+| 041 | SNMP foundation v1/v2c/v3, GET/NEXT/BULK/WALK, poll planner | `sensor/internal/protocol` | SNMPv3 security; typed union | D: §3.2.2 · I: 020/021/026 · C: 048 | protocol/security/vendor fixtures | credential profile refs | Partial |
+| 042 | SNMP normalization/counters: exact Counter64, delta/reset/wrap | Core `telemetry`; `metric_counter_raw` | UInt64 never Float | D: §6 · I: 041 · C: 048 | counter correctness benchmark | n/a | Raw Counter64 exists |
+| 043 | Interface/entity reconciliation | Core `domain/inventory` | canonical interface identity | D: §4.2 · I: 041/042 · C: 048 | no duplicate/phantom interfaces | n/a | Partial |
+| 044 | SNMP traps/informs: trust, dedupe, inform ACK, storm | `sensor/internal/…` | pre-ACK admission/accounting | D: §3.2.2 · I: 041 · C: 048 | loss/storm/spoof | storm thresholds | Partial/spec |
+| 045 | gNMI/NETCONF/REST connector runtime | none | bounded subscriptions | D: Platform_10 · I: 020/021/026 · C: 048 | security/reconnect/backpressure | connector config | Mostly not implemented |
+| 046 | Network discovery (candidates only; not activation) | Core `domain/discovery`, V003; `sensor/internal/discovery` | review-gated; BUILD-068 owns lifecycle | D: DF-008, Platform_20 · I: 040/041/025 · C: 048 | false-positive/tenant tests | schedule via DF-SCHED | Partial; auth incomplete |
+| 047 | Synthetics: HTTP/TCP/TLS/DNS; browser/outside-in **P1.5-NOT ACTIVE** | none | no browser runtime preselection | D: DF-018 · I: 020/021 · C: 048 | protocol negatives | test schedule | Partial code |
+| 048 | Network Sensor certification (scale, fairness, offline continuity, path/multipath) | `tests/` | devices-per-Sensor benchmark | D: 130 · I: 040–047 · C: self | benchmark + failure matrix | n/a | Not certified |
+| 049 | Normalized SD-WAN; vendor adapters **P1.5-NOT ACTIVE** | none | namespaced vendor extensions | D: Platform_21 · I: 020/021/026/045 · C: self | multi-vendor mapping/tenancy/secret fixtures; listing ≠ cert | connector disable | Specified |
+| 050 | Syslog/events UDP/TCP/TLS, parsing, source identity, drop counters, dedupe | `sensor/internal/…` | timestamp quality; ACK after durable acceptance | D: DF-014 · I: 020/022/023 · C: 054 | UDP loss/storm/security | listener config | Next lane (Syslog) |
+| 051 | Flow receiver NetFlow v5/v9, IPFIX, sFlow; verified ingress context | `sensor/internal/…` | §13.9 ingress/template validity; quarantine | D: §13.9 · I: 020/022/023 · C: 054 | receiver/template/restart; ambiguous-tenant quarantine | exporter allowlist | Next lane |
+| 052 | Flow enrichment/safeguards, cardinality budgets | Core/analytics | heavy-hitter caps | D: §15.3 · I: 051 · C: 054 | high-rate/noisy-neighbour benchmark | budgets | Next lane |
+| 053 | FLOW/LOG role reconciliation (replace STREAMING_EVENT) | `sensor/internal/runtime` | shared schema, profile-scoped | D: 020 contracts · I: 051/052 (FLOW), 050 (LOG) · C: 054 | per-profile alignment | role config | Shared design first |
+| 054 | Streaming certification (FLOW and LOG separately) | `tests/` | separate workload evidence | D: 053 · I: 050–053 · C: self | capacity/loss/failure profile per role | n/a | Not certified |
+
+### BUILD-060..075 — Core foundation (READY-AFTER-GATE; BUILD-016/062/063/064 prerequisites for structured evidence)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 060 | Persistent IAM/RBAC; SCIM v2 target (no compliance claim) | Core `security`, V016 | deny-first; resource scope | D: Platform_10/18 · I: 000 · C: 075 | isolation/privilege-escalation; SCIM target tests | IdP config | Partial (V016 directory) |
+| 061 | Core authoritative DB model | Core `persistence`, `migration` | MIG-PLAN-001..012 hosts | D: Platform_17 §15 · I: 000 · C: 075 | DB invariant/migration tests | migration order | Partial |
+| 062 | Ingestion gateway: reserve→Kafka→finalize→ACK; typed process-network/path | Core `ingestion`, `controller` | HA_DURABILITY_DESIGN_GATE | D: §7/§10 · I: 003/061 · C: 075 | durability/failure certification | topic config | Partial |
+| 063 | Kafka backbone | `deploy/docker/kafka`; Core `ingestion` | §15.5 topic realization | D: §3.4 · I: 062 · C: 075 | throughput/replay/rebalance | partitions | Partial (KRaft baseline merged) |
+| 064 | ClickHouse telemetry platform | `deploy/docker/clickhouse/init.sql` | MIG-PLAN-013..016 | D: §15.3 · I: 062/063 · C: 075 | retention/restore/scale | DDL plans | Partial (metric tables only) |
+| 065 | Valkey degradable cache | `compose.yaml` | no authority | D: Platform_03 · I: 060/061 · C: 075 | safe degradation | eviction | Not implemented |
+| 066 | Inventory/entity lifecycle, identity reconciliation | Core `domain/inventory`, `api` | MIG-PLAN-002 | D: Platform_20 · I: 060/061 · C: 075 | no phantom refs; conflict tests | n/a | Partial |
+| 067 | Large-estate Query Service | Core | cursor/keyset | D: Platform_09 §3.6 · I: 066 · C: 130 | 200K+ benchmark | query bounds | Not implemented |
+| 068 | Provisioning/discovery control; candidate lifecycle | Core | §119.1–119.3 | D: Platform_20 · I: 060/066 · C: 113 | authenticated onboarding E2E | auto-approval policy | Partial |
+| 069 | Credential/secret service | Core | USE vs REVEAL | D: Platform_18 · I: 060 · C: 128 | no secret leakage | rotation | Not implemented |
+| 070 | Policy/monitoring profiles | Core | MIG-PLAN-003 | D: Platform_22 · I: 060/066 · C: 080 | determinism; selector/profile override | profile rollout | Not implemented |
+| 071 | Device Pack/MIB/API Studio | `device-packs`, Core | dimensional certification | D: 026 · I: 026/060 · C: self | lifecycle/security | pack rollback | Not implemented |
+| 072 | Topology/graph | Core | provenance/confidence/age | D: §8.4 · I: 066/068 · C: 100 | historical topology | n/a | Not implemented |
+| 073 | Durable audit | Core | tamper evidence (mechanism pending architecture/security review — documented gate) | D: Platform_18 · I: 060 · C: 075 | independent verifiability/export | retention | Not implemented |
+| 074 | Pipeline integrity/self-monitor | Core `health` | produced/accepted/normalized/inserted accounting | D: DF-070 · I: 062–064 · C: 075 | faults → alarms | alarms | Partial |
+| 075 | Core foundation certification | `tests/` | standalone Core | D: all 060–074 · I: same · C: self | substrate certified | n/a | Not certified |
+
+### BUILD-080..086 — Monitoring state, alerting, incidents, notifications
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 080 | Monitoring state engine + Availability Qualification Deadline | none | semantic states ≠ DOWN | D: Platform_22 · I: 070/074/075 · C: self | No Data ≠ Down; severity/confidence | state config | Not implemented |
+| 081 | Alert engine (hysteresis/flap/alert keys) | none | MIG-PLAN-004; §119.4 | D: · I: 080 · C: 082 | transition/storm | policy lifecycle | Not implemented |
+| 082 | Device-down qualification | none | secondary evidence | D: · I: 040/080/081 · C: self | false-down benchmark | n/a | Not implemented |
+| 083 | Maintenance/suppression | none | §119.5 | D: · I: 081 · C: self | safety tests | n/a | Not implemented |
+| 084 | Incident correlation | none | cross-signal | D: DF-021 · I: 072/081 · C: 100 | precision/recall | n/a | Not implemented |
+| 085 | Unified timeline | none | revision-safe | D: DF-054 · I: 073/084 · C: 100 | ordered/provenanced | n/a | Not implemented |
+| 086 | Notification Center + external notification + ITSM (four Phase-1 rails; Phase-1.5 expansion **P1.5-NOT ACTIVE**) | none | MIG-PLAN-008/010; §119.17/18 | D: Platform_20 §6 · I: 060/068/081/084 · C: self | delivery/security; NC tenant/RBAC/dedupe | connector enable | MIXED; Not implemented |
+
+### BUILD-090..098 — Domain services
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 090 | NCM: backup/diff/compliance/golden-state P1; mass push/canary/plan **P1.5-NOT ACTIVE** | none | §119.8–119.10; maker-checker only P1.5 | D: DF-025/026 · I: 069/071/073 · C: self | RBAC/approval/audit/rollback | adapter enable | MIXED; Not implemented |
+| 091 | CLI Session Broker | none | credentials never reach browser | D: DF-027 · I: 069/073 · C: self | security negatives; recording policy | recording config | Not implemented |
+| 092 | IPAM | none | §119.11 | D: PRD §25 · I: 066/068 · C: self | authority/conflict | n/a | Not implemented |
+| 093 | NTA/Flow analytics | none | cardinality-bound | D: · I: 051/052/064 · C: self | cardinality/query benchmark | retention | Not implemented |
+| 094 | Log analytics | none | bounded search | D: · I: 050/064/084 · C: self | query/retention benchmark | retention | Not implemented |
+| 095 | Service Assurance & reporting (PDF/CSV only) | none | §119.12; formulas typed | D: §8.2 · I: 066/072/080/083/084 · C: self | formula/calendar/DST/restatement/PDF branding | policy versions | Not implemented |
+| 096 | Licensing/entitlement (`EXPIRED_GRACE_15D`) | none | §119.22; quantities `FOUNDER-RESERVED` | D: BRD §34 · I: 060/066 · C: self | grace/T-7/audit | licence artifact | Not implemented |
+| 097 | Lifecycle/migration/PIR + tenant offboarding | none | offboarding lifecycle; no immediate-erasure claim | D: Platform_21 §4.4/4.6 · I: 060/066/069/073/085 · C: 125 for destruction | workflow/audit; no false erasure | legal-hold | Not implemented; EOS/PIR parts P1.5† |
+| 098 | Installed Software Inventory & Change Evidence | none | consumes typed snapshot; removal-safety | D: Platform_17 inventory · I: 011/014/016/062/063/064/066/067 · C: 111/112 | Linux+Windows E2E reconciliation; partial-source | n/a | Not implemented |
+
+### BUILD-100..103 — RCA and AI
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 100 | Deterministic RCA (first-GA) | `analytics/src` | §119.7; INCONCLUSIVE valid; works without software inventory | D: Platform_22 · I: 072/084/085 · C: self | ground-truth incl. contradiction/late revision | rule-set version | Not implemented |
+| 101 | RCA quality/feedback corpus | none | audited feedback; no policy mutation | D: · I: 100 · C: self | audited isolation tests | n/a | Not implemented |
+| 102 | GNN/learned correlation — **ROADMAP-NOT ACTIVE** (not first-GA) | none | advisory only | D: · I: 100/101 · C: self | must beat deterministic baseline | model registry | Candidate |
+| 103 | AI Gateway/local intelligence — **ROADMAP-NOT ACTIVE** (not first-GA) | none | all-AI-disabled deterministic operation | D: · I: 100 · C: self | privacy/egress/fallback/resource isolation | provider config | Not implemented |
+
+### BUILD-110..118 — UI
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 110 | UI shell/runtime, Notification bell | `ui/src/platform/{shell-contract,navigation,primary-navigation}.ts` | Core-unavailable resilience | D: Platform_09 §2 · I: Core contracts · C: self | non-regression | static build | UI-F1/F2 certified (historical); runtime auth pending |
+| 111 | Inventory UI | `ui/src` | UI-030/042/052/066/073/077 | D: Platform_09 §16 · I: 067 · C: self | live API + scale UX | n/a | Foundation |
+| 112 | Entity/detail/troubleshooting UI | `ui/src` | UI-010/011/031/032/043/057/058 | D: · I: 066/080/085/098 · C: self | role-aware live-data acceptance | n/a | Foundation |
+| 113 | Agent/Sensor admin UI | `ui/src` | UI-073/074/075/077 + onboarding | D: · I: Agent/Sensor certified · C: self | operational acceptance | n/a | Foundation |
+| 114 | Alerts/incidents/topology UI | `ui/src` | UI-055/056/057/058 | D: · I: 072/081–086/100 · C: self | scale/a11y; ICW non-authority | n/a | Foundation |
+| 115 | Dashboard/report UI (PDF/CSV only) | `ui/src` | UI-001/002/003/071/072 | D: §8.2 · I: 067/095 · C: self | permission/a11y; PDF/CSV-only | n/a | Foundation |
+| 116 | Domain UIs (ship only with certified backend) | `ui/src` | UI-062–069 etc. | D: · I: backend modules · C: self | ships only with certified backend | flag per domain | Mostly empty |
+| 117 | Admin/security/licensing UI | `ui/src` | UI-084/094/060 + notification preferences | D: · I: admin modules · C: self | admin/audit acceptance | n/a | Foundation |
+| 118 | UI completeness/quality — 98-workspace reconciliation | `ui/src/platform/workspace-registry.ts` | Platform_09 §16 coverage | D: Platform_09 §16 · I: 111–117 · C: self | accessibility/perf/browser acceptance; all 98 reconciled | n/a | Partial |
+
+### BUILD-120..124 — Two-Core HA (**P1.5-NOT ACTIVE**)
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 120 | Two-Core authority/fencing, stable endpoint, split-brain | none | positive fencing; no witness/third node | D: Platform_03 HA, DF-037 · I: 075 · C: self | deterministic failover; split-brain negative | HA profile | OPEN P0 |
+| 121 | PostgreSQL HA: replication/promotion/fencing/rewind/rejoin | none | no Patroni/repmgr invention | D: · I: 120/061 · C: self | failover consistency | HA runbook | OPEN P0 |
+| 122 | Kafka HA: two-Core topology/failover/rejoin | none | | D: · I: 120/063 · C: self | replay/backlog/failover | HA runbook | OPEN P0 |
+| 123 | ClickHouse HA | none | | D: · I: 120/064 · C: self | data-consistency failover | HA runbook | OPEN P0 |
+| 124 | Sensor continuity across Core failover | none | re-anchor; no dual authority | D: DF-037/038 · I: 120–123 · C: self | no duplicate authority/loss | HA runbook | OPEN P0 |
+
+### BUILD-125..134 — Release and operations gates
+
+| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |
+|---|---|---|---|---|---|---|---|
+| 125 | Backup/restore/DR (HA ≠ DR) | `deploy/` | §119.20; PG/CH/config/secrets refs/packs | D: Platform_16 · I: Core complete · C: self | restore drills | runbook | Incomplete |
+| 126 | Native packaging/install (deb/rpm/MSI) | `deploy/systemd` | | D: Platform_15 · I: stable runtime · C: self | clean offline install/remove/reinstall | package rollback | Incomplete |
+| 127 | Upgrade/canary/rollback | | §119.21; one-way migrations flagged | D: Platform_16 · I: 126 · C: self | upgrade matrix | rollback/restore | Incomplete |
+| 128 | Security closure | | secret guard, tenant isolation, SSRF/egress | D: Platform_18 · I: all · C: self | adversarial certification | n/a | Open P0/P1 |
+| 129 | Supply-chain/air-gap | | SBOM/signing/provenance | D: Platform_07/15 · I: 126/127 · C: self | signed reproducible offline install | n/a | Partial |
+| 130 | Capacity/scale/soak (OBS-P1 overlay validation) | `tests/` | owns numeric budgets used above | D: Platform_11 · I: stack · C: self | measured capacity + soak incl. storms | n/a | Not certified |
+| 131 | Failure/chaos certification | `tests/` | eBPF/AI degrade-before-harm | D: · I: stack · C: self | safe degradation/recovery | n/a | Partial |
+| 132 | Operability/support (support bundle, runbooks, housekeeping) | | | D: DF-057/060 · I: stack · C: self | operator diagnosis/recovery | n/a | Partial |
+| 133 | AWS validation | | deferred pending readiness gate | D: · I: ≥90–95% readiness · C: self | cloud-host certification | n/a | **Deferred** |
+| 134 | Final production certification (NIOCP-P1-v1; HA adds 120–124; 102/103 non-first-GA) | | | D: all applicable · I: all · C: self | no applicable P0/P1 blockers | n/a | Future |

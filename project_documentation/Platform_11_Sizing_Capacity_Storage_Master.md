@@ -1,8 +1,8 @@
 # Platform — Sizing, Capacity, Sensor Distribution & Storage Master
 
-**Document ID:** PLATFORM-SIZING-001  
+**Document ID:** PLATFORM-SIZING-001
 **Version:** 3.3.0
-**Status:** **Authoritative Mother Reference — Engineering Sizing Model**  
+**Status:** **Authoritative Mother Reference — Engineering Sizing Model**
 **Product:** Platform
 
 ## 1. Governing rule
@@ -267,29 +267,33 @@ Existing BUILD-061/064/074/086/094/097/130 gates own this bounded specification;
 
 ## 10. Retention and rollups
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->
-#### Formal requirements — `REQ-DATA` family
+### 10.0 Normative requirements — `REQ-DATA` family
 
-Governing locator: Data lifecycle / retention / storage-protection sections. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-DATA-001` | Customer-configurable raw retention by data type/scope |
-| `REQ-DATA-002` | Customer-configurable rollup resolution and rollup retention |
-| `REQ-DATA-003` | Numeric rollups preserve min/max/avg/count/percentiles as appropriate |
-| `REQ-DATA-004` | Counter and state metrics use correct rate/delta/availability semantics |
-| `REQ-DATA-005` | Automatic query resolution selection based on time range |
-| `REQ-DATA-006` | Hot/warm/archive capability and NFS/S3-compatible/customer archive destinations |
-| `REQ-DATA-007` | Mandatory Core 80% storage-protection watermark |
-| `REQ-DATA-008` | Mandatory Sensor 80% storage-protection watermark |
-| `REQ-DATA-009` | Emergency purge oldest eligible raw telemetry/flow/log before protected state |
-| `REQ-DATA-010` | Preserve recent operational window within safety limits |
-| `REQ-DATA-012` | Telemetry cardinality/explosion protection |
-| `REQ-DATA-013` | Deduplication, replay, late/out-of-order handling |
-| `REQ-DATA-014` | Legal hold/preserve incident evidence from purge |
-| `REQ-DATA-015` | Data pipeline integrity counters and no silent data loss |
+This subsection is the **primary normative owner contract** for the `REQ-DATA` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
 
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Customer admins configure by data type/scope: - raw retention; - rollup resolution(s); - rollup retention(s); - archive destination/retention; - emergency purge priority within safe data classes. Numeric gauges preserve min/max/avg/count and percentiles where meaningful. Counters preserve rate/delta/total semantics; states preserve availability/down duration/transitions/last state. Historical queries automatically choose an appropriate resolution and disclose the resolution used.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-DATA-001` | Platform SHALL enforce: Customer-configurable raw retention by data type/scope. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-002` | Platform SHALL enforce: Customer-configurable rollup resolution and rollup retention. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-003` | Platform SHALL enforce: Numeric rollups preserve min/max/avg/count/percentiles as appropriate. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-004` | Platform SHALL enforce: Counter and state metrics use correct rate/delta/availability semantics. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-005` | Platform SHALL enforce: Automatic query resolution selection based on time range. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-006` | Platform SHALL enforce: Hot/warm/archive capability and NFS/S3-compatible/customer archive destinations. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-007` | Platform SHALL enforce: Mandatory Core 80% storage-protection watermark. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-008` | Platform SHALL enforce: Mandatory Sensor 80% storage-protection watermark. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-009` | Platform SHALL enforce: Emergency purge oldest eligible raw telemetry/flow/log before protected state. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-010` | Platform SHALL enforce: Preserve recent operational window within safety limits. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-012` | Platform SHALL enforce: Telemetry cardinality/explosion protection. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-013` | Platform SHALL enforce: Deduplication, replay, late/out-of-order handling. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-014` | Platform SHALL enforce: Legal hold/preserve incident evidence from purge. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-DATA-015` | Platform SHALL enforce: Data pipeline integrity counters and no silent data loss. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 
 Customer admins configure by data type/scope:
 

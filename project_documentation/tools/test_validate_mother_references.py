@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -61,7 +62,7 @@ def _header(doc_id: str | None, version: str = "3.3.0") -> str:
 
 
 def _req_registry(rows: list[tuple[str, str, str]]) -> str:
-    """rows: (id, summary, owner)."""
+    """rows: (id, summary, owner). Locator defaults to the fixture section that holds the ID."""
     lines = [
         "<!-- GLOBAL PRIMARY REQ REGISTRY -->",
         "### GLOBAL PRIMARY REQ REGISTRY",
@@ -70,8 +71,14 @@ def _req_registry(rows: list[tuple[str, str, str]]) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for rid, summary, owner in rows:
+        # Platform_08-owned fixture IDs live under historical §6; other owners use §1.
+        locator = (
+            "§6 Historical requirement catalogue"
+            if owner.endswith("Platform_08_Requirements_Traceability.md")
+            else "§1 Section"
+        )
         lines.append(
-            f"| {rid} | {summary} | `{owner}` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |"
+            f"| {rid} | {summary} | `{owner}` | {locator} | BASE_RTM_INDEXED | SPECIFIED | n/a |"
         )
     lines.append("<!-- END GLOBAL PRIMARY REQ REGISTRY -->")
     return "\n".join(lines)
@@ -88,7 +95,7 @@ def _prd_registry(rows: list[tuple[str, str, str]]) -> str:
     ]
     for rid, summary, owner in rows:
         lines.append(
-            f"| {rid} | {summary} | `{owner}` | §1 | — | SPECIFIED |"
+            f"| {rid} | {summary} | `{owner}` | §1 Section | — | SPECIFIED |"
         )
     lines.append("<!-- END GLOBAL PRIMARY PRD REGISTRY -->")
     return "\n".join(lines)
@@ -261,15 +268,20 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                     for old, new in req_row_overrides.items():
                         body = body.replace(old, new, 1)
             elif fname == "Platform_02_PRD.md":
-                body = _header(doc_id, version) + (
-                    p02_body
-                    or (
-                        "\n".join(
+                if p02_body is None:
+                    p02_content = (
+                        "## 1. Section\n\n"
+                        + "\n".join(
                             f"| `{rid}` | {summary} |" for rid, summary, _owner in prd_rows
                         )
                         + "\n"
                     )
-                )
+                elif re.search(r"^##\s+1\b", p02_body, re.M):
+                    p02_content = p02_body
+                else:
+                    # Preserve custom bodies while satisfying default §1 PRD locator.
+                    p02_content = "## 1. Section\n\n" + p02_body
+                body = _header(doc_id, version) + p02_content
             else:
                 body = _header(
                     (doc_id_overrides or {}).get(fname, doc_id), version
@@ -1010,7 +1022,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8"
         )
         p08 = p08.replace(
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue |",
             "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` |  |",
             1,
         )
@@ -1033,8 +1045,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8"
         )
         p08 = p08.replace(
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |",
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue | BASE_RTM_INDEXED | SPECIFIED | n/a |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue |",
             1,
         )
         (root / "Platform_08_Requirements_Traceability.md").write_text(
@@ -2255,12 +2267,24 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 )
             ],
             p02_body=(
+                "## 1. Section\n\n"
                 "| `PRD-HA-001` | HA pair |\n\n"
                 "## 28. ITSM and notification integrations\n\n"
-                "| Requirement ID | Normative requirement |\n"
-                "|---|---|\n"
-                "| `REQ-INT-001` | ServiceNow/BMC/Jira SM ITSM with binding and certification |\n"
+                "Platform SHALL provide ServiceNow/BMC/Jira SM ITSM connectors with "
+                "binding, certification and durable outbox semantics (`REQ-INT-001`).\n"
             ),
+        )
+        # Override default §1 locator to the substantive §28 owner section.
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-INT-001 | ITSM connectors | `Platform_02_PRD.md` | §1 Section |",
+            "| REQ-INT-001 | ITSM connectors | `Platform_02_PRD.md` | §28 ITSM and notification integrations |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
         )
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)
@@ -2383,6 +2407,286 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                     "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
                 ),
             ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_76_rtm_section_formal_requirements_marker_alone_fails(self) -> None:
+        """<!-- RTM SECTION FORMAL REQUIREMENTS --> catalogues must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-001", "Clean-room", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\nCatalogue prose without the formal ID.\n\n"
+            + "<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->\n"
+            + "#### Formal requirements — REQ-OSS\n\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-OSS-001` | Clean-room Platform |\n"
+            + "<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-001 | Clean-room | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-001 | Clean-room | `Platform_07_OSS_Catalog.md` | §1 Purpose |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-OSS-001" in e
+                and (
+                    "absent from declared owner" in e
+                    or "does not bind ID" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_77_synthetic_two_column_summary_under_marker_fails(self) -> None:
+        """Synthetic two-column summary tables under markers cannot own a requirement."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-DATA-001", "Retention", "Platform_11_Sizing_Capacity_Storage_Master.md"),
+            ],
+        )
+        (root / "Platform_11_Sizing_Capacity_Storage_Master.md").write_text(
+            _header("PLATFORM-SIZING-001")
+            + "## 10. Retention\n\nNo substantive ID outside the marker.\n\n"
+            + "<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-DATA-001` | Customer-configurable raw retention |\n"
+            + "<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §1 Section |",
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §10 Retention |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("REQ-DATA-001" in e for e in errors),
+            errors,
+        )
+
+    def test_78_wrong_domain_owner_fails(self) -> None:
+        """ID present only in a non-owner document does not satisfy ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-UI-001", "Dashboard Studio", "Platform_09_UI_UX_Master.md"),
+            ],
+        )
+        (root / "Platform_09_UI_UX_Master.md").write_text(
+            _header("PLATFORM-UIUX-001") + "## 1. Section\n\nNo UI requirement ID here.\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 1. Section\n\n| `PRD-HA-001` | HA |\n\n"
+            + "## 9. UI\n\n`REQ-UI-001` lives only in the wrong owner.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-UI-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_79_missing_and_stale_section_locator_fail(self) -> None:
+        """Missing section and stale locator that does not contain the ID both fail."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 1. Mandate\n\nUnrelated.\n\n"
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "Platform SHALL use exactly two Core nodes (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        # Missing section
+        p08_missing = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §99 Missing |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08_missing, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e and "locator section not found" in e for e in errors
+            ),
+            errors,
+        )
+        # Stale section: exists but does not contain the ID
+        p08_stale = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Mandate |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08_stale, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e and "absent from locator section" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_80_duplicate_conflicting_owner_still_fails_on_declared_owner(self) -> None:
+        """Declared owner without the ID fails even if another doc also mentions it."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-NET-001", "SNMP", "Platform_02_PRD.md"),
+            ],
+            p02_body="## 1. Section\n\n| `PRD-HA-001` | HA |\n\nNo NET ID here.\n",
+        )
+        (root / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+            _header("PLATFORM-PROTOCOL-001")
+            + "## 1. Section\n\nAlso mentions `REQ-NET-001` but is not the declared owner.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-NET-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_81_valid_substantive_and_specialized_master_owners_pass(self) -> None:
+        """Exact locator + ID inside substantive owner section must pass."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+                ),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "### 7.0 Normative requirements — REQ-A family\n\n"
+            + "Platform SHALL deploy exactly two Core nodes for HA (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §7.0 Normative requirements — REQ-A family |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+
+
+    def test_82_unmarked_two_column_summary_table_alone_fails(self) -> None:
+        """Two-column Requirement ID | Normative requirement tables alone cannot own."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-002", "Approved OSS only", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\nCatalogue intro without the formal ID in prose.\n\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-OSS-002` | Approved OSS only |\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-002 | Approved OSS only | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-002 | Approved OSS only | `Platform_07_OSS_Catalog.md` | §1 Purpose |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-OSS-002" in e
+                and (
+                    "absent from declared owner" in e
+                    or "does not bind ID" in e
+                    or "absent from locator section" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_83_valid_four_column_normative_table_passes(self) -> None:
+        """Multi-column normative contract tables remain valid ownership evidence."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-003", "Licence review", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\n"
+            + "### 1.0 Normative requirements — REQ-OSS family\n\n"
+            + "**Shared normative envelope:** inherits parent OSS admission contract.\n\n"
+            + "| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |\n"
+            + "|---|---|---|---|\n"
+            + "| `REQ-OSS-003` | Platform SHALL require licence/CVE/SBOM review before merge. "
+            + "Distinctive obligations bind with the shared envelope. | Inherits shared envelope | "
+            + "Do not invent unlisted OSS. |\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-003 | Licence review | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-003 | Licence review | `Platform_07_OSS_Catalog.md` | §1.0 Normative requirements — REQ-OSS family |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
         )
         errors = validate_docs_root(root)
         self.assertEqual(errors, [], errors)

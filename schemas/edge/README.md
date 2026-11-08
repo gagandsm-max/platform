@@ -50,7 +50,7 @@ JSON Schema Draft 2020-12 documents structure. `tools/validate.mjs` performs dep
 |---|---|
 | `FROZEN_BUILD_000_INVARIANT` | JSON-carried sequence/control ceiling is `2^53−1`. Schemas/validator encode this now. |
 | Historical `CURRENT_IMPLEMENTED_V1` | The original freeze recorded Go `uint64` / Java `long` / SQL `BIGINT` without all later explicit guards. |
-| Current source (`36e1513f`) | Agent queue ceiling guards and delivery-worker ACK range binding, Sensor Agent receiver, Core `TransportSequenceLimits`/validators and V012/V013 now enforce ceiling constraints on their implemented transport/control paths. Future extensions require separate conformance evidence. |
+| Current source truth (`92f0fb37`; unchanged since `36e1513f` reconciliation) | Agent queue ceiling guards and delivery-worker ACK range binding, Sensor Agent receiver, Core `TransportSequenceLimits`/validators and V012/V013 now enforce ceiling constraints on their implemented transport/control paths. Future extensions require separate conformance evidence. |
 
 Applies to JSON-carried durable delivery/replay sequences and JSON-carried control counters/generations/versions.
 

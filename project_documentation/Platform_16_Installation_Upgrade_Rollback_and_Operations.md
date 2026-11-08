@@ -1,18 +1,5 @@
 # Platform — Installation, Upgrade, Rollback & Operational Runbooks
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
-#### Formal requirements — `REQ-LC` family
-
-Governing locator: Backup/restore operations. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
-
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-LC-001` | Backup/restore with verification |
-| `REQ-LC-002` | Safe low-downtime upgrades and rollback |
-| `REQ-LC-007` | Support bundle with secret masking and error correlation IDs |
-
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-LC -->
-
 **Document ID:** PLATFORM-OPSINSTALL-001
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Consolidated Engineering Contract**
@@ -24,6 +11,24 @@ Governing locator: Backup/restore operations. Rows bind formal IDs to already-ap
 Defines Core/Sensor/Agent installation and enrollment, auto-start and reboot behavior, HA pairing,
 upgrade/rollback sequencing, installer diagnostics, and operational runbooks for component failure, storage pressure,
 Kafka/PostgreSQL/ClickHouse faults, Sensor/Agent failures, certificate rotation, backup/restore and DR.
+
+
+### 1.0 Normative requirements — `REQ-LC` family
+
+
+This subsection is the **primary normative owner contract** for the `REQ-LC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
+
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-LC-001` | Platform SHALL enforce: Backup/restore with verification. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-LC-002` | Platform SHALL enforce: Safe low-downtime upgrades and rollback. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-LC-007` | Platform SHALL enforce: Support bundle with secret masking and error correlation IDs. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 
 ## 2. Source-document provenance
 

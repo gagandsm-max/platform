@@ -2608,7 +2608,7 @@ Navigation preserves authorized scope, selected object, time/display timezone, f
 | Alert → incident → investigation → recovery; UI-055 `/alert-console`, UI-057 `/incident-detail`, UI-058 `/rca-investigation-workspace` | DF-019..024/027A/027B/029/RCA-001; Platform_19/22 | Open qualified evidence → acknowledge/assign under the owning incident contract → preserve time/scope while inspecting supporting/contradictory/missing evidence → run only authorized bounded diagnostics → attach outcome/evidence → qualify recovery. No Data and monitoring degradation are not DOWN; an external ticket's state does not prove recovery. Cancellation, lost source, changed authorization and `INCONCLUSIVE` remain visible. |
 | Maintenance/suppression; UI-060 `/maintenance-suppression` | PRD §20/§37.10; UI-060; DF-030/058 for related policy/freeze | Select scope/window/execution timezone/recurrence → preview affected qualification/notification behavior → record reason/ticket and required approval → commit revision → show scheduled/active/end/expiry evidence. Reject stale edits; distinguish cancel of future work from early end of active maintenance. Preserve suppressed evidence and audit; expiry is not recovery or acknowledgement. Exact lifecycle/action bindings remain required before enablement. |
 | NCM and CLI; UI-062 `/ncm-overview`, UI-063 `/device-configuration`, UI-065 `/configuration-change` | DF-025..027/066/ACP-005; PRD §24/§58.4 | Phase-1 permitted read/backup/diff/manual CLI uses current authorization and audit. Phase-1.5 controlled change adds plan/version/target/config hashes, window and precheck/risk preview → approval → canary/batch execution → postcheck/stabilization → result/rollback where certified. Changed plan/config/window requires reapproval. Failed/partial execution, cancelled work and unsupported rollback remain explicit. |
-| IPAM reservation/conflict; UI-066 `/ipam-overview`, UI-067 `/subnet-detail`, UI-068 `/ip-conflict` | PRD §25; canonical inventory/IPAM owner | Select authorized VRF/subnet/address → inspect observed/declared state, source and conflicts → validate requested reservation/state change → commit via authoritative API → show updated state/history. A competing reservation or stale edit must not silently overwrite ownership. Reservation/release transition, concurrency and exact action API contracts remain documentation HOLD until frozen; no direct DNS/DHCP/device configuration is implied by a record edit. |
+| IPAM reservation/conflict; UI-066 `/ipam-overview`, UI-067 `/subnet-detail`, UI-068 `/ip-conflict` | PRD §25; canonical inventory/IPAM owner | Select authorized VRF/subnet/address → inspect observed/declared state, source and conflicts → validate requested reservation/state change → commit via authoritative API → show updated state/history. A competing reservation or stale edit must not silently overwrite ownership. Reservation/release transition, concurrency and exact action API contracts are frozen in §119.12 and `Platform_17` §15; no direct DNS/DHCP/device configuration is implied by a record edit. `IMPLEMENTATION=PENDING`. |
 | Capacity/retention and fixed storage safety; UI-093 `/storage-retention` | DF-032..036/063; Platform_11 §9–11; Platform_05 §37; approved issue #292 | Select volume/data-class scope → load qualified measurements → preview canonical model and requested/effective retention → expose headroom/shortfall, assumptions, protected data and hold conflicts → confirm authorized revision-checked policy → observe apply/purge/notification outcomes. Missing inputs are UNKNOWN. Model uncertainty uplift, 70% planning and non-disableable 80% emergency state are distinct; no universal retention/SLA promise. A generated notification is not proven delivery. |
 | ITSM/CMDB connection and synchronization; `/integrations`, UI-080 `/integration-health`, UI-081 `/itsm-lifecycle` | DF-028/029/056/ACP-003/004; PRD §28/§58 | Configure permitted endpoint/auth references and discovered capabilities → test sandbox/mapping preview → controlled enablement → durable delivery/reconciliation → current status/audit. Duplicate, rate-limit, auth expiry, mapping conflict and dead-letter outcomes use the existing outbox/inbox and authority contract. Retry/reconcile is authorized and idempotent; external closure/CI disappearance does not overwrite monitoring truth/delete the entity. |
 | Report/SLA authoring and execution; `/reports`, `/studios/report`, UI-071 `/sla`, UI-072 `/isp-carrier-sla` | DF-043/SLA-001; PRD §27 | Choose authorized definition/scope/period and policy version → preview supported metric/formula and quality → execute or save schedule → re-authorize at execution → generate PDF/CSV → authorize retrieval/delivery → inspect execution/delivery evidence. Denied, insufficient, partial, cancelled or failed output is labelled. Immutable closed measurement periods and access revocation are both respected; snapshotting data does not preserve access. |
@@ -2618,6 +2618,491 @@ Navigation preserves authorized scope, selected object, time/display timezone, f
 
 ### 118.3 Closure and source truth
 
-At the source checkpoint above, the Discovery request APIs, entity APIs and bounded per-entity metric read are real foundations, but no numbered workspace is marked backend-integrated. Schedule calendar helpers do not prove persistent dispatch. The source-path/API boundary table in `Platform_09` §4.12 is the current implementation reference; all remaining endpoint/action bindings must be explicitly specified and source-verified before enablement.
+At the source checkpoint above, the Discovery request APIs, entity APIs and bounded per-entity metric read are real foundations, but no numbered workspace is marked backend-integrated. Schedule calendar helpers do not prove persistent dispatch. The source-path/API boundary table in `Platform_09` §4.12 remains the current **implementation** reference.
 
-This table closes journey ownership and negative-path composition only. An unselected essential query/action/state/field/authorization contract is a documentation blocker for that journey; an already adequate contract awaiting code, UI binding or runtime evidence is an implementation/certification blocker. Record them separately in the existing RTM/Build gate. Neither a complete system diagram nor a route skeleton may be used as acceptance evidence for the other layer.
+**Documentation closure for Phase-1 primary journeys is owned by §119** (action/state contracts: actor, authorization, request, state owner, transitions, handoffs, persistence/events, success/failure, retry, idempotency, timeout, cancellation, partial success, restart/replay, stale-version, compensation, audit, observable UI/API outcome). Operation/DTO/table/event physical contracts are owned by `Platform_17` §15. UI bindings are owned by `Platform_09` §16 with matrix status `SPEC_CONTRACT=FROZEN` / `IMPLEMENTATION=PENDING`.
+
+§118 closes journey ownership and negative-path composition. An already adequate contract awaiting code, UI binding or runtime evidence is an implementation/certification blocker, not a documentation blocker. Record them separately in the existing RTM/Build gate. Neither a complete system diagram nor a route skeleton may be used as acceptance evidence for the other layer.
+
+## 119. Phase-1 primary journey action/state contracts
+
+**Status:** `SPEC_CONTRACT=FROZEN` (effective on independent exact-head acceptance; `DOC_P0_BLOCKED` unchanged) · `IMPLEMENTATION=PENDING` for every journey. This section closes the "exact action API / transition / concurrency" gaps recorded in §118.2 (IPAM, maintenance, NCM, recurrence, offboarding). It binds existing `DF-*` flows and `Platform_17` operation families (§15 of that document gives DTOs, routes, tables and events). It allocates no new service, database or BUILD ID. A journey's `SPEC_CONTRACT=FROZEN` is not implemented, tested, benchmarked, certified or deployed truth (`SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`).
+
+### 119.0 Shared defaults (G-01..G-12) inherited by every journey
+
+| ID | Default |
+|---|---|
+| G-01 | Authorization: tenant is derived from the authenticated principal, never from the body. Each request is re-authorized server-side for permission + resource scope + entitlement. Out-of-scope resources return `RESOURCE_NOT_FOUND` (no existence leak); in-scope but unauthorized returns `PERMISSION_DENIED`; unlicensed returns `NOT_LICENSED`. Cached UI permission never authorizes. |
+| G-02 | `X-Correlation-Id` is accepted or generated, echoed in the response, and carried into audit, events, logs and downstream jobs. |
+| G-03 | Every POST create/action requires `Idempotency-Key`. Scope = tenant + principal + operation + key. Same key + same canonical body hash returns the original outcome (including terminal failure). Same key + different body returns `409 IDEMPOTENCY_KEY_REUSE`. Retention is `api.idempotency.retention`, which must be ≥ the longest operation horizon. `NUMERIC_BUDGET_OWNER=Platform_11/BUILD-130`. |
+| G-04 | Mutable aggregates carry `version BIGINT`. Mutations send `If-Match: "<version>"`. A mismatch returns `409 STALE_VERSION` with `current_version` and the current representation reference. No last-write-wins. |
+| G-05 | Work beyond the synchronous budget returns `202` + resource/`operation_id` in `QUEUED`. `ACCEPTED`, `RUNNING`, `COMPLETED`, `PARTIAL`, `FAILED`, `CANCELLED` and `TIMED_OUT` are distinct. Accepted ≠ completed. |
+| G-06 | Audit intent is written in the same PostgreSQL transaction as the state change (`platform.audit_event`, `Platform_17` §15.2). Fields: actor, tenant, action, resource+version, before/after hash, reason, result, correlation. Secrets and keystroke payloads are never recorded. Durable tamper-evident export is BUILD-073. |
+| G-07 | Retry applies to classified transient failures only: exponential backoff with jitter, bounded attempts, same `Idempotency-Key`. Non-transient errors are not retried automatically. |
+| G-08 | Each operation has `<family>.deadline` config. Timeout is never success and never `DEVICE_DOWN`. A timed-out request leaves the resource in an explicit `TIMED_OUT`/`UNKNOWN` outcome and retains partial evidence. `NUMERIC_BUDGET_OWNER=Platform_11/BUILD-130`. |
+| G-09 | State is persisted before any side effect. Domain events leave via the transactional outbox. Workers recover from PostgreSQL state + lease/fencing generation. Consumers dedupe by `event_id`. Lost-ACK replays are safe. |
+| G-10 | Errors use the `Platform_17` §10.9 standard error: stable `code`, `message_key`, `correlation_id`, `retryable`, `remediation`. |
+| G-11 | UI states follow `Platform_09` §3.2 (Loading/Empty/Partial/Stale/Permission/Not-Licensed/Query-Limited/Error/Monitoring-Degraded/Normal). Cancel-requested, partial, validation-failed and rollback-unsupported are never rendered as success. |
+| G-12 | `No Data`, `STALE`, `MONITORING_DEGRADED`, `UNKNOWN` and collector failure never become `DOWN` in any journey. LLM/GNN output never mutates state or invokes privileged actions. |
+
+### 119.1 Device/entity provisioning — `DF-005/006/007`, Platform_20 `DF-ONB-001/004` · Phase 1
+- **Actor:** tenant admin/operator with `inventory.provision`; the Platform scheduler for bulk-import execution (acting on the requester's captured scope).
+- **Authorization/preconditions:** target Site and Group are in the actor's resource scope. The Credential Profile is `USE`-authorized (never REVEAL). Entitlement and capacity preview is not `BLOCKED`. No `EXCLUDED` identity match (an exclusion yields `409 TARGET_EXCLUDED`).
+- **Request/input:** `ProvisioningRequest{display_name, entity_type, management_endpoint(s), site_id, group_ids, tags, criticality, monitoring_profile_ref, assignment_mode: AUTO_FROM_CRITICALITY|EXPLICIT_PROFILE, credential_profile_ref, sensor_pool_hint?, reason?}`. Bulk: CSV/XLSX → N items, each validated independently.
+- **Authoritative state owner:** Core Inventory (`platform.entity` + `platform.provisioning_request`). Sensor assignment authority stays with BUILD-004 desired state.
+- **State transitions:** request `DRAFT→VALIDATING→PREFLIGHT→READY→PROVISIONING→ACTIVE`, with terminal `FAILED|CANCELLED`. Entity `DISCOVERED|(none)→PROVISIONING→ACTIVE`. `ACTIVE` means monitored-eligible, not `UP`; the first qualifying observation moves state from `NO_DATA`.
+- **Service/API handoffs:** `OP-PROV-CREATE` → Identity/dedupe (BUILD-066) → Credential service USE check (BUILD-069) → Policy effective-profile + capacity/licence preview (BUILD-070/096) → Sensor preflight job over existing control path → desired-state assignment with generation/fence → Sensor ACK of applied version.
+- **Persistence/event effects:** `provisioning_request`, `entity`, `entity_identifier`, `entity_management_endpoint` and a desired-state row in one transaction. Outbox emits `entity.lifecycle.v1{PROVISIONING|ACTIVE|FAILED}`. Licence consumption occurs only at `ACTIVE`.
+- **Success path:** preflight passes → assignment accepted → `ACTIVE` → UI shows `NO_DATA` until the first telemetry, then the semantic state. Per-item results are returned for bulk.
+- **Failure path:** preflight classes `CREDENTIAL_FAILURE | TARGET_UNREACHABLE | UNSUPPORTED_CAPABILITY | IDENTITY_CONFLICT | CAPACITY_BLOCKED | LICENCE_BLOCKED | NO_ELIGIBLE_SENSOR` → request `FAILED`, entity not activated, no licence consumed, input retained for edit/resubmit.
+- **Retry:** G-07. A user resubmit after fixing input creates a new attempt in the same request (`attempt_no+1`), not a new entity.
+- **Duplicate/idempotency:** G-03 plus identity dedupe on `(tenant, identifier_type, namespace, value)`. A same-identity match returns `409 IDENTITY_CONFLICT` with the existing `entity_id`; it never silently merges or duplicates.
+- **Timeout:** `provisioning.preflight.deadline` → `FAILED(TIMEOUT)`; the late preflight result is rejected as obsolete (generation mismatch).
+- **Cancellation:** `OP-PROV-CANCEL` is allowed in `DRAFT..PROVISIONING`. A cancel during PROVISIONING requests assignment revocation; it stays `CANCEL_REQUESTED` until the Sensor ACKs removal, and a late ACK of the old generation is rejected.
+- **Partial success:** bulk batches commit per item (`SUCCEEDED|FAILED|SKIPPED_DUPLICATE|BLOCKED`). One batch operation shows `PARTIAL`. A single entity is never half-active: either assignment ACKed or `FAILED`.
+- **Restart/replay:** the PROVISIONING worker resumes from persisted step; re-issuing the assignment is idempotent on `(entity, generation)`. Outbox replay is deduped by `event_id`.
+- **Stale-version handling:** edit/cancel require `If-Match` on `provisioning_request.version`; mismatch → `STALE_VERSION`, the UI shows the diff and requires review.
+- **Compensation/rollback/cleanup:** failed or cancelled provisioning removes the pending assignment and releases the capacity reservation. The `entity` row is deleted only if it was created by this request and never ACTIVE; otherwise it is `QUIESCED`/retained for audit. No credential copy remains.
+- **Audit:** `entity.provision.requested|validated|activated|failed|cancelled`, with actor, reason, per-item result and policy/capacity snapshot hash.
+- **Observable UI/API outcome:** `/provisioning` shows per-item status and failure class with remediation. The entity appears in `/inventory` with lifecycle and monitoring state. A completed wizard is never shown while any step is unconfirmed.
+
+### 119.2 Discovery review — `DF-008`, `DF-ONB-001/004/006` · Phase 1
+- **Actor:** onboarding reviewer/admin (`onboarding.review`); the system (discovery run) as producer; a trusted auto-approval policy as a bounded system actor.
+- **Authorization/preconditions:** candidate `lifecycle_state=PENDING_APPROVAL` and the candidate's site/scope is within the reviewer's resource scope. Decision comment/reason is mandatory (length-bounded, safely encoded). The EXCLUDE reopen permission is separate (`onboarding.exclusion.reopen`).
+- **Request/input:** `OnboardingDecision{candidate_id, expected_revision, decision: APPROVE|UNMANAGED|REJECT|EXCLUDE, reason, enrichment{display_name, alias, description, site_id, group_ids, tags, criticality, monitoring_profile_ref+assignment_mode, alert_policy_ref, sensor_assignment}}`. Bulk: up to the bulk bound, per-item `expected_revision`.
+- **Authoritative state owner:** Core Onboarding (`platform.onboarding_candidate` + append-only `onboarding_decision`). Source evidence stays in `discovery_candidate/evidence` (V003).
+- **State transitions:** `DISCOVERED|ENROLLED→PENDING_APPROVAL`; `PENDING_APPROVAL→PROVISIONING→ACTIVE | UNMANAGED | REJECTED | EXCLUDED`. `EXCLUDED→PENDING_APPROVAL` only via `OP-EXCL-REOPEN`. `ACTIVE→DECOMMISSION_REQUESTED→DECOMMISSIONED(→RETIRED)`. Source encoding map (MIG-PLAN-002): `PENDING_REVIEW=PENDING_APPROVAL`, `APPROVED_FOR_PROVISIONING=PROVISIONING|ACTIVE`, `LEFT_UNMANAGED=UNMANAGED`, `IGNORED=REJECTED`, `EXCLUDED_PERMANENTLY=EXCLUDED`.
+- **Service/API handoffs:** discovery run (Sensor, BUILD-046) → dedupe/identity (BUILD-066) → `OP-ONB-CAND-LIST/GET` → `OP-ONB-CAND-DECIDE|BULK-DECIDE` → APPROVE hands off to §119.1 provisioning (the same request model).
+- **Persistence/event effects:** one transaction writes `onboarding_decision` + candidate revision+1 + audit intent + outbox `onboarding.candidate.v1`. APPROVE additionally creates the `provisioning_request`. Notification `DISCOVERY_NEW_ASSET` generation is deduped by `dedupe_key` and rate-limited (§119.17).
+- **Success path:** the decision is recorded with before/after revision; APPROVE reaches `ACTIVE` through §119.1; UNMANAGED keeps bounded inventory visibility without monitoring/licence; REJECT is recorded; EXCLUDE is permanent with no auto-expiry.
+- **Failure path:** `STALE_VERSION`; `IDENTITY_CONFLICT_REVIEW_REQUIRED` (blocks APPROVE until reconciled); `CAPACITY_BLOCKED|LICENCE_BLOCKED` (the candidate stays `PENDING_APPROVAL`); `VALIDATION_FAILED` (reason missing, unknown group). All are per-item in bulk.
+- **Retry:** idempotent resubmit with the same key returns the recorded decision. Rediscovery of an `EXCLUDED` target updates `last_seen_at` only, with no new candidate and no notification.
+- **Duplicate/idempotency:** candidate `dedupe_key` is unique per tenant. Rediscovery or Agent reconnect updates the existing candidate (revision-safe merge of observations); it never creates a duplicate row or notification.
+- **Timeout:** the bulk decision runs async past the sync budget (`202 + operation_id`); per-item results are retrievable until `api.operation.retention`.
+- **Cancellation:** a bulk operation can be cancelled; items already decided stay decided (reported `CANCELLED_NOT_STARTED` for the rest). A single decision is atomic and not cancellable once committed.
+- **Partial success:** bulk returns per-item `APPLIED|FAILED|SKIPPED|CONFLICT` plus evidence; overall `PARTIAL`.
+- **Restart/replay:** bulk resumes from the per-item cursor; already-committed items are skipped by `(candidate_id, expected_revision)`.
+- **Stale-version handling:** `expected_revision` ≠ current → `409 STALE_VERSION`; no auto-retry. The UI reloads the candidate and requires re-confirmation.
+- **Compensation/rollback/cleanup:** a decision is not "undone". Reversal is a new authorized decision (UNMANAGED→APPROVE; EXCLUDED→reopen→PENDING_APPROVAL). A failed APPROVE hand-off leaves the candidate `PENDING_APPROVAL` and releases the reservation.
+- **Audit:** `onboarding.decision.{approve|unmanaged|reject|exclude|reopen}` with comment, before/after revision, evidence ref, per-item result.
+- **Observable UI/API outcome:** `/provisioning` review queue shows lifecycle, conflict state, per-item bulk results and the history of the candidate. A denied or conflicting item is never shown as success.
+
+### 119.3 Agent onboarding / approval / reassignment — `DF-004`, `DF-ONB-002/005`, `DF-017` · Phase 1
+- **Actor:** Agent (bootstrap, machine identity); reviewer (`onboarding.review`); infra admin (`sensor.assign`) for reassignment.
+- **Authorization/preconditions:** a scoped single-use enrollment token (V011 authority). A valid CSR whose SAN matches `agent_id`. The accepting Sensor is in the tenant's pool. Reassignment needs the target Sensor eligible (capacity, locality, role) and the current generation known.
+- **Request/input:** enrollment `{token, CSR, agent_id, system_name, os_identity}`; decision as §119.2; reassignment `AgentReassign{agent_id, expected_assignment_generation, target_sensor_id|pool_id, reason}`.
+- **Authoritative state owner:** Core Agent control authority (`platform.agent`, `agent_sensor_assignment`, `entity_agent_binding`) and onboarding candidate (`source_type=AGENT_ENROLLMENT`).
+- **State transitions:** candidate `ENROLLED→PENDING_APPROVAL→PROVISIONING→ACTIVE|UNMANAGED|REJECTED|EXCLUDED`. Binding `PENDING_APPROVAL→ACTIVE|UNMANAGED|REVOKED|SECURITY_HOLD`. Assignment generation increments on each reassignment: `ASSIGNED(g)→DRAINING(g)→ASSIGNED(g+1)`.
+- **Service/API handoffs:** Agent→Sensor (mTLS bootstrap) → Core enrollment + unique identity → provisional Sensor association → candidate created → review → activation profile + Sensor assignment (existing Sensor Control authority) → Agent applies and ACKs.
+- **Persistence/event effects:** `agent`, `agent_certificate_credential`, `entity_agent_binding`, `onboarding_candidate/decision`, `agent_sensor_assignment` (new generation). Events `onboarding.candidate.v1`, `agent.assignment.v1`.
+- **Success path:** the unique Agent identity is established; `PENDING_APPROVAL` carries bounded bootstrap health only (no monitoring workload, no licence consumption, no direct Core telemetry); approval activates the profile; reassignment completes when the new Sensor ACKs generation g+1 and the old authority is fenced.
+- **Failure path:** token replay/expiry → `ENROLLMENT_TOKEN_INVALID`; clone or conflicting certificate identity → `SECURITY_HOLD` + `IDENTITY_CONFLICT`; SAN mismatch → fail closed; no eligible Sensor → `NO_CAPACITY` (the candidate stays pending); stale generation → `STALE_VERSION`.
+- **Retry:** the Agent retries enrollment with backoff+jitter under the same token only until it is consumed. Reassignment retries are idempotent on `(agent_id, target_generation)`.
+- **Duplicate/idempotency:** `agent_id` and `certificate_identity` are unique per deployment; reinstall increments `reinstall_generation` only after explicit reconciliation. A reconnect with a changed IP/MAC updates observations, never `entity_id`/`agent_id`.
+- **Timeout:** `agent.enrollment.deadline` → the candidate remains `ENROLLED` with a `STALE_ENROLLMENT` flag. Reassignment timeout → `DRAINING` held, then rollback to g (§compensation).
+- **Cancellation:** a pending enrollment can be rejected/revoked. A reassignment can be cancelled before the new ACK; cancelling never restores a superseded generation after it was fenced.
+- **Partial success:** during reassignment the old Sensor may still hold the data buffer; replay of the unACKed Agent segments continues through the same Agent→Sensor transport. The state is shown `DRAINING`, not complete.
+- **Restart/replay:** Core restart resumes from persisted assignment generation. The Agent restart re-presents its identity; Core re-issues the current desired state. Late ACKs of an obsolete generation are rejected and recorded.
+- **Stale-version handling:** `expected_assignment_generation` mismatch → `STALE_VERSION`; fenced Sensors reject stale privileged work.
+- **Compensation/rollback/cleanup:** a failed reassignment re-asserts generation g authority (new generation g+2 pointing at the original Sensor, never reusing g+1). A rejected Agent has its certificate revoked per policy and all pending workload removed.
+- **Audit:** `agent.enroll.*`, `onboarding.decision.*`, `agent.reassign.{requested|completed|failed|cancelled}`, `agent.identity.conflict`.
+- **Observable UI/API outcome:** `/provisioning` + UI-077 `/agent-estate` show state, binding, generation, last heartbeat and conflict. "Pending approval" is never rendered as healthy or monitored.
+
+### 119.4 Alert lifecycle and acknowledgement — `DF-019/020`, Platform_22 evidence contracts · Phase 1
+- **Actor:** the alert engine (system); operator with `alerts.ack`/`alerts.assign`; a shared team assignee.
+- **Authorization/preconditions:** alert is in the actor's resource scope; the action is valid for the current state; ack of a `SUPPRESSED` alert needs `alerts.ack.suppressed`.
+- **Request/input:** `AlertAction{alert_id, expected_version, action: ACKNOWLEDGE|ASSIGN|UNASSIGN|ADD_NOTE|CLOSE_MANUAL, assignee_ref?, note?, reason?}`. The engine writes via an internal command, not the public API.
+- **Authoritative state owner:** Core Alert Engine (`platform.alert_current`, append-only `alert_lifecycle_event`). Semantic state (BUILD-080) and severity/confidence are separate columns.
+- **State transitions:** `NEW→ACKNOWLEDGED→ASSIGNED→INVESTIGATING→MONITORING_RECOVERY→RESOLVED→CLOSED` (each may be skipped forward by an authorized action). `RESOLVED→REOPENED(NEW)` on recurrence within the reopen window. `SUPPRESSED` is an overlay flag (§119.5), not a lifecycle state.
+- **Service/API handoffs:** policy evaluation (BUILD-081) with the class Alert Evidence Contract and telemetry-quality gate → `alert_current` upsert by `alert_key` → `OP-ALERT-ACK/ASSIGN/NOTE/CLOSE` → notification (§119.17) / incident correlation (§119.6) / ITSM outbox (§119.18).
+- **Persistence/event effects:** one transaction writes `alert_current` (version+1), `alert_lifecycle_event` and the outbox `alert.lifecycle.v1`. Analytical history goes to the ClickHouse `alert_history`.
+- **Success path:** the action is committed; ack records actor/time and stops re-notification per policy; recovery is qualified by the evidence contract (not by an external ticket status).
+- **Failure path:** `INVALID_TRANSITION` (409); `STALE_VERSION`; `PERMISSION_DENIED`; the target alert already `CLOSED` → `ALERT_CLOSED`.
+- **Retry:** idempotent per G-03; the engine's re-evaluation is deterministic (same inputs → same state). Flapping is damped by hysteresis (BUILD-081), not by client retry.
+- **Duplicate/idempotency:** `alert_key=(tenant, policy_id, entity/object, condition)` is unique among non-CLOSED alerts; repeated firings increment `occurrence_count`. A duplicate ack with the same key returns the original outcome; an ack of an already-ACKNOWLEDGED alert by a different actor is a no-op noted in history (`ALREADY_ACKNOWLEDGED`).
+- **Timeout:** the evaluation deadline exceeded → `MONITORING_DEGRADED`/`UNKNOWN` alert-context, never `DOWN`. The ack has no timeout beyond the request deadline.
+- **Cancellation:** acknowledgement is revoked only by an explicit `UNACK` (authorized). A bulk ack is cancellable before dispatch; the rest report `NOT_APPLIED`.
+- **Partial success:** bulk ack/assign returns per-alert results; the batch is `PARTIAL` when any item fails.
+- **Restart/replay:** the engine rebuilds in-memory evaluation state from `alert_current` + the latest telemetry watermark; lifecycle events are replay-safe by `event_id`.
+- **Stale-version handling:** `STALE_VERSION` carries the current state; the UI refreshes and shows who changed it.
+- **Compensation/rollback/cleanup:** a mistaken ack/assign is corrected by a compensating authorized action (new event); lifecycle events are never edited or deleted.
+- **Audit:** `alert.{acknowledge|assign|note|close|reopen|auto_resolve}` with actor, reason, evidence ref, before/after state.
+- **Observable UI/API outcome:** UI-055 `/alert-console` shows state, ack owner, severity and confidence separately, the semantic state and evidence quality; the action result is shown per alert. An alert awaiting recovery qualification is not shown as resolved.
+
+### 119.5 Suppression vs maintenance vs mute — `DF-030/058`, Platform_22 · Phase 1
+- **Actor:** maintenance admin (`maintenance.manage`); operator (`alerts.mute` for personal/team notification mute); the engine (dependency/dedup suppression).
+- **Authorization/preconditions:** scope in the actor's resource scope; maintenance requires reason (+ticket where policy requires) and execution timezone; mute is limited to notification delivery of the actor's own subscriptions unless `alerts.mute.team`.
+- **Request/input:** `MaintenanceWindow{scope, timezone, recurrence?, starts_at/ends_at, reason, ticket_ref?, qualification_effect: SUPPRESS_NOTIFICATIONS|SUPPRESS_ALERTING|EXPECTED_STATE}`; `Mute{alert_id|scope, until, reason}`; `SuppressionRule` (system-defined types `DEPENDENCY|DEDUP|FLAP`) is policy-driven, not user-created per alert.
+- **Authoritative state owner:** Core Policy (`platform.maintenance_window`, `suppression_rule`, `alert_mute`). The alert overlay is derived on `alert_current`.
+- **State transitions:** window `SCHEDULED→ACTIVE→ENDED|CANCELLED|EXPIRED`; early end `ACTIVE→ENDED(early)`. Mute `ACTIVE→EXPIRED|CANCELLED`. Alert overlay flags `SUPPRESSED_BY{MAINTENANCE|DEPENDENCY|DEDUP|FLAP}` and `MUTED` are independent of lifecycle and of each other.
+- **Service/API handoffs:** `OP-MNT-CREATE/UPDATE/CANCEL/END-EARLY` → preview of affected qualification/notification → commit revision → engine reads the effective overlay at evaluation time → notification layer honors `MUTED` only for delivery.
+- **Persistence/event effects:** window/rule/mute rows + `maintenance.window.v1` events; the alert event records `suppression_applied|released` with the cause. Suppressed evidence is retained and queryable.
+- **Success path:** the window activates at its resolved start (DST/month-end rules from DF-SCHED); during it the matching alerts show the overlay; at end the overlay is released and evaluation resumes. Expiry is not recovery and not acknowledgement.
+- **Failure path:** invalid scope/timezone/recurrence → `VALIDATION_FAILED`; overlapping windows with conflicting effects → `WINDOW_CONFLICT` (merge or reject is the preview's explicit choice); stale edit → `STALE_VERSION`.
+- **Retry:** idempotent create; end/cancel are naturally idempotent (a repeat returns the terminal state).
+- **Duplicate/idempotency:** `(tenant, scope_hash, starts_at, ends_at, recurrence_hash)` uniqueness warns, rather than silently collapsing, windows with identical parameters.
+- **Timeout:** the preview query exceeding the bound → `QUERY_LIMITED`; the commit is not attempted without a completed preview.
+- **Cancellation:** cancelling a future window ≠ ending an active one. Early end is a separate action recording the actual end; both are audited.
+- **Partial success:** a window applying to a large scope reports `affected_count`, `evaluated_count`; entities added after creation are matched by the scope expression, not retro-applied silently.
+- **Restart/replay:** activation/expiry is driven by persisted times, not in-memory timers; Core restart recomputes the active set; missed activations during downtime are applied from the resolved start (late-start recorded).
+- **Stale-version handling:** `If-Match` on the window `version`; an active window edit that shortens/widens the scope creates a new revision effective from commit time.
+- **Compensation/rollback/cleanup:** deleting is not allowed for windows that were ever ACTIVE (cancel/end only); the overlay is released at end/cancel; suppressed alerts that persist after release are re-evaluated immediately.
+- **Audit:** `maintenance.{create|update|cancel|end_early|activate|expire}`, `alert.mute.*`, suppression applied/released.
+- **Observable UI/API outcome:** UI-060 `/maintenance-suppression` lists windows with status, scope and next/last occurrence; UI-055 shows the overlay with cause/window/reason. A suppressed alert never reads as healthy or resolved.
+
+### 119.6 Incident create / correlate / ack / assign / resolve / reopen — `DF-021/029`, RCA-001 · Phase 1
+- **Actor:** the correlation engine (system); NOC operator/lead (`incidents.manage`); an assignee.
+- **Authorization/preconditions:** the incident is in the actor's resource scope. `RESOLVE` requires qualified recovery evidence or an explicit authorized manual-resolve with reason. `REOPEN` requires `incidents.reopen`.
+- **Request/input:** `IncidentAction{incident_id, expected_version, action: ACKNOWLEDGE|ASSIGN|SET_PRIORITY|LINK_ALERT|UNLINK_ALERT|ADD_NOTE|RESOLVE|CLOSE|REOPEN, assignee_ref?, reason, evidence_refs?}`. Manual create: `{title, scope, linked_alert_ids?, reason}`.
+- **Authoritative state owner:** Core Incident service (`platform.incident`, `incident_alert_link`, `incident_event`). RCA is a separate revisioned object (§119.7).
+- **State transitions:** `OPEN→ACKNOWLEDGED→INVESTIGATING→RESOLVED→CLOSED`; `RESOLVED|CLOSED→REOPENED(OPEN)` within the reopen policy window, else a new incident that links to the prior one. `SUPPRESSED` is an overlay.
+- **Service/API handoffs:** the engine groups qualified alerts by temporal/topology/change evidence (BUILD-084) → creates/attaches to the incident → `OP-INC-*` actions → RCA investigation (§119.7) → ITSM outbox (§119.18) → notification (§119.17).
+- **Persistence/event effects:** one transaction writes incident + links + `incident_event` + outbox `incident.lifecycle.v1`; the Unified Timeline (BUILD-085) receives the entries. ClickHouse `incident_history` is fed from events.
+- **Success path:** correlation attaches or creates deterministically; actions commit; resolution is qualified by the recovery evidence contract; the external ITSM state never decides recovery.
+- **Failure path:** `INVALID_TRANSITION`, `STALE_VERSION`, `ALERT_ALREADY_LINKED_ELSEWHERE` (resolved by explicit merge action), `RECOVERY_NOT_QUALIFIED` (resolve without evidence).
+- **Retry:** idempotent keys; correlation retries are deterministic for the same input set and `correlation_window`.
+- **Duplicate/idempotency:** `correlation_key` prevents two open incidents for the same root-scope + window; a late alert attaches to the existing one. Merge of two incidents is an explicit action with a before/after evidence record.
+- **Timeout:** the correlation window closing without sufficient evidence → incident created `OPEN` with `INCONCLUSIVE` RCA status, never forced to a cause.
+- **Cancellation:** a manual create can be withdrawn only before ack by `CLOSE(reason=withdrawn)`. There is no hard delete.
+- **Partial success:** link/unlink bulk returns per-alert results. When an ITSM outbound fails the incident state is unaffected; sync state is shown separately.
+- **Restart/replay:** the engine recomputes open incidents from persisted `alert_current` + `incident` state; the event stream replays are deduped by `event_id`.
+- **Stale-version handling:** `If-Match` on incident `version`; `STALE_VERSION` returns the current assignee/state.
+- **Compensation/rollback/cleanup:** a wrong resolve is reversed by `REOPEN` (history retained). A wrong merge is reversed by an explicit split action that restores links from the event log.
+- **Audit:** `incident.{create|ack|assign|priority|link|unlink|note|resolve|close|reopen|merge|split}` with actor/reason/evidence.
+- **Observable UI/API outcome:** UI-056 `/incident-console`, UI-057 `/incident-detail` show state, owner, linked alerts, RCA status (`INCONCLUSIVE` allowed), ITSM sync state and timeline. Recovery shows "qualified" vs "pending evidence".
+
+### 119.7 RCA investigation / revision / inconclusive — `DF-021/RCA-001/024`, Platform_22, Platform_19 · Phase 1
+- **Actor:** the deterministic RCA engine (system); analyst (`rca.view`, `rca.feedback`); AI (BUILD-103) is non-authoritative and optional.
+- **Authorization/preconditions:** the incident is in scope; evidence refs are authorized per source (a user who lacks access to a source sees it redacted). Feedback requires `rca.feedback`.
+- **Request/input:** engine trigger = incident create/evidence-change event. Analyst: `RcaFeedback{rca_id, revision_no, verdict: AGREE|DISAGREE|PARTIAL, structured_reason, evidence_refs?}`; `RcaRerun{rca_id, reason}` (bounded).
+- **Authoritative state owner:** Core RCA service (`platform.rca_investigation`, immutable `rca_revision`, `evidence_ref`). The deterministic engine is the only writer of revisions.
+- **State transitions:** investigation `OPEN→CONCLUDED|INCONCLUSIVE`, any of which may move to `SUPERSEDED` as a newer revision lands. Revisions are append-only, with `revision_no` monotonic; late evidence creates revision n+1 (never edits n).
+- **Service/API handoffs:** the engine pulls evidence by reference (metrics, topology as-of, flow, logs, path, EDS, change, OOB/VM/storage vantages, software change if available) → hypothesis fusion with contradictions/missing evidence → revision persisted → `OP-RCA-GET/LIST-REVISIONS` → optional EDS/Diagnostic job requests (§119.13) → timeline.
+- **Persistence/event effects:** `rca_revision` (outcome, confidence, hypotheses, supporting/contradicting/missing evidence refs, rule/model versions) + outbox `rca.revision.v1`; feedback stored as structured audited input (never mutates policy).
+- **Success path:** the revision reports observed facts, likely cause, confidence, supporting evidence, contradictions, missing evidence and the next validation step. `INCONCLUSIVE` is a valid, correct result.
+- **Failure path:** evidence source unavailable → the revision lists it under missing evidence and the confidence is reduced; engine timeout → `INCONCLUSIVE(reason=ENGINE_DEADLINE)`; unauthorized evidence → redacted placeholder.
+- **Retry:** the engine retries evidence fetch with bounded backoff; `RcaRerun` is rate-limited and idempotent on `(rca_id, evidence_set_hash)`.
+- **Duplicate/idempotency:** a revision is keyed by `(rca_id, evidence_set_hash, rule_version)`, so identical inputs never produce a duplicate revision.
+- **Timeout:** `rca.engine.deadline`; the result is `INCONCLUSIVE` with the partial evidence listed — never a guessed cause.
+- **Cancellation:** a rerun can be cancelled; the existing revisions are untouched.
+- **Partial success:** the revision is `PARTIAL_EVIDENCE` when some vantages failed; this is displayed with the missing list.
+- **Restart/replay:** the engine is stateless over persisted evidence refs; a replay produces the same revision key, so it is a no-op.
+- **Stale-version handling:** the UI pins `revision_no`; when a newer revision exists it shows "newer revision available" and diffs, never silently swapping the content.
+- **Compensation/rollback/cleanup:** wrong conclusions are superseded by newer revisions (history kept); feedback feeds evaluation only (`BUILD-101`), never changes active policy without the policy lifecycle (DRAFT→BACKTEST→SHADOW→ACTIVE).
+- **Audit:** `rca.revision.created`, `rca.feedback.submitted`, `rca.rerun.requested`.
+- **Observable UI/API outcome:** UI-058 `/rca-investigation-workspace` shows revision history, facts/cause/confidence/contradictions/missing evidence/next validation, source provenance and `INCONCLUSIVE`.
+
+### 119.8 NCM backup — `DF-025`, BUILD-090/069 · Phase 1
+- **Actor:** operator with `ncm.backup`; the scheduler (policy schedule); Sensor (executor).
+- **Authorization/preconditions:** target is in scope; the Device Pack/adapter supports backup for the target; the Credential Profile `USE` is authorized for ncm; the maintenance/change-freeze check passes where policy requires.
+- **Request/input:** `NcmJobCreate{kind=BACKUP, targets[], config_scope: RUNNING|STARTUP|BOTH, reason?}`; scheduled form references a `backup_policy`.
+- **Authoritative state owner:** Core NCM (`platform.ncm_job`, `ncm_job_target`, `ncm_config_version`).
+- **State transitions:** job `QUEUED→RUNNING→SUCCEEDED|PARTIAL|FAILED|CANCELLED|TIMED_OUT`; per target `PENDING→CAPTURING→STORED|UNCHANGED|FAILED|SKIPPED`. A config version is immutable once stored.
+- **Service/API handoffs:** `OP-NCM-JOB-CREATE` → RBAC/window/credential-ref check → signed job lease to the eligible Sensor (generation/fence) → SSH/NETCONF/API fetch → Sensor returns config + hash + execution evidence → Core stores the version (metadata in PostgreSQL; content in the governed config store) → timeline fact.
+- **Persistence/event effects:** `ncm_config_version{content_hash, redaction_state, diff_base_id}` + target result + outbox `ncm.job.v1` and a timeline fact (`config_backup`). Identical hash → `UNCHANGED` (no new version, last-checked updated).
+- **Success path:** the version is stored with provenance (Sensor, adapter, time, hash); the diff vs the previous version is available; compliance/golden-state evaluation can run on it.
+- **Failure path:** `CREDENTIAL_FAILURE`, `TARGET_UNREACHABLE`, `UNSUPPORTED_ADAPTER`, `PRIVILEGE_DENIED`, `CONFIG_TOO_LARGE`, `REDACTION_FAILED` per target; no partial config is stored as a version.
+- **Retry:** transient failures are retried per G-07 up to the job's attempt bound; credential failures are not retried automatically.
+- **Duplicate/idempotency:** the job key + `(entity_id, config_scope, content_hash)` unique; concurrent backups of the same target serialize via a per-target lease, so a second request returns the in-flight job.
+- **Timeout:** per-target and job deadlines → `TIMED_OUT` for targets; the late result with an expired lease is rejected.
+- **Cancellation:** `OP-NCM-JOB-CANCEL`; running targets are cancelled best-effort; the stored versions remain.
+- **Partial success:** job `PARTIAL` with per-target result; successful targets are kept.
+- **Restart/replay:** the Sensor retains the result in the spool until the durable Core ACK; a Core restart resumes the job from the per-target state; duplicate result delivery is deduped by `(job_id, target, content_hash)`.
+- **Stale-version handling:** schedule/policy edits use `If-Match`; an in-flight job uses the policy version snapshot at creation.
+- **Compensation/rollback/cleanup:** a failed capture leaves no version; the temporary Sensor artifacts are deleted on completion/expiry; the secrets are never persisted in versions (redaction state recorded).
+- **Audit:** `ncm.job.{create|cancel|complete}`, `ncm.config.version.stored`, credential USE reference (not value).
+- **Observable UI/API outcome:** UI-062/063 show job status per target, version list, diff and last-success time. A failed backup is never displayed as "up to date".
+
+### 119.9 NCM change execution (Phase-1 applicable) — `DF-026/027`, `DF-ACP-005`, Platform_17 §13.4/13.8 · Phase 1 manual / Phase 1.5 plan
+- **Actor (Phase 1):** engineer with `ncm.cli.change` using a CLI session (§119.16) for one governed device. **Phase 1.5:** requester + independent approver for the Change Plan; mass/canary/automated remediation is **NOT ACTIVE**.
+- **Authorization/preconditions (Phase 1):** RBAC + resource scope; reason/ticket; JIT/MFA per policy; the device supports a pre-change snapshot; no change freeze (DF-058) conflict. **Phase 1.5:** approval bound to exact plan version + target-set hash + rendered-change hash + window.
+- **Request/input (Phase 1):** `NcmManualChange{entity_id, cli_session_id, reason, ticket_ref?, pre_snapshot: REQUIRED|WAIVED_WITH_REASON}`. **Phase 1.5:** `ChangePlan{version, targets, template/render hash, window, prechecks, postchecks, rollback_ref}`.
+- **Authoritative state owner:** Core NCM (`ncm_job kind=CHANGE`, `ncm_job_target`, `ncm_config_version`; Phase 1.5 `ncm_change_plan(+version)`, `ncm_approval`).
+- **State transitions (Phase 1):** `REQUESTED→PRE_SNAPSHOT→EXECUTING(session)→POST_SNAPSHOT→COMPLETED|FAILED|ABORTED`. **Phase 1.5:** `DRAFT→SUBMITTED→APPROVED→EXECUTING(canary→batch)→VALIDATING→COMPLETED|FAILED|ROLLING_BACK→ROLLED_BACK|ROLLBACK_FAILED`; a material plan change returns to `SUBMITTED` (`STALE_REAPPROVAL_REQUIRED`).
+- **Service/API handoffs:** `OP-NCM-CHANGE-CREATE` → policy/RBAC → pre-snapshot (§119.8) → CLI broker session (BUILD-091) → post-snapshot + diff → timeline/ITSM link. Phase 1.5 adds approval, canary/batch dispatch and post-validation.
+- **Persistence/event effects:** change job + pre/post `ncm_config_version` + diff reference; `ncm.job.v1`; timeline `config_change`. No privileged command text is stored as telemetry; CLI evidence follows §119.16.
+- **Success path:** pre/post snapshots exist and the diff is attached; the change links to the incident/investigation when present; the result is shown as `COMPLETED` only after the post-snapshot is stored.
+- **Failure path:** pre-snapshot failure blocks the change unless `WAIVED_WITH_REASON` (privileged waiver, audited); session failure → `FAILED` with partial evidence; post-snapshot failure → `COMPLETED_UNVERIFIED` (never plain success).
+- **Retry:** a re-run is a new change record (never an automatic re-execution of commands); only the snapshot steps retry per G-07.
+- **Duplicate/idempotency:** `Idempotency-Key` on creation; one open change per `(entity, cli_session)`.
+- **Timeout:** the session/step deadlines → `ABORTED`; the post-snapshot is still attempted to record the resulting state.
+- **Cancellation:** a request cancels before EXECUTING; once EXECUTING, the session is terminated by an authorized user; the state captured is `ABORTED` with post-snapshot.
+- **Partial success:** multi-target is Phase 1.5 only; Phase 1 is single-device. A Phase 1.5 batch reports per-target and stops on the blast-radius threshold.
+- **Restart/replay:** a Core restart reconstructs from the job state; an orphaned EXECUTING record without a live session is reconciled to `ABORTED_UNKNOWN` and triggers a verification snapshot.
+- **Stale-version handling:** Phase 1.5 plan/config/window drift → `STALE_REAPPROVAL_REQUIRED`; Phase 1 baseline drift between pre-snapshot and session start is shown in the diff.
+- **Compensation/rollback/cleanup:** Phase 1: the operator-initiated restore from the pre-snapshot (§119.10). Phase 1.5: automated rollback where capability-certified.
+- **Audit:** `ncm.change.{request|approve|execute|complete|abort}` with actor/approver/reason/ticket/hashes. Approval ≠ authorization to bypass local RBAC/preconditions; ITSM approval alone never authorizes execution.
+- **Observable UI/API outcome:** UI-065 `/configuration-change` shows pre/post/diff/status/approvals. `COMPLETED_UNVERIFIED`, `ABORTED` and unsupported rollback are labelled distinctly.
+
+### 119.10 NCM rollback where applicable — `DF-026`, BUILD-090 · Phase 1 manual restore / Phase 1.5 automated
+- **Actor:** engineer (`ncm.rollback`); Phase 1.5 the executor on policy failure.
+- **Authorization/preconditions:** a stored pre-change `ncm_config_version` exists; the adapter capability `ROLLBACK_SUPPORTED` is certified for the Device Pack/version; the same RBAC/reason/approval class as the original change.
+- **Request/input:** `NcmRollback{change_job_id, target_entity_id, to_config_version_id, reason}`.
+- **Authoritative state owner:** Core NCM (`ncm_job kind=ROLLBACK`).
+- **State transitions:** `REQUESTED→PRECHECK→EXECUTING→VALIDATING→ROLLED_BACK|ROLLBACK_FAILED|UNSUPPORTED`.
+- **Service/API handoffs:** capability check → pre-rollback snapshot (§119.8) → restore via brokered session/adapter → post snapshot + diff against the target version → verification.
+- **Persistence/event effects:** rollback job + before/after versions; `ncm.job.v1`; timeline `config_rollback`.
+- **Success path:** the post-state hash equals the target version hash (or the diff is explained); status `ROLLED_BACK`.
+- **Failure path:** `ROLLBACK_UNSUPPORTED` (explicit, no attempt), `ROLLBACK_FAILED` (partial state captured), `HASH_MISMATCH` (applied but not equal) → manual-intervention state with evidence.
+- **Retry:** manual re-request only; no automatic re-execution after a failure.
+- **Duplicate/idempotency:** one active rollback per target; the key dedupes requests.
+- **Timeout:** deadline → `ROLLBACK_FAILED(TIMEOUT)` with a verification snapshot attempt.
+- **Cancellation:** before EXECUTING only; after that it is terminated and verified.
+- **Partial success:** the multi-target rollback is Phase 1.5; per-target results are reported.
+- **Restart/replay:** the same reconciliation as §119.9.
+- **Stale-version handling:** `to_config_version_id` must exist and belong to the same entity/tenant; the config drift since the change is shown before confirmation.
+- **Compensation/rollback/cleanup:** rollback of a rollback is a new rollback to a chosen version; irreversible external effects are listed as `NOT_REVERSIBLE` in the result — never claimed as undone.
+- **Audit:** `ncm.rollback.{request|execute|complete|fail}`.
+- **Observable UI/API outcome:** UI-065 shows the rollback capability state and result; unsupported shows the actionable reason and the manual recovery path.
+
+### 119.11 IPAM reservation / release / conflict — PRD §25, Platform_17 §15 · Phase 1
+- **Actor:** network admin with `ipam.reserve`/`ipam.release`; the discovery/DHCP-observation pipeline (system, observations only).
+- **Authorization/preconditions:** VRF/subnet in scope; the address lies within a managed subnet; the actor can see the VRF (overlapping RFC1918 spaces differ by VRF).
+- **Request/input:** `IpamReserve{vrf_id, address|cidr, owner_ref, purpose, expires_at?, reason}`; `IpamRelease{reservation_id, expected_version, reason}`.
+- **Authoritative state owner:** Core IPAM (`platform.ipam_address`, `ipam_reservation`, `ipam_conflict`). Observed state (from discovery/DHCP/ARP) and declared state are separate columns.
+- **State transitions:** reservation `ACTIVE→RELEASED|EXPIRED`; address `FREE|OBSERVED→RESERVED→ASSIGNED→RELEASED`; conflict `OPEN→ACKNOWLEDGED→RESOLVED|DISMISSED`.
+- **Service/API handoffs:** `OP-IPAM-RESERVE` → SERIALIZABLE transaction under `pg_advisory_xact_lock(hash(tenant,vrf))` (no extension) → conflict detection (competing reservation, observed-by-other-owner, overlapping subnet) → commit; `OP-IPAM-RELEASE`; `OP-IPAM-CONFLICT-ACTION`.
+- **Persistence/event effects:** reservation + address update + audit + `ipam.change.v1`; a conflict row is created when an observation contradicts a declaration. No DNS/DHCP/device configuration is written.
+- **Success path:** the reservation commits and the address shows owner/purpose/history; release returns it to FREE and keeps history.
+- **Failure path:** `ADDRESS_RESERVED_BY_OTHER` (409, with the owner reference), `OUTSIDE_MANAGED_SUBNET`, `SUBNET_OVERLAP`, `STALE_VERSION`.
+- **Retry:** idempotent key; a competing write returns the winner, and the loser must review.
+- **Duplicate/idempotency:** a unique partial index allows one ACTIVE reservation per `(tenant, vrf_id, address)`; the same key + same body returns the original reservation.
+- **Timeout:** the lock wait exceeding `ipam.lock.deadline` → `409 RETRY_LATER` with no partial write.
+- **Cancellation:** not applicable (synchronous); a bulk reservation import is cancellable between items.
+- **Partial success:** bulk reserve returns per-address `RESERVED|CONFLICT|OUTSIDE_SUBNET|INVALID` with the batch `PARTIAL`.
+- **Restart/replay:** the transaction is atomic; observation ingestion is idempotent by `(source, address, observed_at)`.
+- **Stale-version handling:** `If-Match` on reservation/subnet `version`; the UI shows the current owner.
+- **Compensation/rollback/cleanup:** release is the compensation; an expired reservation moves to EXPIRED by the scheduler and is audited; conflict dismissal requires a reason and does not delete evidence.
+- **Audit:** `ipam.{reserve|release|expire|conflict.open|conflict.ack|conflict.resolve}` with actor/owner/reason.
+- **Observable UI/API outcome:** UI-066/067/068 show owner, state, history and conflicts with observed-vs-declared evidence. A record edit never implies DNS/DHCP/device changes.
+
+### 119.12 Report create / execute / download / schedule — `DF-043`, `DF-SLA-001`, Platform_17 §8.2 · Phase 1
+- **Actor:** report author (`reports.manage`); consumer (`reports.run`/`reports.download`); the scheduler (system) acting under captured obligation scope.
+- **Authorization/preconditions:** definition scope is within the author's resource scope; execution re-evaluates the current authorization of the requesting principal (or the obligation owner) and the entitlement; the format is `PDF` or `CSV` only.
+- **Request/input:** `ReportDefinition{type, scope, period_spec, policy_version_ref?, format: PDF|CSV, branding_ref}`; `ReportRunRequest{definition_id, version, period?}`; `ReportObligation{schedule(rrule), timezone, recipients, delivery}`.
+- **Authoritative state owner:** Core Reporting (`platform.report_definition(+version)`, `report_obligation`, `report_run`, `report_artifact`). Closed measurement periods are owned by Service Assurance (immutable).
+- **State transitions:** run `QUEUED→RUNNING→SUCCEEDED|PARTIAL|FAILED|CANCELLED|EXPIRED`; artifact `GENERATING→AVAILABLE→EXPIRED|REVOKED`; obligation `ACTIVE→PAUSED→ACTIVE|CANCELLED`.
+- **Service/API handoffs:** `OP-RPT-RUN` → bounded query execution (Query Service, timeout/row/scan/concurrency caps) → render PDF (effective commercial logo) or CSV (data-only) → store artifact → `OP-RPT-ARTIFACT-GET` re-authorizes → optional delivery via Notification/email.
+- **Persistence/event effects:** run + artifact (checksum, size, format, branding_ref, expires_at) + `report.run.v1`; delivery state is separate (`QUEUED|SENT|FAILED`).
+- **Success path:** the artifact is available with a checksum; download re-checks authorization at retrieval; scheduled runs record the planned vs actual time.
+- **Failure path:** `QUERY_LIMITED`, `INSUFFICIENT_DATA`, `PERMISSION_DENIED_AT_EXECUTION`, `RENDER_FAILED`, `DELIVERY_FAILED`; a failed run produces no "successful" artifact; an insufficient-evidence report is labelled in content.
+- **Retry:** G-07 for transient query/render; the user can re-run (a new run); the scheduler retries bounded per obligation policy then records `FAILED`.
+- **Duplicate/idempotency:** `(obligation_id, planned_at)` is unique, so a schedule cannot produce two runs for the same occurrence; the user key dedupes manual runs.
+- **Timeout:** `reports.run.deadline` → `FAILED(TIMEOUT)`/`PARTIAL` with the completed sections labelled; async exports for large queries.
+- **Cancellation:** `OP-RPT-RUN-CANCEL` is honored at the next checkpoint; the partial artifact is discarded unless the run is `PARTIAL` by design.
+- **Partial success:** `PARTIAL` is labelled in the artifact and the API; contractual SLA commitments in a report remain `FOUNDER-RESERVED` unless a policy is formally approved.
+- **Restart/replay:** a RUNNING run with no live worker after lease expiry is re-queued once (idempotent by `run_id`) and then `FAILED`; a scheduler restart recomputes missed occurrences per the coalesce/skip policy.
+- **Stale-version handling:** a run snapshots the definition version; an edit during a run does not affect it; edits need `If-Match`.
+- **Compensation/rollback/cleanup:** expired/revoked artifacts are deleted per retention; access revocation blocks download even for existing artifacts; closed-period data is restated only via a new linked revision.
+- **Audit:** `report.{define|update|run|download|schedule|pause|cancel|deliver}`, including who downloaded what.
+- **Observable UI/API outcome:** `/reports`, `/studios/report`, UI-071/072 show run state, evidence quality, artifact (PDF/CSV only), delivery state and schedule history.
+
+### 119.13 Diagnostic job — `DF-027A`, Platform_17 §3.2.1/§3.3, `DF-094/095` · Phase 1
+- **Actor:** operator with `diagnostics.run`; the EDS trigger policy (system, bounded); the Sensor/Agent executor.
+- **Authorization/preconditions:** the target entity is in scope; the diagnostic type is allowlisted for the role; vantage mode `ASSIGNED|SELECTED|MULTI` is permitted; the tenant concurrency/rate budget is not exhausted; no arbitrary cross-tenant target.
+- **Request/input:** `DiagnosticJobCreate{origin{type,id}, target_entity_id, diagnostic_type, params(bounded), vantage_mode, vantage_ids?, investigation_id?, incident_id?}`.
+- **Authoritative state owner:** Core Diagnostics (`platform.diagnostic_job`, `diagnostic_job_vantage_result`).
+- **State transitions:** `QUEUED→RUNNING→SUCCEEDED|PARTIAL|FAILED|CANCELLED|TIMED_OUT|DENIED`; per vantage `PENDING→RUNNING→RESULT|ERROR|SUPPRESSED`.
+- **Service/API handoffs:** `OP-DIAG-JOB-CREATE` → authorization/budget → vantage resolution → signed bounded execution request with job/correlation/fencing → Sensor/Agent runs (isolated from routine capacity) → typed per-vantage result → Core persists → live UI update channel.
+- **Persistence/event effects:** job + per-vantage results (immutable provenance) + `diagnostic.job.v1`; analytics copy to ClickHouse where volume justifies. No secrets in results.
+- **Success path:** results arrive per vantage with evidence quality; contradictions between vantages are preserved; the job is attachable to an Investigation Session (§119.15).
+- **Failure path:** `DENIED`, `CAPACITY_LIMITED`, `TARGET_UNREACHABLE`, `CREDENTIAL_FAILURE`, `TIMEOUT`, `UNSUPPORTED_DIAGNOSTIC` — each normalized per vantage.
+- **Retry:** a retry is a new execution unless the same `Idempotency-Key` is replayed (returns the original job).
+- **Duplicate/idempotency:** a per-`(target, diagnostic_type)` cooldown/dedupe within the budget returns the in-flight job reference for the system-triggered EDS.
+- **Timeout:** `diagnostics.job.deadline` and per-vantage deadlines → `TIMED_OUT`; the late results with an expired/fenced job are rejected.
+- **Cancellation:** explicit `OP-DIAG-JOB-CANCEL` (authorized); `CANCEL_REQUESTED` until the executor confirms; partial results remain visible.
+- **Partial success:** `PARTIAL` when some vantages succeed; each vantage result is individually visible; a failed vantage never overwrites monitored history.
+- **Restart/replay:** the executor drops the job on restart (result `CANCELLED/UNKNOWN`); Core reconciles RUNNING jobs after lease expiry to `TIMED_OUT`; replayed results are deduped by `(job_id, vantage_id)`.
+- **Stale-version handling:** the job is immutable after creation except state; cancel requires current `version`.
+- **Compensation/rollback/cleanup:** diagnostics are read-only/bounded; temporary Sensor artifacts are removed at job end; no remediation is implied.
+- **Audit:** `diagnostic.job.{create|cancel|complete}` with parameters hash, vantage set and result code.
+- **Observable UI/API outcome:** the Troubleshoot drawer shows live per-vantage progress, final state and quality; `ON_DEMAND` evidence is labelled separately from monitored state.
+
+### 119.14 Live Evidence — Platform_17 §3.2.1, `REQ-UI-020` · Phase 1
+- **Actor:** an operator with `evidence.view` (read); the system (projection).
+- **Authorization/preconditions:** the entity/incident is in scope; each evidence item is re-authorized by its source domain.
+- **Request/input:** `LiveEvidenceQuery{entity_id|incident_id, evidence_types?, include_on_demand: bool, cursor, limit}`; the optional action `Verify Now` creates a Diagnostic Job (§119.13).
+- **Authoritative state owner:** it is a read model — authority stays with the monitored-observation stores and Diagnostic Job results. No second evidence store.
+- **State transitions:** none on the read model; items carry `qualification_state: FRESH|STALE|PARTIAL|CONTRADICTED|UNAVAILABLE`.
+- **Service/API handoffs:** `OP-LIVE-EVIDENCE-GET` → merges monitored evidence (metric-observations/Quality) with latest applicable `ON_DEMAND` results → returns separate sections.
+- **Persistence/event effects:** read-only; no writes.
+- **Success path:** each item shows evidence type, source/vantage, observed/result time, freshness/quality, correlation/evidence ref and qualification; monitored history is never overwritten.
+- **Failure path:** a source failure returns that item as `UNAVAILABLE` with a reason; the response is `200 PARTIAL` rather than failing the whole read.
+- **Retry:** safe GET; the client retries with backoff.
+- **Duplicate/idempotency:** a pure read; `Verify Now` follows §119.13.
+- **Timeout:** the per-source read budget exceeded → that section is `QUERY_LIMITED`.
+- **Cancellation:** query cancellation by closing the request; no server side-effects.
+- **Partial success:** the sections returned independently with per-section status.
+- **Restart/replay:** stateless.
+- **Stale-version handling:** items carry `observed_at`; the UI marks stale (never shows an old value as current).
+- **Compensation/rollback/cleanup:** none.
+- **Audit:** reads are logged at access level; `Verify Now` is audited by §119.13.
+- **Observable UI/API outcome:** the Live Evidence panel separates "monitored" and "on-demand" with freshness and contradictions; a failed on-demand test does not mark the entity DOWN.
+
+### 119.15 Investigation Session — `DF-027B`, Platform_17 §3.2.1 · Phase 1
+- **Actor:** analyst/operator with `investigation.manage`; collaborators with `investigation.view`.
+- **Authorization/preconditions:** the origin object (entity/alert/incident) is in scope; each attached evidence item is re-authorized at attach and at view.
+- **Request/input:** `InvestigationCreate{origin, title, reason, incident_id?}`; `AttachEvidence{session_id, expected_version, evidence_ref}`; `CloseSession{reason}`.
+- **Authoritative state owner:** Core (`platform.investigation_session`, `investigation_evidence_link`). Evidence payloads stay in their owning stores (references only).
+- **State transitions:** `OPEN→CLOSED`; `CLOSED→OPEN` only via authorized reopen; the evidence link `ACTIVE→REMOVED(soft)`.
+- **Service/API handoffs:** `OP-INV-SESSION-*` → attach references (diagnostic job, CLI session, query, config, topology, flow, log, change, RCA revision) → optional link to the incident → timeline.
+- **Persistence/event effects:** session + ordered link rows (with the immutable evidence snapshot hash); `investigation.session.v1`; the incident-linked session follows the protected retention lifecycle.
+- **Success path:** the ordered evidence index is preserved with source/provenance; closing records the summary/reason; the evidence is not silently retargeted to another tenant/entity.
+- **Failure path:** `EVIDENCE_NOT_AUTHORIZED`, `EVIDENCE_REF_NOT_FOUND`, `SESSION_CLOSED`, `STALE_VERSION`.
+- **Retry:** idempotent attach on `(session_id, evidence_ref_hash)`.
+- **Duplicate/idempotency:** the same evidence reference attached twice is a no-op returning the existing link.
+- **Timeout:** the request deadline only; there is no long-running state.
+- **Cancellation:** not applicable (synchronous); attached diagnostic jobs are cancelled via §119.13.
+- **Partial success:** bulk attach returns per-reference results.
+- **Restart/replay:** stateless over PostgreSQL.
+- **Stale-version handling:** `If-Match` on the session `version` for attach/close; conflicts show the interleaved changes.
+- **Compensation/rollback/cleanup:** unlink is soft (history kept); close/reopen is audited; legal-hold-linked evidence is not deleted.
+- **Audit:** `investigation.{create|attach|detach|close|reopen}`.
+- **Observable UI/API outcome:** the workbench (UI-058/057) shows the ordered evidence, provenance and the linked incident; unauthorized items appear as redacted placeholders.
+
+### 119.16 Browser CLI session — `DF-027`, BUILD-091, Platform_17 §3.2.1, Platform_18 · Phase 1 (security-gated)
+- **Actor:** an engineer with `cli.session` (+`cli.privileged` for elevated privilege).
+- **Authorization/preconditions:** entity in scope; the credential mode `STORED_PROFILE|PERSONAL|ONE_TIME` is policy-permitted; reason/ticket/MFA/JIT per the risk tier; the Sensor path is eligible; Phase 1 certification applies only when RBAC/credential brokering/audit gates pass.
+- **Request/input:** `CliSessionCreate{entity_id, requested_privilege, reason, ticket_ref?, credential_mode, one_time_secret?}`. The one-time secret is accepted only on this request, never echoed or persisted outside the broker's memory.
+- **Authoritative state owner:** the Core CLI Broker (`platform.cli_session`, metadata only).
+- **State transitions:** `REQUESTED→AUTHORIZED→CONNECTING→ACTIVE→CLOSED|TERMINATED|EXPIRED|DENIED|FAILED`.
+- **Service/API handoffs:** `OP-CLI-SESSION-CREATE` → RBAC/JIT/MFA → short-lived session token → WebSocket to the Core broker → Sensor opens a short-lived SSH session with the protected credential → the stream is relayed; the browser never receives a reusable secret.
+- **Persistence/event effects:** session metadata + command/result audit evidence per policy (recording reference per BUILD-091); `cli.session.v1` carries lifecycle metadata only (no keystroke payloads, no secrets).
+- **Success path:** the terminal is established; commands are policy-checked where required; the session ends with a close reason and evidence reference.
+- **Failure path:** `DENIED`, `MFA_REQUIRED`, `CREDENTIAL_FAILURE`, `TARGET_UNREACHABLE`, `CAPACITY_LIMITED`, `POLICY_COMMAND_BLOCKED`.
+- **Retry:** a new session is a new request; token reuse after expiry is rejected; transient connect failures retry once per the broker policy and surface the result.
+- **Duplicate/idempotency:** `Idempotency-Key` on create returns the same session metadata; a concurrent-session cap per user/target applies.
+- **Timeout:** idle and absolute session timeouts (`cli.session.idle|max`) → `EXPIRED` with the terminal closed; the connection-establish deadline → `FAILED`.
+- **Cancellation:** the user or an admin can terminate (`OP-CLI-SESSION-TERMINATE`); termination closes the Sensor session and revokes the token.
+- **Partial success:** a session that connected but recording storage failed follows the policy (`FAIL_CLOSED` for privileged tiers → terminated; otherwise flagged `RECORDING_DEGRADED`).
+- **Restart/replay:** a Core/Sensor restart terminates active sessions (`TERMINATED(RESTART)`); no auto-resume; the session metadata remains.
+- **Stale-version handling:** terminate/extend need the current session `version`.
+- **Compensation/rollback/cleanup:** on close the token is revoked, the Sensor session closed, and one-time secrets discarded; configuration changes made in the session are handled via §119.9/119.10 evidence.
+- **Audit:** `cli.session.{request|authorize|open|command|close|terminate}` with the reason/ticket, MFA outcome, target, privilege and recording ref; no secret values.
+- **Observable UI/API outcome:** the terminal pane with the session banner (target, privilege, expiry) and UI-085 history; failures show the normalized reason without leaking credentials.
+
+### 119.17 Notification lifecycle — `DF-ONB-003`, Platform_20 §6.4–6.6, BUILD-086 · Phase 1
+- **Actor:** the notification generator (system); recipients (`notifications.read`); admins (`notifications.admin`) for subscription policy.
+- **Authorization/preconditions:** the recipient's current access to the source object is re-checked at retrieval and at action; a recipient row is not an authorization grant.
+- **Request/input:** list/count `{category?, state?, cursor, limit}`; `NotificationAction{notification_id, action: READ|UNREAD|DISMISS|ACTION}`; `SubscriptionUpdate{category/type filters, resource_scope, delivery_mode: IMMEDIATE|DIGEST|MUTED, quiet_window?, expected_version}`.
+- **Authoritative state owner:** Core Notification module (`platform.user_notification`, `user_notification_recipient`, `notification_subscription`, `notification_delivery`). Alerts/Incidents are separate domain objects.
+- **State transitions:** the recipient `UNREAD→READ→DISMISSED`, with `action_state NULL→PENDING→DONE`; external delivery `QUEUED→SENT→DELIVERED|FAILED|SUPPRESSED`.
+- **Service/API handoffs:** the source event → resolve scope → eligible users/teams/subscriptions → dedupe/rate-limit → durable notification → per-user state; the external channels go through the Integration Service outbox (§119.18 pattern).
+- **Persistence/event effects:** notification + recipients in one transaction; `notification.request.v1` for external delivery; dedupe by `dedupe_key`; the recipient expansion is bounded.
+- **Success path:** the unread count updates; the deep link opens the source object only if currently authorized; read/dismiss do not change alert/incident state.
+- **Failure path:** `SOURCE_NOT_AUTHORIZED` (the item is hidden/redacted), `DELIVERY_FAILED` (external), `RATE_LIMITED` (suppressed with a counter).
+- **Retry:** external delivery retries are bounded with backoff and honor provider `Retry-After`; in-product state is never blocked by external delivery.
+- **Duplicate/idempotency:** `(tenant, dedupe_key, window)` suppresses the repeats; rediscovery and Agent-reconnect storms are bounded by the rate limit and an aggregate "N more" notification.
+- **Timeout:** the generation deadline → the notification is dropped to a `GENERATION_DEGRADED` self-monitoring counter, never blocking the source path.
+- **Cancellation:** a user can dismiss; a pending external delivery can be cancelled by the admin before `SENT`.
+- **Partial success:** the fan-out result is per recipient/channel; the failed channels are visible as delivery state.
+- **Restart/replay:** generation is replay-safe via the outbox and `dedupe_key`; the delivery worker resumes `QUEUED/SENDING` rows.
+- **Stale-version handling:** the subscription `If-Match` on `version`.
+- **Compensation/rollback/cleanup:** the expiry (`expires_at`) retires notifications; a user losing access has the notification hidden immediately on next request.
+- **Audit:** subscription changes and admin actions are audited; per-user read/dismiss is state, not audit, unless required by the approval category.
+- **Observable UI/API outcome:** the global bell with unread count, the list with category/priority, the deep link with a permission check; "generated", "queued" and "delivered" are distinct states.
+
+### 119.18 ITSM synchronization — `DF-028/029`, `DF-ACP-003/004`, Platform_17 §13 · Phase 1 (four rails) / Phase 1.5 expansion
+- **Actor:** an integration admin (`integration.manage`); the Integration Service (system); the external system (inbound).
+- **Authorization/preconditions:** connector configured with a Credential Profile reference; sandbox test passed; the mapping version is activated; the inbound tenant is server-derived from the authenticated ingress (the payload tenant is never authoritative).
+- **Request/input:** `ConnectorConfig{type, endpoint_ref, auth_ref, mapping_version}`; `OutboundRequest` is system-generated from incident/alert events; the inbound webhook/poll normalized to the Integration event envelope; `ReconcileRequest{binding_id|incident_id}`.
+- **Authoritative state owner:** Core Integration Service (`platform.integration_connector`, `integration_outbox`, `integration_inbox`, `external_binding`, `sync_conflict`). The monitored technical truth always stays with Platform.
+- **State transitions:** outbox `PENDING→SENDING→DELIVERED|RETRY|DEAD`; inbox `RECEIVED→PROCESSED|REJECTED|DEAD`; binding `ACTIVE|CONFLICT|BROKEN`; connector `DRAFT→SANDBOX_PASSED→ENABLED→DEGRADED|DISABLED`.
+- **Service/API handoffs:** incident event → transactional outbox → delivery with an idempotent external operation key → the external reference stored in `external_binding`; inbound events → authenticate/verify → dedupe → apply under field-authority rules → timeline.
+- **Persistence/event effects:** the outbox row is written in the same transaction as the source event; `integration.outbound.v1|integration.inbound.v1`; external references and the ETag/version are kept in the binding; conflicts in `sync_conflict`.
+- **Success path:** the external incident is created/updated once; the external state is mirrored as sync metadata; external closure/CI disappearance never overwrites the monitoring state or deletes the entity.
+- **Failure path:** `AUTH_EXPIRED` (connector `DEGRADED`, delivery paused), `RATE_LIMITED`, `MAPPING_CONFLICT`, `EXTERNAL_5XX`; after the attempt bound → `DEAD` (dead-letter, visible, replayable).
+- **Retry:** exponential backoff + jitter with provider `Retry-After`; replay of `DEAD` items is an authorized, audited, idempotent action.
+- **Duplicate/idempotency:** at-least-once outbound with a stable operation hash `(tenant, connector, object_ref, mapping_version, event_seq)` that the external adapter uses as its idempotency reference; inbound `(tenant, connector, external_event_id)` unique; exactly-once is not claimed.
+- **Timeout:** the per-call deadline → `RETRY`; the connector health reflects the sustained timeouts.
+- **Cancellation:** a pending outbound item may be cancelled by the admin before `SENDING`; a connector disable stops new deliveries but does not delete the queued items.
+- **Partial success:** a multi-object sync reports per-object status; a failing field mapping isolates to that object.
+- **Restart/replay:** the outbox/inbox are durable; workers resume `SENDING` rows after a lease timeout (the idempotent external key prevents duplicate creation).
+- **Stale-version handling:** the external ETag/version is checked before update; a mismatch → `sync_conflict` for reconciliation; there is no last-write-wins.
+- **Compensation/rollback/cleanup:** a wrong external update is corrected by a new reconcile operation; the external deletions are never issued by Platform unless the mapping policy explicitly allows and it is audited; free-text external content cannot trigger privileged commands.
+- **Audit:** `integration.connector.*`, `integration.outbound.*`, `integration.inbound.*`, `integration.reconcile.*`.
+- **Observable UI/API outcome:** UI-080/081 show connector health, queue depth/age, DEAD items, conflicts and per-incident sync state, separate from the incident state.
+
+### 119.19 Retention / storage-protection action — `DF-032/034/035/036/063`, Platform_11 §9–11, Platform_05 §37 · Phase 1
+- **Actor:** a storage admin (`storage.manage`); the system for the non-disableable 80% emergency protection; a legal-hold officer (`legalhold.manage`).
+- **Authorization/preconditions:** volume/data-class scope in the actor's authorization; the missing inputs are `UNKNOWN` (no action based on invented values); a legal hold blocks purge of the protected data.
+- **Request/input:** `RetentionPolicyRevision{data_class, requested_retention, expected_version, reason}` with the preview token; `StorageActionRequest{kind: APPLY_RETENTION|PURGE_RECLAIMABLE|EMERGENCY_ACKNOWLEDGE, scope}`.
+- **Authoritative state owner:** Core Storage Lifecycle (`platform.retention_policy_revision`, `platform.storage_action`, `platform.platform_operation`). Measurements are exact integer bytes with `OBSERVED|ESTIMATED|UNKNOWN|PROJECTED`.
+- **State transitions:** the revision `DRAFT→PREVIEWED→ACTIVE|REJECTED`; the action `REQUESTED→RUNNING→COMPLETED|PARTIAL|FAILED|CANCELLED`; the storage state `NORMAL→PLANNING_70→EMERGENCY_80→RECOVERED` (the 80% protection cannot be disabled).
+- **Service/API handoffs:** the preview computes the canonical model (headroom/shortfall/protected/reclaimable) → the version-bound activation → the housekeeping job (BUILD-097/132 owner path) → purge in the data-class order (the emergency purge does not treat all tables equally) → notification (§119.17).
+- **Persistence/event effects:** revision + action rows + `platform.operation.v1`; the audit of every purge decision (class, volume, bytes, reason); the emergency state recorded with its evidence.
+- **Success path:** the policy activates only if the preview version matches; the purge removes only eligible reclaimable data; protected/legal-hold data is untouched; the result states bytes reclaimed.
+- **Failure path:** `STALE_PREVIEW` (concurrent change), `PROTECTED_DATA_CONFLICT`, `INSUFFICIENT_INPUT_UNKNOWN`, `PURGE_FAILED`; the failure never enables purge of protected data.
+- **Retry:** the purge is idempotent per `(action_id, partition/segment)`; an automatic retry is bounded.
+- **Duplicate/idempotency:** the key + a single active action per `(volume, data_class)`.
+- **Timeout:** the action deadline → `PARTIAL` with the remaining work listed; the emergency protection continues independently.
+- **Cancellation:** the cancel is honored at the next segment boundary; the completed segments are not restored.
+- **Partial success:** per-class/partition results; the shortfall remaining is reported.
+- **Restart/replay:** the action resumes from the persisted segment cursor; the purge of a segment is atomic and idempotent.
+- **Stale-version handling:** the activation requires the preview's `policy_version` and measurement snapshot; changed inputs → `STALE_PREVIEW`.
+- **Compensation/rollback/cleanup:** the purged data is not restorable except via backup/restore (§119.20); the policy revision can be reverted (a new revision); no universal retention/SLA promise (`FOUNDER-RESERVED` for the commitments).
+- **Audit:** `storage.retention.{preview|activate|reject}`, `storage.purge.{start|segment|complete|fail}`, `storage.emergency.{enter|exit}`.
+- **Observable UI/API outcome:** UI-093 `/storage-retention` shows measured/estimated/unknown values, the headroom/shortfall, protected data and the action results. A notification is "generated", not proven delivered.
+
+### 119.20 Backup / restore — `DF-047/048`, BUILD-125, Platform_16 · Phase 1 (standalone profile)
+- **Actor:** a platform operator (`platform.backup`/`platform.restore`); the scheduler for backups; an approver for restore.
+- **Authorization/preconditions:** the exact approved artifact/profile; the preflight passes (space, compatibility, integrity); the restore requires a maintenance state and a second approver per policy; HA ≠ DR (the Phase-1 DR profile is redeploy/endpoint redirection).
+- **Request/input:** `BackupRequest{profile, components: PG|CH|CONFIG|SECRETS_REFS|PACKS, mode}`; `RestoreRequest{artifact_ref, target_profile, point_in_time?, reason}`.
+- **Authoritative state owner:** Core Platform Operations (`platform.platform_operation`, `platform_operation_step`) with the artifact manifest.
+- **State transitions:** the operation `REQUESTED→PREFLIGHT→RUNNING→VERIFYING→COMPLETED|FAILED|CANCELLED`; the step-level `PENDING→OK|FAILED`.
+- **Service/API handoffs:** the preflight → per-component backup with an integrity manifest (checksums) → the artifact registered; the restore → preflight → stop writers → restore → data integrity verification → service health verification → resume.
+- **Persistence/event effects:** operation + step rows + the manifest; `platform.operation.v1`; the secrets are never exported in plaintext (references/envelope per BUILD-069).
+- **Success path:** the backup manifest verifies; the restore drill proves the restored data/service health before the operation is `COMPLETED`.
+- **Failure path:** `PREFLIGHT_FAILED`, `INTEGRITY_MISMATCH`, `RESTORE_FAILED` → the service remains in the maintenance state with the evidence and the governed recovery runbook; no half-restored "success".
+- **Retry:** the steps are idempotent; the retry resumes from the last verified step; a failed restore is re-run only after the operator review.
+- **Duplicate/idempotency:** a single active backup/restore per scope; the key dedupes requests.
+- **Timeout:** the step deadlines → `FAILED(TIMEOUT)` with the rollback-to-prior-state guidance; there is no automatic destructive retry.
+- **Cancellation:** a backup is cancellable; a restore is cancellable only before the destructive step; after that it proceeds or fails to the maintenance state.
+- **Partial success:** per-component outcomes are shown; a backup missing a component is `PARTIAL` and is not usable as a full restore point.
+- **Restart/replay:** the operation state is persisted outside the component being restored (or recreated from the manifest); the resume is by step.
+- **Stale-version handling:** the restore verifies that the artifact's schema/app version is compatible (`UPGRADE_ORIGIN` matrix); it refuses incompatible artifacts.
+- **Compensation/rollback/cleanup:** the pre-restore snapshot is retained until verification; the temporary files are cleaned; the exact RPO/RTO claims are not promised (`DF-048` architecture-level).
+- **Audit:** `platform.backup.*`, `platform.restore.*` with the artifact id/hash, the approvers and the verification results.
+- **Observable UI/API outcome:** `/platform-operations` and UI-095 show operation state, steps, verification result and the artifact inventory; "restored" is shown only after verification.
+
+### 119.21 Upgrade / rollback — `DF-049/050/093`, BUILD-127, Platform_16 · Phase 1 (standalone) / Phase 1.5 (two-Core standby-first)
+- **Actor:** a platform operator (`platform.upgrade`) with an approver; the package manager (executes natively).
+- **Authorization/preconditions:** the signed artifact; the preflight (compatibility matrix, backup verified within policy, space, Sensor/Agent version compatibility); the target is not in an active failover. Phase 1.5 adds the standby-first sequence.
+- **Request/input:** `UpgradeRequest{target_version, artifact_ref, scope: CORE|SENSOR|AGENT, strategy: STANDALONE|CANARY|STANDBY_FIRST(1.5), reason}`; `RollbackRequest{operation_id}`.
+- **Authoritative state owner:** Core Platform Operations (`platform_operation kind=UPGRADE|ROLLBACK`); the packaging layer owns the install transaction.
+- **State transitions:** `REQUESTED→PREFLIGHT→BACKUP_VERIFIED→UPGRADING→VERIFYING→COMPLETED|FAILED→ROLLING_BACK→ROLLED_BACK|ROLLBACK_FAILED|ROLLBACK_UNSUPPORTED`.
+- **Service/API handoffs:** the preflight → the verified backup (§119.20) → the migration plan (MIG-PLAN, forward-only/one-way marking) → package upgrade → service health/readiness → compatibility confirm; the Sensor/Agent canary per DF-050.
+- **Persistence/event effects:** operation + steps; the schema migration history (`schema_history`); `platform.operation.v1`; version reporting.
+- **Success path:** the services restart supervised and ready; the migrations applied once; the compatibility matrix confirms; the monitoring continues (Sensors buffer within the 80% policy).
+- **Failure path:** `PREFLIGHT_FAILED`, `MIGRATION_FAILED`, `HEALTH_VERIFY_FAILED` → rollback if supported; **irreversible (one-way) migrations** record `ROLLBACK_UNSUPPORTED` and require the restore path (§119.20) — never a claimed rollback.
+- **Retry:** the retry resumes idempotent steps; the migrations are idempotent where practical; a failed forward migration is never re-run blindly.
+- **Duplicate/idempotency:** a single active upgrade per scope; the key dedupes.
+- **Timeout:** the step deadline → `FAILED` with the evidence; the health-verify timeout triggers the rollback decision, not an assumed success.
+- **Cancellation:** only before `UPGRADING`; afterwards it proceeds to completion or rollback.
+- **Partial success:** the mixed-version Sensor/Agent fleet is a supported, reported state per the compatibility matrix; the Core partial upgrade is not a valid end state.
+- **Restart/replay:** the operation state persists across the service restarts; the package manager's transaction state is the source for the install step.
+- **Stale-version handling:** the target version/artifact hash is pinned at request time; the changed artifact → `STALE_ARTIFACT`.
+- **Compensation/rollback/cleanup:** the rollback = previous package + the restore of the pre-upgrade backup where the schema moved (one-way); the leftover artifacts cleaned; the Phase 1.5 standby-first never self-promotes the Standby or bypasses fencing.
+- **Audit:** `platform.upgrade.*`, `platform.rollback.*` with the versions, artifact hash, approvers, migration IDs.
+- **Observable UI/API outcome:** `/platform-operations` and UI-095 show the step state, the versions, the compatibility, and `ROLLBACK_UNSUPPORTED` where applicable.
+
+### 119.22 Licence expiry / grace (`EXPIRED_GRACE_15D`) — `DF-040/041`, BUILD-096, Platform_01 §34 · Phase 1
+- **Actor:** the licence state evaluator (system, UTC clock); a licence admin (`licence.manage`) for load/renew/extend.
+- **Authorization/preconditions:** a signed licence artifact with a valid signature; the evaluation uses the absolute signed expiry in UTC (deployment-timezone-independent); the display uses the user's timezone. `FOUNDER-RESERVED`: commercial quantities, SKUs, pricing — not stated or invented here.
+- **Request/input:** `LicenceLoad{artifact}`; `LicenceExtend{until, reason}` (a manual extension, `licence.extend`).
+- **Authoritative state owner:** Core Licensing (`platform.licence_entitlement`, `licence_state_history`, `licence_usage_snapshot`).
+- **State transitions:** `VALID→EXPIRING_30D→EXPIRING_7D_BANNER→EXPIRED_GRACE_15D→POLLING_SUSPENDED`. The T-7 banner is 7 days **before** expiry; the 15-day grace is **after** expiry. Renewal/extension returns to `VALID|EXPIRING_*` per the new expiry.
+- **Service/API handoffs:** evaluator tick → the state computed from `expires_at` and the UTC now → `licence.state.v1` → the scheduler (BUILD-021) polling decision → UI banner/Notification Center → audit.
+- **Persistence/event effects:** the state-history rows (entered_at, derived_from_expiry); events; the usage snapshots for the capacity visibility.
+- **Success path:** polling **continues** during `EXPIRED_GRACE_15D`; after the grace ends, **new/renewed monitoring jobs stop** (`POLLING_SUSPENDED`) unless the licence is manually extended/renewed; historical data stays accessible; **no licence-expiry data deletion**; no data corruption.
+- **Failure path:** an invalid/unsigned artifact → `LICENCE_INVALID` with the previous state retained; a clock anomaly (backward jump) → the state is not regressed silently and the anomaly is flagged for review; the security controls are never bypassed on expiry.
+- **Retry:** the evaluator is idempotent; a repeated load of the same artifact is a no-op.
+- **Duplicate/idempotency:** the artifact hash is unique per tenant/scope; the state history is deduped by `(state, expiry_ref)`.
+- **Timeout:** not applicable; the evaluation is a bounded local computation.
+- **Cancellation:** an extension is revocable only by a new authorized licence action; a state transition in progress is atomic.
+- **Partial success:** the module-level entitlement (licensed vs used) may degrade per module; the per-module state is visible; the unlicensed module returns `NOT_LICENSED` (the UI state) without data loss.
+- **Restart/replay:** the state is derived from persisted `expires_at` and UTC at startup; the missed ticks are not required for the correctness.
+- **Stale-version handling:** `If-Match` on `licence_entitlement.version` for extend/renew.
+- **Compensation/rollback/cleanup:** the renewal after `POLLING_SUSPENDED` resumes polling with no back-filled data claims (DF-041); the telemetry gap is shown as a gap, not zero.
+- **Audit:** `licence.{load|state_change|extend|renew|invalid}`.
+- **Observable UI/API outcome:** the UI-094 `/usage-licensing` and the global banner (T-7 distinct from the post-expiry grace) show the state, remaining days from the Core UTC, licensed vs used and forecast; the polling-suspended state is explicit.

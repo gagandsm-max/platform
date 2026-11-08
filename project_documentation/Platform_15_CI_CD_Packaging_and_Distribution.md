@@ -197,8 +197,13 @@ Each package/release record must name source SHA/tree, artifact hash, target OS/
 
 ### Signed packages, SBOM and supply-chain security — `REQ-SEC-004`
 
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-SEC-004` | Signed packages/updates, SBOM, CVE/license/secret scan, secret redaction |
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Release artifacts SHALL be signed, SBOM-covered and scanned for CVE/licence/secret issues before promotion. Secret redaction applies to support bundles, logs and release evidence. Documentation of the gate is not certification that every gate has already passed on a given SHA.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-SEC-004` | Platform SHALL enforce: Signed packages/updates, SBOM, CVE/license/secret scan, secret redaction Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
 
 Release artifacts SHALL be signed, SBOM-covered and scanned for CVE/licence/secret issues before promotion. Secret redaction applies to support bundles, logs and release evidence. Documentation of the gate is not certification that every gate has already passed on a given SHA.

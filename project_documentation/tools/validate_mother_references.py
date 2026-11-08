@@ -150,6 +150,22 @@ OWNERSHIP_INDEX_HEADING_RE = re.compile(
     r"^#{1,6}\s+RTM formal-ID ownership index\b.*$",
     re.I | re.M,
 )
+# Front-matter / family catalogue markers that only duplicate RTM one-liners.
+RTM_SECTION_FORMAL_START_RE = re.compile(
+    r"<!--\s*RTM SECTION FORMAL REQUIREMENTS:\s*([^>]+?)\s*-->",
+    re.I,
+)
+RTM_SECTION_FORMAL_END_RE = re.compile(
+    r"<!--\s*END RTM SECTION FORMAL REQUIREMENTS:\s*([^>]+?)\s*-->",
+    re.I,
+)
+NON_NORMATIVE_SECTION_HEADING_RE = re.compile(
+    r"^#{1,6}\s+.*\b("
+    r"non-normative|ownership index|summary[- ]only|catalogue only|"
+    r"formal-id ownership|rtm section formal requirements"
+    r")\b.*$",
+    re.I | re.M,
+)
 # Trailing/footer blocks that only list identifiers without requirement prose.
 BARE_ID_BULLET_RE = re.compile(
     r"^\s*[-*]\s+`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*$",
@@ -157,6 +173,25 @@ BARE_ID_BULLET_RE = re.compile(
 )
 BARE_ID_TABLE_ROW_RE = re.compile(
     r"^\|\s*`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*\|\s*$",
+    re.M,
+)
+# Two-column summary catalogues that merely restatement RTM one-liners.
+SUMMARY_REQ_TABLE_HEADER_RE = re.compile(
+    r"^\|\s*Requirement ID\s*\|\s*Normative requirement\s*\|\s*$",
+    re.I | re.M,
+)
+# Extract numbered section references from Platform_08 locators.
+# Require an explicit section marker (§ / Section / leading N. title form).
+# Do not treat issue numbers, versions (v3.3) or ID suffixes (-001) as sections.
+LOCATOR_SECTION_RE = re.compile(
+    r"(?:§|Section\s+|sec(?:tion)?\s+)(\d+(?:\.\d+){0,4})\b"
+    r"|^\s*(\d+(?:\.\d+){0,4})\.\s+\S"
+    r"|(?<![A-Za-z0-9._#])(\d+(?:\.\d+){1,4})\s+[A-Za-z]",
+    re.I | re.M,
+)
+MARKDOWN_NUMBERED_HEADING_RE = re.compile(
+    # Accept "## 3. Title" and "### 3.1 Title"; reject "### 3.1A" collapsing to "3".
+    r"^(#{2,6})\s+(\d+(?:\.\d+)*)(?!\.\d)(?![A-Za-z0-9])[^\n]*$",
     re.M,
 )
 
@@ -199,24 +234,94 @@ def strip_all_marker_blocks(text: str, start: str, end: str) -> str:
     return text
 
 
+def strip_rtm_section_formal_requirement_blocks(text: str) -> str:
+    """Remove <!-- RTM SECTION FORMAL REQUIREMENTS --> catalogue blocks.
+
+    These markers historically hosted two-column summary tables that duplicated
+    RTM one-liners. They are non-normative ownership evidence when used alone.
+    """
+    while True:
+        start = RTM_SECTION_FORMAL_START_RE.search(text)
+        if not start:
+            break
+        end = RTM_SECTION_FORMAL_END_RE.search(text, start.end())
+        if not end:
+            # Unclosed marker: drop from start marker to EOF so it cannot prove
+            # ownership.
+            text = text[: start.start()]
+            break
+        text = text[: start.start()] + text[end.end() :]
+    return text
+
+
+def strip_non_normative_heading_sections(text: str) -> str:
+    """Drop sections whose heading declares index/summary/non-normative ownership."""
+    if not NON_NORMATIVE_SECTION_HEADING_RE.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in NON_NORMATIVE_SECTION_HEADING_RE.finditer(text):
+        parts.append(text[idx : match.start()])
+        rest = text[match.end() :]
+        stop = re.search(r"\n#{1,6}\s+\S", rest)
+        idx = match.end() + (stop.start() if stop else len(rest))
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
+def strip_two_column_summary_req_tables(text: str) -> str:
+    """Remove two-column Requirement ID | Normative requirement summary catalogues.
+
+    These tables historically duplicated RTM one-liners and must not prove
+    ownership by themselves. Genuinely normative multi-column contract tables
+    and prose sections are retained. Semantic sufficiency of retained prose
+    remains an independent-audit concern.
+    """
+    if not SUMMARY_REQ_TABLE_HEADER_RE.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in SUMMARY_REQ_TABLE_HEADER_RE.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        parts.append(text[idx:line_start])
+        cursor = match.end()
+        if cursor < len(text) and text[cursor] == "\n":
+            cursor += 1
+        # Consume separator and subsequent table rows only.
+        while cursor < len(text):
+            eol = text.find("\n", cursor)
+            line = text[cursor:] if eol < 0 else text[cursor:eol]
+            if line.startswith("|"):
+                cursor = len(text) if eol < 0 else eol + 1
+                continue
+            break
+        idx = cursor
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
 def strip_ownership_index_placeholders(text: str) -> str:
     """Remove index-only ownership placeholders that must not prove RTM ownership.
 
-    Structural ownership indexes, bare identifier bullets and identifier-only
-    table rows are non-normative. A static validator cannot certify semantic
-    correctness of remaining prose; independent line-by-line review remains
-    mandatory.
+    Structural ownership indexes, RTM SECTION FORMAL REQUIREMENTS catalogues,
+    bare identifier bullets/rows, two-column summary catalogues and labelled
+    non-normative/summary sections are non-normative. Ownership must still bind
+    through an exact Platform_08 section locator into remaining substantive
+    owner text. A static validator cannot certify semantic completeness of that
+    prose; independent review remains mandatory.
     """
     text = strip_all_marker_blocks(text, OWNERSHIP_INDEX_START, OWNERSHIP_INDEX_END)
+    text = strip_rtm_section_formal_requirement_blocks(text)
+    text = strip_non_normative_heading_sections(text)
+    text = strip_two_column_summary_req_tables(text)
     # Drop the ownership-index heading and following bare-ID list until the next
-    # heading or horizontal rule, when present without markers.
+    # heading, when present without markers.
     if OWNERSHIP_INDEX_HEADING_RE.search(text):
         parts: list[str] = []
         idx = 0
         for match in OWNERSHIP_INDEX_HEADING_RE.finditer(text):
             parts.append(text[idx : match.start()])
             rest = text[match.end() :]
-            # Consume until next markdown heading or EOF.
             stop = re.search(r"\n#{1,6}\s+\S", rest)
             idx_end = match.end() + (stop.start() if stop else len(rest))
             idx = idx_end
@@ -226,6 +331,71 @@ def strip_ownership_index_placeholders(text: str) -> str:
     text = BARE_ID_BULLET_RE.sub("", text)
     text = BARE_ID_TABLE_ROW_RE.sub("", text)
     return text
+
+
+def extract_locator_section_ids(locator: str) -> list[str]:
+    """Return ordered unique numbered section ids referenced by a locator."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in LOCATOR_SECTION_RE.finditer(locator or ""):
+        sid = next((g for g in match.groups() if g), None)
+        if sid and sid not in seen:
+            seen.add(sid)
+            found.append(sid)
+    return found
+
+
+def section_body_map(text: str) -> dict[str, str]:
+    """Map numbered heading ids to body text until the next same/higher heading."""
+    matches = list(MARKDOWN_NUMBERED_HEADING_RE.finditer(text))
+    bodies: dict[str, str] = {}
+    for i, match in enumerate(matches):
+        level = len(match.group(1))
+        sid = match.group(2)
+        start = match.end()
+        end = len(text)
+        for nxt in matches[i + 1 :]:
+            if len(nxt.group(1)) <= level:
+                end = nxt.start()
+                break
+        bodies[sid] = text[start:end]
+    return bodies
+
+
+def locator_binds_id(locator: str, rid: str, owner_text: str) -> tuple[bool, str]:
+    """Structural check: locator names a real section and the ID appears there.
+
+    Returns (ok, reason). Empty/coarse locators without numbered sections fail.
+    """
+    section_ids = extract_locator_section_ids(locator)
+    if not section_ids:
+        return False, "locator lacks numbered section reference"
+    bodies = section_body_map(owner_text)
+    # Also allow the heading line itself to contain the ID.
+    heading_only = {
+        m.group(2): m.group(0)
+        for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(owner_text)
+    }
+    matched_existing = False
+    for sid in section_ids:
+        if sid not in bodies and sid not in heading_only:
+            continue
+        matched_existing = True
+        chunk = heading_only.get(sid, "") + "\n" + bodies.get(sid, "")
+        if rid.startswith("REQ-"):
+            present = rid in REQ_ID_RE.findall(chunk)
+        elif rid.startswith("PRD-"):
+            present = rid in PRD_ID_RE.findall(chunk)
+        else:
+            present = rid in chunk
+        if present:
+            return True, ""
+    if not matched_existing:
+        return (
+            False,
+            "locator section not found in owner: " + ", ".join(section_ids),
+        )
+    return False, "formal ID absent from locator section(s)"
 
 
 def clean_cell(value: str) -> str:
@@ -683,6 +853,7 @@ class MotherReferenceValidator:
         kind: str,
         paths: dict[str, Path],
     ) -> None:
+        owner_text_cache: dict[str, str | None] = {}
         for row in rows:
             rid = row["id"]
             owner = row["owner"]
@@ -702,11 +873,28 @@ class MotherReferenceValidator:
             if not owner_path.is_file():
                 self.fail(f"{kind} {rid}: owner file does not exist: {owner}")
                 continue
-            owner_text = self._owner_text_without_primary_registry(owner, paths, kind)
+            if owner not in owner_text_cache:
+                owner_text_cache[owner] = self._owner_text_without_primary_registry(
+                    owner, paths, kind
+                )
+            owner_text = owner_text_cache[owner]
             if owner_text is None or not self._id_occurs_in_text(rid, owner_text):
                 self.fail(
                     f"{kind} {rid}: formal ID absent from declared owner "
                     f"outside primary registry: {owner}"
+                )
+                continue
+            # Structural semantic-ownership gate: Platform_08 locator must name
+            # an exact numbered owner section that contains the ID after
+            # non-normative catalogues are stripped.
+            if not locator:
+                continue
+            ok, reason = locator_binds_id(locator, rid, owner_text)
+            if not ok:
+                self.fail(
+                    f"{kind} {rid}: source locator does not bind ID to a "
+                    f"substantive owner section ({reason}): locator={locator!r} "
+                    f"owner={owner}"
                 )
 
     def validate_global_requirements(

@@ -1,30 +1,5 @@
 # Platform — Discovery, Onboarding, Identity & Notification Master
 
-<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-PRV -->
-#### Formal requirements — `REQ-PRV` family
-
-Governing locator: Discovery / onboarding / identity governance sections. Rows bind formal IDs to already-approved BASE RTM requirement text; they do not invent scope, APIs, architecture or certification.
-
-| Requirement ID | Normative requirement |
-|---|---|
-| `REQ-PRV-001` | UI-only customer provisioning: individual, CSV/XLSX bulk and auto discovery |
-| `REQ-PRV-002` | Optional user display name and description; auto-derive when blank |
-| `REQ-PRV-003` | Do not use IP alone as canonical identity |
-| `REQ-PRV-004` | Credential Profiles; avoid secrets in CSV |
-| `REQ-PRV-005` | CSV/XLSX staging, normalization, duplicate/error/warning classification |
-| `REQ-PRV-006` | Sensitive-field whitespace never silently modified |
-| `REQ-PRV-007` | Preflight Diagnostic Engine with actionable failure evidence/remediation |
-| `REQ-PRV-008` | Diagnostics execute from actual selected Sensor |
-| `REQ-PRV-009` | Required firewall/connectivity matrix export |
-| `REQ-PRV-010` | Discovery review queue before licensing/monitoring |
-| `REQ-PRV-011` | IP/CIDR/seed/site/IPAM scope + exclusions |
-| `REQ-PRV-012` | Provisioning capacity simulation before activation |
-| `REQ-PRV-013` | Provisioning jobs support Fix & Retry |
-| `REQ-PRV-014` | Environment/Deployment Readiness Test |
-| `REQ-PRV-015` | Asset lifecycle/reconciliation and no automatic deletion |
-
-<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-PRV -->
-
 **Document ID:** PLATFORM-ONBOARDING-001
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Discovery / Onboarding / Identity / Notification**
@@ -58,6 +33,36 @@ Logical authority in this document is:
 This document does **not** select a new OSS dependency, database, mandatory microservice, commercial SKU, pricing model or licensing quantity.
 
 ---
+
+
+### 1.0 Normative requirements — `REQ-PRV` family
+
+
+This subsection is the **primary normative owner contract** for the `REQ-PRV` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
+
+**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
+
+**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
+
+| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
+|---|---|---|---|
+| `REQ-PRV-001` | Platform SHALL enforce: UI-only customer provisioning: individual, CSV/XLSX bulk and auto discovery. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-002` | Platform SHALL enforce: Optional user display name and description; auto-derive when blank. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-003` | Platform SHALL enforce: Do not use IP alone as canonical identity. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-004` | Platform SHALL enforce: Credential Profiles; avoid secrets in CSV. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-005` | Platform SHALL enforce: CSV/XLSX staging, normalization, duplicate/error/warning classification. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-006` | Platform SHALL enforce: Sensitive-field whitespace never silently modified. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-007` | Platform SHALL enforce: Preflight Diagnostic Engine with actionable failure evidence/remediation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-008` | Platform SHALL enforce: Diagnostics execute from actual selected Sensor. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-009` | Platform SHALL enforce: Required firewall/connectivity matrix export. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-010` | Platform SHALL enforce: Discovery review queue before licensing/monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-011` | Platform SHALL enforce: IP/CIDR/seed/site/IPAM scope + exclusions. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-012` | Platform SHALL enforce: Provisioning capacity simulation before activation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-013` | Platform SHALL enforce: Provisioning jobs support Fix & Retry. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-014` | Platform SHALL enforce: Environment/Deployment Readiness Test. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+| `REQ-PRV-015` | Platform SHALL enforce: Asset lifecycle/reconciliation and no automatic deletion. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
+
+
 
 ## 2. Non-negotiable principles
 
@@ -603,7 +608,7 @@ At each admitted occurrence, current Core authority and generation gate bounded 
 
 Pause creates no catch-up queue; resume previews the next future occurrence. Edit/cancel advances generation, prevents queued obsolete work and visibly tracks best-effort in-flight cancellation. An old-generation late result cannot update current schedule authority or trigger trusted auto-approval; preserve it only as labelled auditable evidence under §3.1A. Revision conflict, expired credential, no eligible Sensor, capacity refusal and notification delivery failure are actionable outcomes; retries must not create duplicate schedules or silently widen scope.
 
-**Source boundary at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`:** `DiscoveryOccurrenceCalculator` provides pure calendar calculation. `DiscoveryController`/`DiscoveryDtos` provide request create/read/cancel and candidate/evidence reads, without schedule CRUD/recurrence fields. This profile is specified behavior, not proof of a durable scheduling API, dispatch integration or finished UI. The exact persistence/API/action contracts remain required implementation-entry bindings; do not invent supported endpoint paths.
+**Source boundary (current main `92f0fb37805c234be2869619abcc01ad26b5f30b`; discovery schedule API still absent as first observed at historical `36e1513f`):** `DiscoveryOccurrenceCalculator` provides pure calendar calculation. `DiscoveryController`/`DiscoveryDtos` provide request create/read/cancel and candidate/evidence reads, without schedule CRUD/recurrence fields. This profile is specified behavior, not proof of a durable scheduling API, dispatch integration or finished UI. The exact persistence/API/action contracts remain required implementation-entry bindings; do not invent supported endpoint paths.
 
 ---
 
