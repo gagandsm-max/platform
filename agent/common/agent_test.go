@@ -52,7 +52,7 @@ func TestAgentServiceLifecycle(t *testing.T) {
 	}
 
 	stub := client.NewUnavailableTransport("SENSOR_UNAVAILABLE_TEST")
-	svc, err := NewAgentService(cfg, ident, stub, nil)
+	svc, err := NewAgentService(cfg, ident, stub, nil, withCollectorRegistryForTest(singleCollectorRegistry(t, &integrityLifecycleCollector{}, cfg.CollectionInterval, cfg.CollectionTimeout)))
 	if err != nil {
 		t.Fatalf("failed to construct AgentService: %v", err)
 	}

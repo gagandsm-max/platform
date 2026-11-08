@@ -690,7 +690,7 @@ func TestSchedulerEnqueueFailureAccountingContinues(t *testing.T) {
 	reg := mustRegistry(t, collector.Registration{
 		Collector: ok, Enabled: true, Interval: 30 * time.Millisecond, Timeout: time.Second,
 	})
-	enq := &mockEnqueuer{err: errors.New("disk full")}
+	enq := &mockEnqueuer{err: queue.ErrQueueFull}
 	sched, err := NewScheduler(testIdent(), reg, enq, 1, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1245,11 +1245,11 @@ func TestPendingMergeSameCycleBeforeFlush(t *testing.T) {
 }
 
 type blockingEnqueuer struct {
-	mu       sync.Mutex
-	records  [][]byte
-	entered  chan struct{}
-	release  chan struct{}
-	calls    atomic.Int32
+	mu      sync.Mutex
+	records [][]byte
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int32
 }
 
 func (b *blockingEnqueuer) Enqueue(payload []byte) (*queue.Record, error) {
@@ -1349,16 +1349,23 @@ func TestPendingOverflowExplicitAndBounded(t *testing.T) {
 	}
 
 	sched.flushPending()
-	if enq.count() != 1 {
-		t.Fatalf("expected one durable batch, got %d", enq.count())
+	if enq.count() < 1 {
+		t.Fatal("expected durable fragments")
 	}
 	var batch telemetry.CollectionBatch
 	enq.mu.Lock()
-	err = json.Unmarshal(enq.records[0], &batch)
-	enq.mu.Unlock()
-	if err != nil {
-		t.Fatal(err)
+	for _, payload := range enq.records {
+		if len(payload) > defaultRecordBytes {
+			t.Fatalf("oversized fragment %d", len(payload))
+		}
+		var fragment telemetry.CollectionBatch
+		if err := json.Unmarshal(payload, &fragment); err != nil {
+			t.Fatal(err)
+		}
+		batch.Observations = append(batch.Observations, fragment.Observations...)
+		batch.Errors = append(batch.Errors, fragment.Errors...)
 	}
+	enq.mu.Unlock()
 	sawOverflow := false
 	for _, e := range batch.Errors {
 		if e.Code == "PENDING_OVERFLOW" && e.Collector == "cpu" {

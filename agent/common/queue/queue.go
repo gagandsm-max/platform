@@ -56,6 +56,7 @@ const (
 	syncPhaseMetaFile       = "meta-file"
 	syncPhaseMetaDir        = "meta-dir"
 	syncPhaseActiveCommit   = "active-commit"
+	syncPhaseEnqueueDir     = "enqueue-dir"
 )
 
 // syncHookFunc is a per-queue test seam for directory and file fsync phases. Production
@@ -86,6 +87,66 @@ type Record struct {
 	CreatedAt time.Time `json:"createdAt"`
 	Checksum  string    `json:"checksum"`
 	Payload   []byte    `json:"payload"`
+}
+
+// AdmissionDisposition describes this Enqueue call, separately from whether the
+// queue requires recovery. A non-nil error is never a receipt of successful delivery.
+type AdmissionDisposition string
+
+const (
+	NotAdmitted        AdmissionDisposition = "NOT_ADMITTED"
+	DurablyAdmitted    AdmissionDisposition = "DURABLY_ADMITTED"
+	AdmissionUncertain AdmissionDisposition = "UNCERTAIN"
+)
+
+// AdmissionError preserves errors.Is/As while exposing per-call custody. In
+// particular ErrMetaUncertain can occur either before or after this record exists.
+type AdmissionError struct {
+	Disposition      AdmissionDisposition
+	RecoveryRequired bool
+	Err              error
+}
+
+func (e *AdmissionError) Error() string { return e.Err.Error() }
+func (e *AdmissionError) Unwrap() error { return e.Err }
+
+func AdmissionOutcome(err error) (AdmissionDisposition, bool) {
+	if err == nil {
+		return DurablyAdmitted, false
+	}
+	var e *AdmissionError
+	if errors.As(err, &e) {
+		return e.Disposition, e.RecoveryRequired
+	}
+	// Compatibility for existing Enqueuer implementations: only explicit
+	// pre-admission sentinels are safe to retry. Unknown errors fail closed.
+	if errors.Is(err, ErrQueueFull) || errors.Is(err, ErrRecordTooLarge) {
+		return NotAdmitted, false
+	}
+	return AdmissionUncertain, true
+}
+
+// MaxRecordBytes is immutable after construction; callers must budget encoded
+// payload bytes, not serialized queue-record bytes (which include base64).
+func (q *DurableQueue) MaxRecordBytes() int { return q.maxRecordBytes }
+
+// MaxAdmissionPayloadBytes also respects the capacity of an empty queue. A
+// fragment larger than this could otherwise wait forever on ErrQueueFull.
+// Budget the existing on-disk JSON wrapper using maximum sequence, timestamp
+// and ID widths (including generateRecordID's entropy-failure fallback).
+func (q *DurableQueue) MaxAdmissionPayloadBytes() int {
+	wrapper, _ := json.Marshal(Record{Sequence: MAX_SAFE_SEQUENCE,
+		ID: strings.Repeat("x", 24), CreatedAt: time.Date(9999, 12, 31, 23, 59, 59, 999999999, time.UTC),
+		Checksum: strings.Repeat("x", 64), Payload: []byte{}})
+	available := q.maxBytes - int64(len(wrapper))
+	if available <= 0 {
+		return 0
+	}
+	payloadLimit := (available / 4) * 3 // encoding/json base64 groups for []byte
+	if payloadLimit < int64(q.maxRecordBytes) {
+		return int(payloadLimit)
+	}
+	return q.maxRecordBytes
 }
 
 type QueueStats struct {
@@ -151,10 +212,10 @@ type DurableQueue struct {
 
 const (
 	// MAX_SAFE_SEQUENCE is the JSON-safe delivery/replay sequence ceiling (2^53 - 1).
-	MAX_SAFE_SEQUENCE     = 9007199254740991
-	sequenceMetaFile      = "sequence.meta"
-	sequenceMetaVersion2  = 2
-	sequenceMetaVersion3  = 3
+	MAX_SAFE_SEQUENCE    = 9007199254740991
+	sequenceMetaFile     = "sequence.meta"
+	sequenceMetaVersion2 = 2
+	sequenceMetaVersion3 = 3
 )
 
 func NewDurableQueue(dir string, maxRecords int, maxBytes int64, maxRecordBytes int) (*DurableQueue, error) {
@@ -736,7 +797,13 @@ func (q *DurableQueue) adoptMetaAfterUncertainLocked(highest, accepted uint64, r
 	q.lineageStart = earliestNonzeroLineage(q.lineageStart, intendedLineage, diskLineage)
 }
 
-func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
+func (q *DurableQueue) Enqueue(payload []byte) (record *Record, err error) {
+	disposition, recovery := NotAdmitted, false
+	defer func() {
+		if err != nil && err != ErrQueueFull && err != ErrRecordTooLarge {
+			err = &AdmissionError{Disposition: disposition, RecoveryRequired: recovery, Err: err}
+		}
+	}()
 	if len(payload) > q.maxRecordBytes {
 		return nil, ErrRecordTooLarge
 	}
@@ -745,7 +812,12 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 	defer q.mu.Unlock()
 
 	if q.metaUncertain {
+		recovery = true
 		return nil, ErrMetaUncertain
+	}
+	if q.locationUncertain {
+		recovery = true
+		return nil, ErrQuarantineUncertain
 	}
 
 	if q.activeCount >= q.maxRecords {
@@ -753,6 +825,7 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 	}
 
 	if q.lastSeq >= MAX_SAFE_SEQUENCE {
+		recovery = true
 		return nil, ErrSequenceExhausted
 	}
 
@@ -824,30 +897,23 @@ func (q *DurableQueue) Enqueue(payload []byte) (*Record, error) {
 		return nil, fmt.Errorf("QUEUE_RENAME_FAILED: %w", err)
 	}
 
-	if err := syncDir(q.activeDir); err != nil {
-		// Record exists; surface durability warning as hard failure so callers
-		// do not assume durability that the platform could not confirm.
-		q.lastSeq--
-		_ = os.Remove(targetPath)
-		return nil, fmt.Errorf("QUEUE_DIR_SYNC_FAILED: %w", err)
-	}
-
-	// First durable enqueue establishes lineageStart in the same meta write as
-	// highestSequence=seq. Once nonzero, lineageStart never moves forward.
-	if err := q.persistSequenceWatermarkLocked(seq); err != nil {
-		if errors.Is(err, ErrMetaUncertain) {
-			// Meta rename likely durable; retain the record so watermark and active agree.
-			q.activeCount++
-			q.activeBytes += int64(len(data))
-			return nil, err
-		}
-		q.lastSeq--
-		_ = os.Remove(targetPath)
-		return nil, err
-	}
-
+	// After rename, never delete this record or reuse its sequence on an error.
+	// Retaining custody is smaller and safer than a second fallible rollback
+	// transaction. Count conservatively even if directory persistence is uncertain.
 	q.activeCount++
 	q.activeBytes += int64(len(data))
+	if err := q.syncDirPhase(syncPhaseEnqueueDir, q.activeDir); err != nil {
+		disposition, recovery = AdmissionUncertain, true
+		return nil, q.enterUncertainLocked(fmt.Errorf("QUEUE_DIR_SYNC_FAILED: %w", err))
+	}
+	disposition = DurablyAdmitted
+	if err := q.persistSequenceWatermarkLocked(seq); err != nil {
+		// The record file and active directory are already synced. Do not re-enqueue
+		// its payload. Block this instance until reopening/recovery reconciles disk.
+		q.metaUncertain = true
+		recovery = true
+		return nil, errors.Join(ErrMetaUncertain, err)
+	}
 
 	return rec, nil
 }

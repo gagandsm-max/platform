@@ -695,6 +695,7 @@ func (s *AgentService) RuntimeSnapshot() health.RuntimeSnapshot {
 		Lifecycle:                life,
 		Queue:                    qStats,
 		Delivery:                 dStats,
+		Admission:                st.Admission,
 		SchedulerRunning:         st.Running,
 		EnabledCollectors:        st.EnabledCollectors,
 		Collectors:               collectors,

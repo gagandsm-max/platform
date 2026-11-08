@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -797,4 +798,35 @@ func TestAgentServiceCollectorDeadlineFirstRemainsFailure(t *testing.T) {
 	}
 	// Ensure Stop finishes (may timeout on outstanding until release already closed).
 	_ = svc.Stop()
+}
+
+// Fixed cardinality/label bytes reproduce the oversized lifecycle collection
+// without depending on the runner's live /proc population.
+type integrityLifecycleCollector struct{}
+
+func (*integrityLifecycleCollector) Name() string { return "fixture" }
+func (*integrityLifecycleCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	samples := make([]telemetry.Sample, 192)
+	for i := range samples {
+		samples[i] = telemetry.Sample{MetricKey: "fixture.metric", Value: float64(i), Unit: "count", Labels: map[string]string{"fixture": strings.Repeat("x", 128)}}
+	}
+	return samples, nil
+}
+
+func TestIssue302RuntimeSnapshotCarriesAdmissionLoss(t *testing.T) {
+	cfg := testAgentConfig(t, "127.0.0.1:0")
+	cfg.MaxRecordBytes = 128 // Smaller than the immutable collection envelope.
+	reg := singleCollectorRegistry(t, &integrityLifecycleCollector{}, time.Hour, time.Second)
+	svc, err := NewAgentService(cfg, testAgentIdent("agent-302"), client.NewUnavailableTransport("TEST_UNAVAILABLE"), nil, withCollectorRegistryForTest(reg))
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc.scheduler.RunOnce(context.Background())
+	st := svc.RuntimeSnapshot()
+	if st.Admission.DroppedObservations != 192 || st.Admission.DurableObservations != 0 || svc.QueueStats().ActiveCount != 0 {
+		t.Fatalf("health adapter hid loss: %+v", st.Admission)
+	}
 }
