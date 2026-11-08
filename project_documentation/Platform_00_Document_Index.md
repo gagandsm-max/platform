@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-11-06 — Founder-directed P0 correction of the existing Mother References, baselined at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`; six-area acceptance remains `DOC_P0_BLOCKED` under §10.1. Issues #200/#202/#268/#269/#272 and ACP-001..ACP-018 remain governing scope. Set version remains v3.3.0; v3.4.0 is reserved for the separately gated set-wide tranche. Amendments become authoritative only after reviewed merge to canonical main.
+**Last reconciliation:** 2026-11-08 — P0 Mother Reference correction candidate rebased to canonical main `92f0fb37805c234be2869619abcc01ad26b5f30b` (Issue #302 CLOSED/COMPLETED; PR #303 merged; post-main CI `42459975722` 4/4). Integrates adjudicated PR #300/#301/#283/#284 clauses into existing owners; six-area acceptance remains `DOC_P0_BLOCKED` under §10.1. Issues #200/#202/#268/#269/#272 and ACP-001..ACP-018 remain governing scope. Set version remains v3.3.0; v3.4.0 is reserved for the separately gated set-wide tranche. Amendments become authoritative only after reviewed merge to canonical main.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -600,6 +600,10 @@ Current v3.3.0 governing deltas are:
 Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED**. This reconciliation changes product/architecture requirements only; it does not certify runtime capability.
 
 ---
+
+## 2026-10-30 — Transportation, connectivity and redundancy adversarial-audit disposition
+
+The external transport audit and corrected response were independently adjudicated. Scope remains the governing **v3.3.0 / 25 Mother Reference files** and the frozen Issue #200 phase envelopes. Approved clarifications are in Platform_03 §§7.1–7.2 (Active/fencing/durability barrier, WAN/reconnect/capacity and design-side negative-acceptance scenarios), Platform_04 (transport/HA subsystem boundary), Platform_06 (overload/replay/partition dataflow), Platform_12 (accept/partial/reject provenance), and Platform_17 (on-wire ACK/retry semantics). The pre-existing Platform_11 sizing baseline, Platform_14 certification authority and Build Sequence Register execution ownership remain unchanged; audit findings do not expand their file-edit ownership. This neither changes formal requirement/BUILD IDs nor chooses a third Core, HA consensus/witness/fencing technology, 30–60s token TTL or universal RTT algorithm. Kafka/PG atomicity, ClickHouse ACK/consumer custody, two-Core fencing, HA RPO0 and large global-estate acceptance remain unproven until independently certified.
 
 ## A.15 Phase 1 / Phase 1.5 certification-envelope reconciliation — Issue #200 / #202
 

@@ -2576,6 +2576,14 @@ The following are **SPECIFIED** flow invariants, not proof of a current deployed
 
 ---
 
+## 2026-10-30 — Data transportation and two-Core authority failure paths (SPECIFIED)
+
+1. **Congestion:** Sensor durable spool → bounded uploader → authenticated Core admission → on 429/503 without a valid application ACK, retain the exact spool segment → apply bounded exponential backoff/jitter and (when present, valid and capped) Core `Retry-After` → retry only while lifecycle/resource policy permits → record queue age, lag, retry and any 80%-policy loss. Transport rejection is collector/pipeline health evidence, not monitored-device DOWN. No silent priority drop or automatic batch-size reduction is mandated.
+2. **Commit/finalize uncertainty:** Exact `tenant + sensor + durable stream + sequence range + checksum` reservation → Kafka transactional publish → crash/timeout/lease change before PostgreSQL finalize → Sensor receives no durable ACK and retains batch → `RETRY_PENDING` may re-publish **physically** after lease/ownership recovery → downstream committed-only, replay-safe consumer and canonical per-family reads/effects must prevent user-visible duplicate/loss. Existing numeric/Counter64 `FINAL` views alone do not certify event/alert/incident/export idempotence. Prove Kafka-abort visibility and ClickHouse HTTP-completion failure before certifying this path.
+3. **Phase-1.5 partition/failover:** Stable mTLS endpoint → verify exclusive authoritative Active and safely fenced old node → verify PostgreSQL/Kafka/ClickHouse recovery state and certified durability barrier → promote and re-anchor Sensor epoch/session → replay unACKed segments → validate no duplicate effects. If authority or ACK survivability cannot be established, **no promotion and no deletion-ACK**; Sensor buffers subject to the 80% policy. Rejoining former Active stays read-only/Standby until resynchronized. An arbitrary signed token, heartbeat loss or manual action without positive fencing does not prove exclusivity.
+
+The above are testable design paths, not evidence of Phase-1 GA or Phase-1.5 HA implementation/certification.
+
 ## 118. Operator journeys bound to existing system flows
 
 This supplement specifies operator-facing composition of existing requirements; it does not replace system flow IDs, allocate another screen catalogue or claim that an API/UI exists. Preserve registered paths from `ui/src/platform/primary-navigation.ts` and `workspace-registry.ts`; `Platform_09` §4.12 records their source checkpoint. A named administration or authentication subview is a logical destination where no dedicated route is implemented. Do not invent a supported endpoint to fill that gap.

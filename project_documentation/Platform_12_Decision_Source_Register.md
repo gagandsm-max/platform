@@ -555,7 +555,7 @@ Independent implementation review and real Windows certification are mandatory b
 
 ## 27. v3.3.0 ARCH-DELEGATED Network Sensor external-audit disposition — 2026-10-30
 
-**Authority:** Lead Architect independent review of the 2026-10-30 external Network Sensor audit, followed by independent architectural-defect remediation against canonical `main`, existing Phase 1/1.5 certification envelopes, Issues #92/#218/#229, and governing SNMP/Flow/Path/Inform contracts. This is a **specification clarification**; no production-path code is modified, no dependency is admitted, no new mandatory runtime, database, Sensor binary, REQ ID, BUILD ID or fixed capacity guarantee is selected. Mother Reference version remains **3.3.0**. Existing requirements/BUILD owners and `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED` remain unchanged. Concurrent Infrastructure/Log Sensor adjudication (unnumbered 2026-10-30 disposition / merged PR #282) is complementary and is not superseded by this Network Sensor disposition. Section **28** remains reserved for the concurrent Database Architecture Audit in PR #283.
+**Authority:** Lead Architect independent review of the 2026-10-30 external Network Sensor audit, followed by independent architectural-defect remediation against canonical `main`, existing Phase 1/1.5 certification envelopes, Issues #92/#218/#229, and governing SNMP/Flow/Path/Inform contracts. This is a **specification clarification**; no production-path code is modified, no dependency is admitted, no new mandatory runtime, database, Sensor binary, REQ ID, BUILD ID or fixed capacity guarantee is selected. Mother Reference version remains **3.3.0**. Existing requirements/BUILD owners and `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED` remain unchanged. Concurrent Infrastructure/Log Sensor adjudication (unnumbered 2026-10-30 disposition / merged PR #282) is complementary and is not superseded by this Network Sensor disposition. Section **28** records the Database Architecture Audit disposition integrated from PR #283 (ACCEPT WITH CHANGES onto this P0 candidate; see `Platform_05` §98).
 
 | Audit issue | Decision | Reasoning / binding design guardrail |
 |---|---|---|
@@ -593,6 +593,37 @@ Independent implementation review and real Windows certification are mandatory b
 
 
 ---
+
+## 28. v3.3.0 ARCH-DELEGATED database architecture audit disposition — 2026-10-30
+
+**Source:** Independent DB/Storage/Schema audit and follow-up; Master technical challenge against canonical v3.3.0 Mother References. Auditor lacked execution/DDL/query-plan evidence. The audit's six unconditional ACCEPT/P0 claims are **not** implementation findings; this decision retains the frozen PostgreSQL + ClickHouse + Kafka + Valkey architecture. No new product phase, database, migration number, REQ/PRD/BUILD identifier, OSS dependency, capacity certification or version bump is authorized.
+
+| Finding | ARCH-DELEGATED disposition | Approved contract / rejected prescription | Evidence owner |
+|---|---|---|---|
+| ClickHouse mutation/partition/TTL | PARTIAL | Preserve time-oriented bounded partitions, configured retention/rollups/80%/holds; require safe scoped erasure with backup/archive and resource verification. Reject fixed 90-day TTL, blanket entity/month partition drops, hash-salted or per-tenant partition mandates. | BUILD-064 physical DDL and storage lifecycle certification |
+| PostgreSQL JSONB | PARTIAL | Bound/validate attributes; index/normalize *measured* hot predicates only. Reject mandatory generated columns or P0 rework without queries and `EXPLAIN`. | Existing PG schema/migration owning BUILD |
+| MSP tenant isolation | PARTIAL | Tenant/context/RBAC/query/storage fail-closed evidence mandatory; PostgreSQL RLS and ClickHouse read-only row policies are conditional defence in depth, not substitutes for application scope. Reject tenant-first sort keys as isolation and untested RLS snippets. | Phase-1.5 MSP isolation owning BUILD/certification |
+| Valkey resilience | PARTIAL | Safe bypass only for reconstructable cache; security/admission/critical locks fail closed or use verified authoritative path. Reject universal fail-open, Valkey-only HA leadership/fencing and arbitrary 30–60s rebuild claims. | Core cache integration and fault-injection owners |
+| FK/lookup indexes | PARTIAL | Index actual tenant-scoped hot paths from plans/read-write measurements; preserve §89 redundant-identifier-index warning. Reject every-FK/UNIQUE mandatory duplicate indexes. | PostgreSQL migration/query owners |
+| Counter64 rate | PARTIAL | Exact raw `UInt64` path already IMPLEMENTED+TESTED (PR #84); derived rate/reset/wrap/discontinuity remains SPECIFIED, unimplemented/uncertified. Clarify restart/Sensor reassignment quality and preserve no-fabricated-rate invariant. Reject volatile-only correctness claims and Phase-1.5 deferment of Phase-1 interface utilization. | Network Sensor/Core metrics owners and Issue #92 gates |
+
+**Release/sequence:** Existing `REQ-DATA-001..015`, `PRD-EGC-006`, Phase-1 SNMP/counter and Phase-1.5 MSP/HA gates retain their precedence. Audit text is not proof of implementation; do not divert Phase-1 critical path to unbenchmarked schema redesign. See `Platform_05` §98 (including §98.6 negative-acceptance scenarios), existing `Platform_14` quality gates, and `Platform_18` database threat clarification. Implementation starts only after actual DDL/query/call-site/root-cause inspection and scoped work authorization.
+
+## 2026-10-30 — ARCH-DELEGATED Data Transportation / Connectivity / Redundancy audit adjudication
+
+**Evidence/authority:** External transport audit and its challenged clarification, reviewed against GitHub `main=ba1d3add55df5362d5f881c3383c1652afc3541f`, `sensor/internal/uploader/uploader.go`, `sensor/internal/coreclient/client.go`, `SensorIngestionService.java`, `PostgresTelemetryWatermarkStore.java`, numeric/Counter64 ClickHouse canonical `FINAL` views, and open Issues #92/#200/#211/#222/#235. Auditor assertions are **not** certification evidence. Mother Reference remains **v3.3.0 / 25 files**; no new formal requirement/BUILD, dependency, service, schema, customer Core or Phase change. Existing active implementation ownership/gates prevail. Integrated from PR #284 with **ACCEPT** onto this P0 candidate after verifying clauses against current main `92f0fb37` (no newer contradictory main clause found).
+
+| Finding | Adjudication | Phase and executable decision / outstanding proof |
+|---|---|---|
+| **TRANS-1** unbounded retry | **REJECT original P0; PARTIAL residual** | Phase 1: bounded uploader attempts/backoff/jitter and durable spool already implemented. Core `Retry-After` parsing and bounded shared admission/pacing are **not** verified implemented; prove under overload/reboot with real Core 429/503. Do not auto-shrink batches or silently shed beyond existing 80% policy. |
+| **TRANS-2** all duplicates resolved | **REJECT auditor's ALREADY SATISFIED claim; PARTIAL controls** | Phase 1 P1 integrity/certification: exact PG watermark/lease, already-ACKed replay and numeric/Counter64 `FINAL` canonical reads exist. Kafka commit and PG finalize are **not atomic**; crash or lease expiry can physically republish. Kafka committed-only (#222), ClickHouse insert-completion/offset custody (#235), Alert/RCA/export effect dedup and full negative matrix remain unproven; no general exactly-once claim or arbitrary finite dedupe window. |
+| **TRANS-3** direct Core-A/B failover | **REJECT unsafe direct pivot; ACCEPT existing stable Active endpoint** | Phase 1.5 OPEN P0: failover only after positive Active authority/fencing, controlled endpoint movement and Sensor re-anchor; peer TCP failure, signed health or 3 retries do not promote Standby. No HTTP 403/503/status or token-issuer mechanism selected. |
+| **TRANS-4** universal RTT formula | **REJECT formula; PARTIAL bounded adaptive evidence** | Phase 1: preserve existing Device Pack/poll planner capability, per-target/failure-domain limits and no-data-not-down. P95/rolling mean, 2s floor and `MaxRetries=2` are unverified candidates only; benchmark latency and 800-device reference Sensor capacity before selection. |
+| **TRANS-5** 15-min epoch tokens | **REJECT token/TTL prescription; ACCEPT authority invariant only** | Phase 1.5 OPEN P0: one `active_epoch`/session and stale mutation rejection already specified. Tokens cannot elect/fence an Active, revoke isolated old-node writes, or satisfy RPO0. PostgreSQL/ClickHouse fencing and HA ACK barrier mechanisms still unselected; no claim that Integration Service outbox or existing watermark alone is HA transaction protocol. |
+| **TRANS-6** zero-resource nonvoting witness | **REJECT invalid mechanism; RETAIN open HA P0** | Exactly two **full** Cores are fixed. A nonvoting observer cannot break quorum, but “two full Cores” does not mathematically ban every explicit external fence/dependency; any external requirement needs separate approved cost/operability/HA gate, and none is selected. Ambiguous partition remains fail closed; manual promotion without verifiable exclusion is unsafe; <60s target applies only to certified safe-failover cases. |
+| **Ancillary** socket/ports/CRL/HTTP2/ECMP | **PARTIAL / REJECT defaults** | Per-socket tuning only after measured resource proof; never automatically scan TCP 22/443; offline revocation/trust policy requires certified cache/rotation/staleness behavior (neither unconditional external OCSP nor universal Core-synced CRL selected); HTTP/2 stream/channel isolation is measurement-gated, not universally sufficient or required; ECMP flow-stable path probing already specified under BUILD-040. |
+
+**Release gate:** Phase 1 remains standalone Core production certification pending; Phase 1.5 HA RPO0/positive fencing remains OPEN P0 under `HA_DURABILITY_DESIGN_GATE` and BUILD-120–124. Strong global-enterprise sales claims require actual failure, capacity, tenant and network-profile certificates; documentation is `SPECIFIED`, not `IMPLEMENTED`/`CERTIFIED`.
 
 ## 29. P0 Mother Reference correction programme — 2026-11-06
 
@@ -731,3 +762,18 @@ Bounded documentation-only continuation against local candidate descending from 
 | ISSUE269-SHORTHAND-001 — AGENTS / Platform_00 Phase-1.5 Integration/CMDB wording | **ACCEPT** | Shorthand appeared to relocate Phase-1 four ITSM/CMDB rails into Phase 1.5 | Clarified advanced/full expansion over preserved Phase-1 baseline in AGENTS and Platform_00; BUILD-086 phase-slice ownership aligned. |
 | P15-HEADING-001 — ambiguous duplicate heading numbers | **ACCEPT** | Nested `## 1.` under `## 3.` / `## 4.` impaired navigation | Renumbered to §3.x / §4.x hierarchy; updated Platform_16 cross-references. No requirement change. |
 | RTM-OWNER-001 — 248 self-owning primary REQ rows | **ACCEPT WITH CHANGES** | Index rows pointed at Platform_08 instead of domain owners | Remapped primary owners by verified REQ family to domain Mother References; self-owning primary owners now 0. Coarse source-locator cells and full per-REQ binding evidence remain HOLDs for six-area acceptance. |
+
+### 29.8 Post-#302 main rebaseline and open-PR clause integration — 2026-11-08
+
+**Base truth:** canonical GitHub `main=92f0fb37805c234be2869619abcc01ad26b5f30b` after Issue #302 CLOSED/COMPLETED and PR #303 merge; post-main Platform CI `42459975722` SUCCESS 4/4. Laptop `/home/gagan/nms` verified at exact main parity. Prior local candidate `6bdc63621470b6d718a084cc588da47c8004c79d` treated as evidence only and rebased onto current main before retention.
+
+| Candidate / PR | Adjudication | Disposition |
+|---|---|---|
+| Prior local candidate / PR #300 lineage | **ACCEPT WITH CHANGES** | Retain six-area P0 gate, RTM ownership corrections, phase-scope Integration/CMDB clarifications and current-source truth; rebase onto `92f0fb37`; do not claim `DOC_P0_ACCEPTANCE=PASS`. |
+| PR #301 (P15/P16) | **ACCEPT WITH CHANGES** | Keep Phase-1 vs 1.5 install/HA separation, staged-vs-activated lifecycle, legacy Ubuntu 16.04 / RHEL/CentOS 7.x amd64 `TARGET`/`CERTIFICATION_PENDING`, and native package evidence binding under existing Platform_15/16 section numbers. |
+| PR #283 (DB audit) | **ACCEPT WITH CHANGES** | Integrate disposition as Platform_12 §28 + Platform_05 §98 + Platform_18 threat clarification. Renumber original §97→§98 because §97 already owns current-source truth. |
+| PR #284 (Transport/HA) | **ACCEPT** | Integrate Architecture §§7.1–7.2, HLD boundary, Dataflow failure paths, Index disposition, Decision Register TRANS-1..6 and Platform_17 wire clarifications without inventing HA mechanisms. |
+| Issue #302 / PR #303 | **ACCEPT (product fact; docs note only)** | Record bounded Agent telemetry-custody repair evidence in Platform_05 §97.10 and Build Register current checkpoint. Does not certify whole Linux Agent or Phase 1. |
+
+`DOC_P0_BLOCKED` and `SELF_CERTIFY=false` remain in force until Master + independent audit accept all six areas together.
+

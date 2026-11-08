@@ -6,14 +6,31 @@
 
 **Product identity:** Platform is the internal engineering/build identifier. AmrudAi is the default commercial/customer-facing product identity. Licensed governed tenant/MSP white-label branding may override customer-facing branding. Internal BUILD IDs and technical identity remain Platform.
 
-## Current execution checkpoint — 2026-11-06
+## Current execution checkpoint — 2026-11-08
 
-This checkpoint supersedes earlier current-dispatch assertions only. Historical accepted technical certificates, dates, source/CI hashes and dated snapshots below remain provenance. Mother References remain v3.3.0 and BUILD IDs are unchanged. The current documentation correction does not recertify product code or execute services.
+This checkpoint supersedes earlier current-dispatch assertions only. Historical accepted technical certificates, dates, source/CI hashes and dated snapshots below remain provenance and MUST NOT be rewritten. Mother References remain v3.3.0 and BUILD IDs are unchanged. Documentation correction does not recertify product code, packages, capacity, HA or Phase-1 GA. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
 | Current field | Verified fact / remaining gate |
 |---|---|
-| Canonical source | GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238` after PR #298 UUID atomicity correction; exact-main Platform CI run `41821813865`, four jobs SUCCESS. This is a pinned handoff baseline, not a claim that a future main has been checked. |
-| Bounded foundation merges since 2 November | PR #293 slot arithmetic `7b4b1e2bfa78cd716e936893c97ebd6579db1f0e`; PR #296 audit intent `8bd512d92de2937e07dd8d333f2bf31bb835bbca`; PR #297 execution incarnation `662237e617fe12e66f82cd057c0ca01c7c9aca49`; PR #298 UUID atomicity at current main. G1a PR #287 remains `29d21afa95475efdbfe41162c589c6f6d1d6c644`. These are bounded source merges, not G1B runtime activation or complete G2 typed admission. |
+| Canonical source | GitHub main `92f0fb37805c234be2869619abcc01ad26b5f30b` after Issue #302 CLOSED/COMPLETED and PR #303 merge (`fix(agent): preserve fragmented telemetry and durable queue custody`). Exact-main Platform CI run `42459975722` SUCCESS 4/4. Laptop `/home/gagan/nms` verified at exact main parity at this handoff. |
+| Issue #302 / PR #303 boundary | Bounded Agent scheduler/queue/shared-health telemetry-custody repair only. Does **not** certify the whole Linux Agent, BUILD-016 end-to-end durable delivery, Network Sensor production runtime, Core HA, or Phase-1 GA. |
+| Whole-BUILD technical maturity | Last accepted whole-BUILD technical certificate remains BUILD-011 at `179a72837d050f4c757858452d3719c2e8978b95` / Issue #168 comment `6106750423`, bounded Linux scope. BUILD-020 remains IMPLEMENTING / NOT_CERTIFIED. G1B_RUNTIME=HOLD; G2_ADMISSION=DISABLED; RELEASE=NO_GO. |
+| Immediate parallel work | (1) Founder-directed P0 Mother Reference correction across all six documentation areas — candidate branch only; `DOC_P0_BLOCKED` until Master + independent audit accept all six together. (2) Linux Agent production-closure lane continues in parallel under existing BUILD-012..019 / transport-custody owners. Neither lane may claim the other is complete. |
+| Subsequent product order after Linux Agent production closure | Network Sensor + Flow (BUILD-020/021/040 family and authenticated authority/transport prerequisites), then Infrastructure, then Syslog/Log — through existing BUILD/profile ownership below. Progression of bounded slices is not whole-BUILD or Phase-1 certification. |
+| Open docs PRs retained as evidence | PR #300/#301/#283/#284 remain OPEN at this handoff and are clause-adjudicated into this documentation candidate rather than merged blindly. Their historic CI status is not merge authority. |
+| Progress authority | Canonical progress authority is GitHub `main`, verified PR/CI evidence on exact SHAs, Issue #211 register-sync responsibilities and immutable certification references recorded below. Transient workstation paths, unpublished local commits, operator terminal attachments and unverified worktree heads are **not** progress authority. |
+| Issue #211 sync | Local laptop/worktree fast-forward of this register remains an Issue #211 operational responsibility after each guarded merge. Sync status is verified at handoff time against `origin/main`. |
+| Runtime/branch boundary | Installed command paths and clean Git status do not prove running services, model selection, package artifacts or tests. Existing PR #217 runtime and other unmerged lanes retain their exact-head gates; no stale CI or local-only metadata clears them. |
+| Historical checkpoint preservation | The 2026-11-06 and 2026-11-02 checkpoints below are retained as dated provenance. Their embedded main SHAs (`36e1513f...`, `29d21afa...`) are historical and must not be treated as current main. |
+
+## Historical execution checkpoint — 2026-11-06
+
+This dated checkpoint is preserved as provenance from the pre-#302 documentation handoff. It is **not** current main truth. Current dispatch is the 2026-11-08 checkpoint above.
+
+| Current field | Verified fact / remaining gate (historical 2026-11-06) |
+|---|---|
+| Canonical source | GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238` after PR #298 UUID atomicity correction; exact-main Platform CI run `41821813865`, four jobs SUCCESS. Historical pinned handoff baseline only. |
+| Bounded foundation merges since 2 November | PR #293 slot arithmetic `7b4b1e2bfa78cd716e936893c97ebd6579db1f0e`; PR #296 audit intent `8bd512d92de2937e07dd8d333f2bf31bb835bbca`; PR #297 execution incarnation `662237e617fe12e66f82cd057c0ca01c7c9aca49`; PR #298 UUID atomicity at then-current main. G1a PR #287 remains `29d21afa95475efdbfe41162c589c6f6d1d6c644`. These are bounded source merges, not G1B runtime activation or complete G2 typed admission. |
 | Whole-BUILD technical maturity | Last accepted whole-BUILD remains BUILD-011 at `179a72837d050f4c757858452d3719c2e8978b95` / Issue #168 comment `6106750423`, bounded Linux scope. BUILD-020 remains IMPLEMENTING / NOT_CERTIFIED. G1B_RUNTIME=HOLD; G2_ADMISSION=DISABLED; RELEASE=NO_GO. |
 | Immediate work | Founder-directed P0 Mother Reference correction and full six-area semantic acceptance. `DOC_P0_BLOCKED` remains until Technical requirements, Journeys, UI/UX, Data contracts, Master Build Plan and Executable Module Plans all pass independent review. No partial acceptance or structural-validator-only clearance. |
 | Subsequent product order | Linux → Network+Flow → Infrastructure → Syslog, through the existing BUILD/profile ownership below and real shared authority/transport/data/security prerequisites. This is progression of bounded slices, not permission to certify a whole cross-platform BUILD early. |
@@ -480,9 +497,9 @@ This reconciliation deliberately allocates **no new BUILD IDs** and does not sil
 
 No separate Phase-2.5 codebase, customer-specific Core fork, duplicate graph/RCA authority or ungoverned packet/trace datastore is authorized.
 
-## Documentation-first dispatch and executable-plan ledger — 2026-11-06
+## Documentation-first dispatch and executable-plan ledger — 2026-11-06 (retained; current main 2026-11-08)
 
-Current documentation acceptance is governed by Platform_00 §10.1, Platform_08 §§4.1–4.3, Platform_12 §29, AGENTS and the Platform_13 executable-plan contract. `DOC_P0_BLOCKED` persists until all six areas pass exact-candidate independent semantic review; neither this corrected sequence nor the plan ledger alone clears it. Documentation coverage, source implementation, default activation, executed test evidence, bounded technical certification and release/deployment are separate fields.
+Current documentation acceptance is governed by Platform_00 §10.1, Platform_08 §§4.1–4.3, Platform_12 §29, AGENTS and the Platform_13 executable-plan contract. The 2026-11-08 current checkpoint above supersedes only current-dispatch SHA/status fields. `DOC_P0_BLOCKED` persists until all six areas pass exact-candidate independent semantic review; neither this corrected sequence nor the plan ledger alone clears it. Documentation coverage, source implementation, default activation, executed test evidence, bounded technical certification and release/deployment are separate fields.
 
 ### Ordered existing BUILD/profile lanes and source allocation
 

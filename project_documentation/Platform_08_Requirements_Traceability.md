@@ -4,7 +4,7 @@
 **Version:** 3.3.0
 **Status:** **Authoritative Mother Reference — Global Traceability Index (A2.3 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
-**Last reconciliation:** 2026-11-06 — P0 semantic-acceptance and evidence reconciliation at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`; 448 unique REQ / 241 unique PRD primary IDs retained. Issues #269/#268/#272 scope is unchanged. Mother Reference v3.3.0; all six documentation areas remain `DOC_P0_BLOCKED` until §4.1–4.3 pass. Index presence is not implementation, testing or certification.
+**Last reconciliation:** 2026-11-08 — P0 semantic-acceptance and evidence reconciliation rebased to main `92f0fb37805c234be2869619abcc01ad26b5f30b` (Issue #302 CLOSED/COMPLETED; PR #303 merged; post-main CI `42459975722` 4/4). 448 unique REQ / 241 unique PRD primary IDs retained. Issues #269/#268/#272 scope is unchanged. Mother Reference v3.3.0; all six documentation areas remain `DOC_P0_BLOCKED` until §4.1–4.3 pass. Index presence is not implementation, testing or certification.
 **Normalization state:** NORMALIZED_V1 (global index layer). Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Purpose

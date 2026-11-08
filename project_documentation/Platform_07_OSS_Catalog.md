@@ -24,7 +24,7 @@ Governing locator: OSS catalogue / licence policy sections. Rows bind formal IDs
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-11-06 — bounded OSS-124 source-implementation truth correction at main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`; the 2026-10-08 engineering admission (Issue #168 / Master comment `6059162933`) and 2026-09-24 A2.3 normalization / OSS-008→REQ-OSS-008 migration remain unchanged provenance. No new dependency, source pin or release certification.
+**Last reconciliation:** 2026-11-08 — rebaseline verification against canonical main `92f0fb37805c234be2869619abcc01ad26b5f30b` after Issue #302/PR #303; no OSS catalogue change from that Agent custody repair. Prior 2026-11-06 OSS-124 source-implementation truth correction (then main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`), 2026-10-08 engineering admission (Issue #168 / Master comment `6059162933`) and 2026-09-24 A2.3 normalization / OSS-008→REQ-OSS-008 migration remain unchanged provenance. No new dependency, source pin or release certification.
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Architectural approval (`Decision`) is not implementation evidence (`Truth state`).
