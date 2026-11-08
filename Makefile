@@ -121,7 +121,7 @@ test-clickhouse-replay-migration: ## Prove legacy ClickHouse upgrade and replay-
 test-agent-runtime-e2e: ## Real Agent→Sensor Receiver→Agent spool→Core→Kafka path (test-only overlay)
 	@echo "==> Running Agent runtime E2E (does not change SENSOR_AGENT_RECEIVER_ENABLED compose default)..."
 	@echo "==> Does not regenerate development PKI; run 'make certs' only on a stopped stack if CA files are missing."
-	@bash tests/agent-runtime-e2e/run.sh
+	@bash tests/agent-runtime-e2e/run-isolated.sh
 
 evidence: test test-contract test-security-smoke ## Run full regression and generate engineering evidence
 	@echo "==> Capturing complete GA engineering evidence..."

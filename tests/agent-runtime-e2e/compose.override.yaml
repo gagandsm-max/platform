@@ -5,7 +5,7 @@
 # (the first compose file: repository root), not from this overlay file.
 #
 # Usage:
-#   docker compose -f compose.yaml -f tests/agent-runtime-e2e/compose.override.yaml up -d
+#   Use run-isolated.sh after Issue #211 admission. Do not execute this fixed-name overlay directly.
 
 name: platform
 

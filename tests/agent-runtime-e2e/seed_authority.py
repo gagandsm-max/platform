@@ -11,7 +11,8 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-META = Path(__file__).resolve().parent / "certs" / "metadata.json"
+META = Path(os.environ["PLATFORM_E2E_CERT_DIR"]) / "metadata.json"
+PREFIX = os.environ["PLATFORM_E2E_PREFIX"]
 
 TENANT = "018f0e0a-0000-7000-8000-000000000001"
 AGENT_ID = "agent-e2e-01"
@@ -22,6 +23,17 @@ CREDENTIAL_ID = "018f0e0a-0000-7000-8000-00000000ac01"
 ASSIGNMENT_ID = "018f0e0a-0000-7000-8000-00000000aa01"
 IDENTIFIER_ID = "018f0e0a-0000-7000-8000-00000000a101"
 
+if sys.argv[1:] == ["--probe"]:
+    META = META.with_name("probe-metadata.json")
+    AGENT_ID = "agent-e2e-probe-01"
+    HOST_ID = "host-e2e-probe-01"
+    ENTITY_ID = ENTITY_ID[:-1] + "2"
+    CREDENTIAL_ID = CREDENTIAL_ID[:-1] + "2"
+    ASSIGNMENT_ID = ASSIGNMENT_ID[:-1] + "2"
+    IDENTIFIER_ID = IDENTIFIER_ID[:-1] + "2"
+elif sys.argv[1:]:
+    raise SystemExit("Only --probe is supported")
+
 
 def psql(sql: str) -> str:
     env = os.environ
@@ -31,7 +43,7 @@ def psql(sql: str) -> str:
         "docker",
         "exec",
         "-i",
-        "platform-postgres",
+        PREFIX + "-postgres",
         "psql",
         "-U",
         user,

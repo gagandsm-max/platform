@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,6 +15,7 @@ import (
 )
 
 const identityFileName = "identity.json"
+const maxIdentityBytes = 16 * 1024
 
 type AgentIdentity struct {
 	AgentID  string `json:"agentId"`
@@ -33,6 +35,10 @@ func GenerateOrLoadIdentity(configuredID string) (*AgentIdentity, error) {
 // LoadOrGenerate loads an existing persisted identity or generates a new one.
 // If stateDir is empty, an in-memory identity is generated without disk persistence.
 func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, error) {
+	return loadOrGenerate(stateDir, configuredID, tenantID, syncIdentityDir)
+}
+
+func loadOrGenerate(stateDir, configuredID, tenantID string, syncDir func(string) error) (*AgentIdentity, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		return nil, errors.New("IDENTITY_TENANT_REQUIRED: tenantId must be provided")
@@ -70,6 +76,9 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 	if err != nil {
 		return nil, fmt.Errorf("IDENTITY_PATH_INVALID: %w", err)
 	}
+	if err := validateIdentityAncestors(absDir); err != nil {
+		return nil, err
+	}
 
 	// Verify directory exists or create with 0700
 	if fi, err := os.Lstat(absDir); err == nil {
@@ -102,10 +111,28 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 		if !fi.Mode().IsRegular() {
 			return nil, errors.New("IDENTITY_FILE_INVALID: identity file is not a regular file")
 		}
-
-		data, err := os.ReadFile(idPath)
+		if runtime.GOOS == "linux" && fi.Mode().Perm()&0077 != 0 {
+			return nil, errors.New("IDENTITY_PERMISSIONS: identity file must be private")
+		}
+		if fi.Size() > maxIdentityBytes {
+			return nil, errors.New("IDENTITY_TOO_LARGE: identity metadata exceeds byte limit")
+		}
+		f, err := openIdentityFile(idPath)
 		if err != nil {
 			return nil, fmt.Errorf("IDENTITY_READ_FAILED: %w", err)
+		}
+		opened, statErr := f.Stat()
+		if statErr != nil || !os.SameFile(fi, opened) || !opened.Mode().IsRegular() || (runtime.GOOS == "linux" && opened.Mode().Perm()&0077 != 0) || !singleIdentityLink(opened) {
+			_ = f.Close()
+			return nil, errors.New("IDENTITY_FILE_CHANGED: identity metadata is unsafe")
+		}
+		data, err := io.ReadAll(io.LimitReader(f, maxIdentityBytes+1))
+		_ = f.Close()
+		if err != nil {
+			return nil, fmt.Errorf("IDENTITY_READ_FAILED: %w", err)
+		}
+		if len(data) > maxIdentityBytes {
+			return nil, errors.New("IDENTITY_TOO_LARGE: identity metadata exceeds byte limit")
 		}
 
 		var existing AgentIdentity
@@ -133,7 +160,10 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 		existing.Hostname = hostname
 		existing.OS = runtime.GOOS
 		existing.Arch = runtime.GOARCH
-
+		// Also reconcile a prior publication whose directory sync failed.
+		if err := syncDir(absDir); err != nil {
+			return nil, err
+		}
 		return &existing, nil
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, fmt.Errorf("IDENTITY_STAT_FAILED: %w", err)
@@ -161,6 +191,9 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 	payload, err := json.MarshalIndent(newIdent, "", "  ")
 	if err != nil {
 		return nil, fmt.Errorf("IDENTITY_MARSHAL_FAILED: %w", err)
+	}
+	if len(payload) > maxIdentityBytes {
+		return nil, errors.New("IDENTITY_TOO_LARGE: identity metadata exceeds byte limit")
 	}
 
 	// Atomic write: write to temp file in same directory, then rename
@@ -192,8 +225,11 @@ func LoadOrGenerate(stateDir, configuredID, tenantID string) (*AgentIdentity, er
 		return nil, fmt.Errorf("IDENTITY_CLOSE_FAILED: %w", err)
 	}
 
-	if err := os.Rename(tmpName, idPath); err != nil {
-		return nil, fmt.Errorf("IDENTITY_RENAME_FAILED: %w", err)
+	if err := publishIdentity(tmpName, idPath); err != nil {
+		return nil, fmt.Errorf("IDENTITY_PUBLISH_FAILED: %w", err)
+	}
+	if err := syncDir(absDir); err != nil {
+		return nil, err
 	}
 
 	return newIdent, nil
