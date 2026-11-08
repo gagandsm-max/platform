@@ -777,3 +777,14 @@ Bounded documentation-only continuation against local candidate descending from 
 
 `DOC_P0_BLOCKED` and `SELF_CERTIFY=false` remain in force until Master + independent audit accept all six areas together.
 
+### 29.9 DOC_P0 third-pass physical and ownership corrections — 2026-11-08
+
+Starting candidate `09ede46dfca9353305c98f355b9ee393d6ac1edb` on base `92f0fb37805c234be2869619abcc01ad26b5f30b`. Writer evidence only; not acceptance.
+
+| Finding | Disposition | Correction |
+|---|---|---|
+| Synthetic `.0 Normative requirements` / four-column family catalogues as primary owners | **ACCEPT** | Remove synthetic family sections; bind each REQ to a substantive numbered owner section; Platform_08 locators must not point at `.0` catalogues. Validator rejects synthetic locators and catalogue-only ownership. |
+| Platform_23 REQ-DOR / REQ-ECR coarse §30 Serverless locator | **ACCEPT** | Assign stable §31 (Issue #269) and §32 (Issue #272) numbering; rebind DOR/ECR locators. Supersedes RGOV-001 “no §31” note. |
+| PostgreSQL `audit_event` monthly range partition vs PK/UNIQUE | **ACCEPT (Master decision)** | Phase-1 authoritative PostgreSQL `audit_event` is **non-partitioned** with `PRIMARY KEY (tenant_id, audit_id)` and `UNIQUE (tenant_id, tenant_seq)`; ClickHouse `audit_history` remains derived analytical copy; partitioning reconsidered only under BUILD-130 evidence. |
+| Multi-tool review model | **ACCEPT** | Cursor/Codex bounded writers in isolated worktrees; any suitable authorized tool may read-only/advisory-review another candidate; Antigravity is independent adversarial reviewer but not sole auditor; Codex CLI + Codex Desktop are one authority family; writers cannot self-certify; ChatGPT + GitHub remains final technical gate. |
+

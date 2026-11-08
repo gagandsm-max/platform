@@ -719,9 +719,9 @@ Serverless/FaaS monitoring is delivered through the existing Capability Pack + C
 
 ---
 
-## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
+## 31. Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269
 
-### Founder-approved phase outcome
+### 31.1 Founder-approved phase outcome
 
 This section is the authoritative specialized-master contract for Issue #269.
 
@@ -733,8 +733,25 @@ This section is the authoritative specialized-master contract for Issue #269.
 
 **Phase 2.5+** owns full native APM and full native always-on DPI/deep packet analytics.
 
-### Formal Phase-2 Enterprise Customer Requirements
+### 31.2 Formal Phase-2 Enterprise Customer Requirements
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ECR-001`**: Platform SHALL enforce: Enterprise RFP readiness outcome (PRD-ECR-001).
+- **`REQ-ECR-002`**: Platform SHALL enforce: Phase-1.5 Enterprise Foundation (PRD-ECR-002); expands Integration Fabric/CMDB depth beyond preserved Phase-1 ITSM/CMDB baselines and does not relocate them.
+- **`REQ-ECR-003`**: Platform SHALL enforce: Heterogeneous infrastructure/storage depth (PRD-ECR-003).
+- **`REQ-ECR-004`**: Platform SHALL enforce: Database performance monitoring (PRD-ECR-004).
+- **`REQ-ECR-005`**: Platform SHALL enforce: Middleware/batch monitoring (PRD-ECR-005).
+- **`REQ-ECR-006`**: Platform SHALL enforce: Backup/data protection monitoring (PRD-ECR-006).
+- **`REQ-ECR-007`**: Platform SHALL enforce: Multi-cloud/serverless breadth (PRD-ECR-007).
+- **`REQ-ECR-008`**: Platform SHALL enforce: Regulated-enterprise profile (PRD-ECR-008).
+- **`REQ-ECR-009`**: Platform SHALL enforce: Enterprise integration ecosystem (PRD-ECR-009).
+- **`REQ-ECR-010`**: Platform SHALL enforce: Enterprise AIOps maturity (PRD-ECR-010).
+- **`REQ-ECR-011`**: Platform SHALL enforce: Phase-2 APM integration/native boundary (PRD-ECR-011).
+- **`REQ-ECR-012`**: Platform SHALL enforce: Phase-2 DPI integration/native boundary (PRD-ECR-012).
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 | PRD ID | Phase | Requirement |
 |---|---|---|
 | `PRD-ECR-001` | P2 | Platform shall achieve Enterprise ITOM/AIOps RFP readiness across heterogeneous large-enterprise estates and pass `ECRP-P2-v1`; specification or vendor listing alone is insufficient. |
@@ -751,7 +768,7 @@ This section is the authoritative specialized-master contract for Issue #269.
 | `PRD-ECR-012` | P2 / P2.5+ | Phase 2 shall support Flow, active-path intelligence, eBPF process-network evidence, bounded incident-triggered packet evidence and external NPM/DPI integration. Full native always-on DPI — continuous payload capture, TLS decryption, deep L7 reconstruction/packet warehouse/NDR-style DPI — is Phase 2.5+. |
 | `PRD-ECR-013` | P2 exit | `ECRP-P2-v1` shall certify representative end-to-end enterprise operation, technology/version coverage, native/integrated evidence, security/tenant isolation, regulated data boundaries, HA/DR, scale/cardinality, retention/archive, failure/recovery, upgrade compatibility and NOC workflows. |
 
-### Phase-2 target families
+### 31.3 Phase-2 target families
 
 Minimum target families for certification planning include:
 - enterprise Windows/Linux plus demand-backed Unix such as AIX and Solaris;
@@ -766,8 +783,14 @@ Minimum target families for certification planning include:
 
 These are certification targets, not implementation claims. Exact versions and capability dimensions live in the machine-readable compatibility/certification source.
 
-### ECRP-P2-v1
+### 31.4 ECRP-P2-v1
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ECR-013`**: Platform SHALL enforce: ECRP-P2-v1 certification gate (PRD-ECR-013).
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The certification profile must exercise a representative multi-DC/DR/branch/hybrid-cloud estate and prove:
 1. discovery/onboarding/identity/CMDB reconciliation;
 2. network, host, virtualisation, storage, database, middleware, backup, cloud and declared serverless monitoring;
@@ -782,7 +805,7 @@ The certification profile must exercise a representative multi-DC/DR/branch/hybr
 11. enterprise-scale query/dashboard/report/RCA concurrency and noisy/cardinality cases;
 12. end-to-end operator workflows and auditable evidence.
 
-### Formal traceability supplement
+### 31.5 Formal traceability supplement
 
 | REQ ID | PRD ID | Governing capability |
 |---|---|---|
@@ -800,16 +823,22 @@ The certification profile must exercise a representative multi-DC/DR/branch/hybr
 | `REQ-ECR-012` | `PRD-ECR-012` | Phase-2 DPI integration/native boundary |
 | `REQ-ECR-013` | `PRD-ECR-013` | ECRP-P2-v1 certification gate |
 
-### Non-claims
+### 31.6 Non-claims
 
 This roadmap is **SPECIFIED** only. It does not claim any listed technology, connector, regulated profile, AIOps feature or ECRP profile is implemented, tested, benchmarked, certified or deployed. Full native APM and full native DPI remain excluded from Phase 2 even if external evidence is integrated.
 
 ---
 
-## Issue #272 — enterprise partial-closure contract and Phase 2.5 Deep Observability
+## 32. Issue #272 — enterprise partial-closure contract and Phase 2.5 Deep Observability
 
-### PRD-ECR-014 — Procurement Requirement Closure Contract
+### 32.1 PRD-ECR-014 — Procurement Requirement Closure Contract
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ECR-014`**: Platform SHALL enforce: Accepted procurement requirements require explicit owner, phase, route, product/version/security/failure/scale/retention/certification evidence and fallback.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every accepted recurring enterprise procurement requirement SHALL have a closure record with:
 1. requirement/cluster identity;
 2. owning phase;
@@ -823,7 +852,7 @@ Every accepted recurring enterprise procurement requirement SHALL have a closure
 
 A generic "later", "optional", "partial" or "TBD" without this information is not a valid roadmap disposition.
 
-### Remaining customer-cluster closure matrix
+### 32.2 Remaining customer-cluster closure matrix
 
 | Cluster | Planned closure | Target phase | Certification/acceptance obligation |
 |---|---|---|---|
@@ -858,11 +887,11 @@ A generic "later", "optional", "partial" or "TBD" without this information is no
 
 This matrix is roadmap ownership, not implementation or tender-compliance evidence.
 
-### REQ-ECR-014
+#### REQ-ECR-014
 
 `REQ-ECR-014` SHALL trace PRD-ECR-014 across PRD, architecture, RTM, quality, security, operations and the Build Sequence Register.
 
-### Phase-2 exit closure rule
+### 32.3 Phase-2 exit closure rule
 
 A Phase-2 complete/GA-ready claim is prohibited if an accepted enterprise requirement remains an unresolved architecture-level Partial.
 
@@ -872,8 +901,25 @@ Allowed final roadmap/certification dispositions are:
 - **Customer Profile — Certifiable**;
 - **Explicit Phase-2.5 deferment**.
 
-### Phase 2.5 — Native Deep Observability requirement family
+### 32.4 Phase 2.5 — Native Deep Observability requirement family
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DOR-001`**: Platform SHALL enforce: Phase 2.5 SHALL provide native deep application and network observability while preserving the existing identity/graph/evidence/RBAC/tenant/audit authorities..
+- **`REQ-DOR-002`**: Platform SHALL enforce: Native APM SHALL support automatic instrumentation for an explicitly certified runtime/version matrix including approved Java, .NET, Python, Node.js and Go paths..
+- **`REQ-DOR-003`**: Platform SHALL enforce: Native APM SHALL provide full distributed trace/transaction processing, service/resource identity, errors, DB/external calls, dependency context and bounded retention..
+- **`REQ-DOR-004`**: Platform SHALL enforce: Native APM SHALL provide adaptive sampling/cardinality control and continuous CPU/memory/allocation/thread/lock profiling with flame-graph/operator workflows..
+- **`REQ-DOR-005`**: Platform SHALL enforce: Native digital experience SHALL support browser RUM, mobile RUM, Core Web Vitals, user journeys and privacy/consent-governed session replay where enabled..
+- **`REQ-DOR-006`**: Platform SHALL enforce: Native APM evidence SHALL correlate with logs, metrics, synthetics, changes, topology, incidents and deterministic RCA without creating a second RCA authority..
+- **`REQ-DOR-007`**: Platform SHALL enforce: Native network deep observability SHALL support governed SPAN/TAP/vTAP/packet-broker acquisition and continuous capture within a certified line-rate/loss envelope..
+- **`REQ-DOR-008`**: Platform SHALL enforce: Native DPI SHALL provide packet metadata, flow reconstruction, supported L2-L7 decoding, TCP diagnostics, DNS/TLS/HTTP transaction analytics and network-versus-application response decomposition..
+- **`REQ-DOR-009`**: Platform SHALL enforce: Native DPI SHALL correlate packet-derived evidence to canonical entities/services/traces/incidents and support bounded historical packet investigation/replay where safe..
+- **`REQ-DOR-010`**: Platform SHALL enforce: Raw payload/PCAP access SHALL be separately protected by tenant isolation, RBAC, audit, encryption, bounded retention, masking/redaction, export controls and evidence custody..
+- **`REQ-DOR-011`**: Platform SHALL enforce: TLS decryption MAY be supported only under explicit lawful authorization with least privilege, key custody, KMS/HSM integration where applicable, audit and bounded scope; it is never mandatory..
+- **`REQ-DOR-012`**: Platform SHALL enforce: Deep-observability ingest SHALL enforce sampling/capture policy, cardinality/rate protection, backpressure and explicit degraded states rather than uncontrolled resource exhaustion..
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 | ID | Requirement |
 |---|---|
 | PRD-DOR-001 | Phase 2.5 SHALL provide native deep application and network observability while preserving the existing identity/graph/evidence/RBAC/tenant/audit authorities. |
@@ -910,10 +956,16 @@ Formal trace IDs `REQ-DOR-001..013` mirror these product requirements.
 | REQ-DOR-012 | PRD-DOR-012 | Deep-observability ingest SHALL enforce sampling/capture policy, cardinality/rate protection, backpressure and explicit degraded states rather than uncontrolled resource exhaustion. |
 | REQ-DOR-013 | PRD-DOR-013 | Phase 2.5 SHALL NOT claim completion until `DORP-P2.5-v1` passes; this requirement family does not make AmrudAi a general SIEM/NDR replacement. |
 
-### DORP-P2.5-v1
+### 32.5 DORP-P2.5-v1
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DOR-013`**: Platform SHALL enforce: Phase 2.5 SHALL NOT claim completion until `DORP-P2.5-v1` passes; this requirement family does not make AmrudAi a general SIEM/NDR replacement..
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 `DORP-P2.5-v1` is owned by Platform_14 and is NOT a BUILD ID. It certifies the APM and DPI pillars, including exact runtime/protocol/version support, privacy/security/tenant negatives, load/cardinality/line-rate, failure/recovery, retention, upgrade/rollback and end-to-end operator workflows.
 
-### Non-claims
+### 32.6 Non-claims
 
 Issue #272 is **SPECIFIED / ROADMAP** only. It does not establish implementation, benchmark, certification, customer tender compliance or production readiness.

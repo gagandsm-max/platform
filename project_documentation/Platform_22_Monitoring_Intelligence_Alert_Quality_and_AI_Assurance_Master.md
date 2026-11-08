@@ -103,6 +103,15 @@ Nothing in this document selects a commercial model/provider, vector database, m
 
 ## 4. Alert Evidence Contracts
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-004`**: Platform SHALL enforce: Alert qualification state machine; failed SNMP poll != device down.
+- **`REQ-ALT-005`**: Platform SHALL enforce: Multi-protocol/multi-vantage validation and confidence.
+- **`REQ-ALT-007`**: Platform SHALL enforce: Alert storm protection/dedup/rate-limit/compression.
+- **`REQ-ALT-010`**: Platform SHALL enforce: Recovery qualification before auto-resolution.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 An Alert Evidence Contract is versioned policy for a specific alert class. Each contract shall define: monitored subject and scope; required primary evidence; corroborating evidence where applicable; contradictory evidence; telemetry freshness/quality prerequisites; maintenance/expected-state handling; severity logic; confidence logic; suppression/dedup/storm behavior; recovery evidence; active-validation options; and audit/version metadata.
 
 The following classes require explicit contracts before production activation:
@@ -130,9 +139,26 @@ Topology-based qualification uses incident-time, versioned, tenant-scoped graph 
 
 Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
 
+### 4.1 Downstream dependency correlation and reversible suppression safety
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-009`**: Platform SHALL enforce: Maintenance, notification mute and dependency suppression separated.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Topology-based qualification uses incident-time, versioned, tenant-scoped graph edges with type, direction, source protocol, first/last observation and freshness/quality. LLDP/CDP supplies L2 adjacency; parent-child failure propagation requires corroborated routing/path/service/CMDB evidence and redundancy-aware reachability. A failed parent may explain child UNREACHABLE symptoms, but must not automatically mark all children DEVICE_DOWN or assert a confirmed root from timing alone.
+
+Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
+
 ## 5. Telemetry quality, evidence coverage and semantic state
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-ALT-006`**: Platform SHALL enforce: Event vs Alert vs Incident distinction.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Before operational assertion, the evaluation path shall score whether expected evidence is present, fresh, schema-valid, time-aligned and produced by healthy collectors. Missing or degraded evidence lowers confidence and may change the state to `MONITORING_DEGRADED`, `UNKNOWN` or `STALE` instead of asserting target failure.
 
 **Evidence Coverage** shall expose enough machine-readable information to answer: what evidence was expected; what arrived; what is missing/stale/degraded; whether active validation ran; which contradictions exist; and how the evidence affected confidence.
@@ -145,45 +171,23 @@ For eBPF process-network and active-path domains, telemetry trust evaluation mus
 
 ## 6. Alert-policy lifecycle and false-alert quality gates
 
-### 6.0 Normative requirements — `REQ-ALT` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-ALT-001`**: Platform SHALL enforce: Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric.
+- **`REQ-ALT-002`**: Platform SHALL enforce: Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds.
+- **`REQ-ALT-008`**: Platform SHALL enforce: Flapping detection and reopen windows.
+- **`REQ-ALT-012`**: Platform SHALL enforce: Alert-policy effectiveness analytics.
 
-This subsection is the **primary normative owner contract** for the `REQ-ALT` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`. - **DRAFT:** authoring/validation only; no production customer alert effect. - **BACKTEST:** replay against deterministic historical/synthetic fixtures and labelled incidents where available. - **SHADOW:** evaluate live evidence without authoritative customer alerting; compare to active policy and operator outcomes. - **ACTIVE:** only after required review/evidence gates; version remains rollback-capable. Promotion evidence is class-specific. It shall include representative positive/negative cases, maintenance/expected-state cases, collection-degradation cases, storm conditions where relevant and known difficult edge cases. Metrics may include false-positive rate, false-negative/missed-event rate, precision/recall, detection latency, alert volume/cardinality, correlation compression and operator-confirmation rate. This document does not invent a universal numeric acceptance threshold; release criteria must be justified per class and deployment risk.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-ALT-001` | Platform SHALL enforce: Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-002` | Platform SHALL enforce: Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-003` | Platform SHALL enforce: Adaptive polling with triggers, cooldown and capacity guardrails. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-004` | Platform SHALL enforce: Alert qualification state machine; failed SNMP poll != device down. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-005` | Platform SHALL enforce: Multi-protocol/multi-vantage validation and confidence. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-006` | Platform SHALL enforce: Event vs Alert vs Incident distinction. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-007` | Platform SHALL enforce: Alert storm protection/dedup/rate-limit/compression. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-008` | Platform SHALL enforce: Flapping detection and reopen windows. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-009` | Platform SHALL enforce: Maintenance, notification mute and dependency suppression separated. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-010` | Platform SHALL enforce: Recovery qualification before auto-resolution. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-011` | Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-ALT-012` | Platform SHALL enforce: Alert-policy effectiveness analytics. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
-Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`.
-
-- **DRAFT:** authoring/validation only; no production customer alert effect.
-- **BACKTEST:** replay against deterministic historical/synthetic fixtures and labelled incidents where available.
-- **SHADOW:** evaluate live evidence without authoritative customer alerting; compare to active policy and operator outcomes.
-- **ACTIVE:** only after required review/evidence gates; version remains rollback-capable.
-
-Promotion evidence is class-specific. It shall include representative positive/negative cases, maintenance/expected-state cases, collection-degradation cases, storm conditions where relevant and known difficult edge cases. Metrics may include false-positive rate, false-negative/missed-event rate, precision/recall, detection latency, alert volume/cardinality, correlation compression and operator-confirmation rate. This document does not invent a universal numeric acceptance threshold; release criteria must be justified per class and deployment risk.
-
----
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 7. Active Evidence Acquisition
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-003`**: Platform SHALL enforce: Adaptive polling with triggers, cooldown and capacity guardrails.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Active evidence acquisition is an investigation capability, not unrestricted probing. Each action must specify purpose, allowed target/scope, expected information gain, protocol/tool, credential need, rate/time/resource budget, potential impact and stop conditions. RBAC, tenant policy, maintenance constraints and audit apply. Unsafe or disruptive evidence collection requires explicit approval or is forbidden.
 
 The base PRD/UI additionally requires **operator-triggered** bounded diagnostics (for example Ping, traceroute/path, SNMP/TCP/DNS/SSH/API tests), multi-vantage verification, Live Evidence and deterministic `Verify Now` packs. Those manual NOC actions use the same evidence/safety model but are not dependent on an AI/planner. Planner-selected/autonomous evidence acquisition remains governed by this section and its release priority; manual safe diagnostics may be implemented earlier as base product workflow.
@@ -214,7 +218,12 @@ The regression corpus must include parent-link-down with child UNREACHABLE, redu
 
 ## 9. Operator feedback and learning governance
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-ALT-011`**: Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Operator feedback is structured evidence, not an automatic production-policy mutation. Supported feedback may include confirmed/rejected cause, alert useful/not useful, false-positive reason, suppression reason, remediation success/failure and missing evidence. Feedback records actor, tenant, incident/policy/model version and timestamp.
 
 Use of feedback for model/policy training requires a governed evaluation/promotion process. Production policy, prompts or model weights must not silently self-modify from individual operator actions.

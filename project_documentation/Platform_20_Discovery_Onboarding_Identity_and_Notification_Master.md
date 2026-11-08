@@ -35,35 +35,6 @@ This document does **not** select a new OSS dependency, database, mandatory micr
 ---
 
 
-### 1.0 Normative requirements — `REQ-PRV` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-PRV` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-PRV-001` | Platform SHALL enforce: UI-only customer provisioning: individual, CSV/XLSX bulk and auto discovery. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-002` | Platform SHALL enforce: Optional user display name and description; auto-derive when blank. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-003` | Platform SHALL enforce: Do not use IP alone as canonical identity. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-004` | Platform SHALL enforce: Credential Profiles; avoid secrets in CSV. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-005` | Platform SHALL enforce: CSV/XLSX staging, normalization, duplicate/error/warning classification. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-006` | Platform SHALL enforce: Sensitive-field whitespace never silently modified. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-007` | Platform SHALL enforce: Preflight Diagnostic Engine with actionable failure evidence/remediation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-008` | Platform SHALL enforce: Diagnostics execute from actual selected Sensor. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-009` | Platform SHALL enforce: Required firewall/connectivity matrix export. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-010` | Platform SHALL enforce: Discovery review queue before licensing/monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-011` | Platform SHALL enforce: IP/CIDR/seed/site/IPAM scope + exclusions. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-012` | Platform SHALL enforce: Provisioning capacity simulation before activation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-013` | Platform SHALL enforce: Provisioning jobs support Fix & Retry. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-014` | Platform SHALL enforce: Environment/Deployment Readiness Test. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-PRV-015` | Platform SHALL enforce: Asset lifecycle/reconciliation and no automatic deletion. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
 ## 2. Non-negotiable principles
 
 1. **Discovery is not automatic activation.** Finding or enrolling an entity creates governed candidate state; full monitoring/licence activation requires authorized review unless explicit trusted auto-approval policy applies.
@@ -83,6 +54,18 @@ This subsection is the **primary normative owner contract** for the `REQ-PRV` fa
 
 ## 3. Formal product requirements
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-001`**: Platform SHALL enforce: UI-only customer provisioning: individual, CSV/XLSX bulk and auto discovery.
+- **`REQ-PRV-004`**: Platform SHALL enforce: Credential Profiles; avoid secrets in CSV.
+- **`REQ-PRV-005`**: Platform SHALL enforce: CSV/XLSX staging, normalization, duplicate/error/warning classification.
+- **`REQ-PRV-006`**: Platform SHALL enforce: Sensitive-field whitespace never silently modified.
+- **`REQ-PRV-007`**: Platform SHALL enforce: Preflight Diagnostic Engine with actionable failure evidence/remediation.
+- **`REQ-PRV-009`**: Platform SHALL enforce: Required firewall/connectivity matrix export.
+- **`REQ-PRV-013`**: Platform SHALL enforce: Provisioning jobs support Fix & Retry.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The following IDs are authoritative PRD supplements for v3.2.2.
 
 | PRD ID | Requirement |
@@ -192,6 +175,118 @@ DHCP, Wi-Fi, VPN or network movement may change addresses repeatedly. Such chang
 
 ### 3.5 Identity conflict and reconciliation
 
+The product shall surface an explicit review/security condition for cases including:
+
+- Agent reinstall with ambiguous previous identity;
+- OS reimage;
+- VM/image clone carrying duplicated Agent identity;
+- certificate/Agent ID reuse from conflicting hosts;
+- hostname collision;
+- conflicting serial/hardware/cloud/OS identifiers;
+- improbable simultaneous heartbeats from the same Agent identity;
+- manual merge/split request.
+
+Platform shall preserve evidence and require an authorized reconciliation decision. It shall not silently merge distinct endpoints or allow two active bindings for one unique Agent identity.
+
+### 3.6 Notification Center semantics
+
+The global Notification Center/bell is a per-user operational inbox. Recommended categories include:
+
+- My Action Required;
+- Incidents;
+- Network;
+- Infrastructure;
+- Database;
+- SD-WAN / Cloud / Kubernetes where applicable;
+- Discovery & New Assets;
+- Approvals;
+- Platform Health;
+- Reports / Integrations / Licensing where applicable.
+
+Categories are views over typed notifications, not separate notification subsystems or separate bell icons.
+
+Marking a notification read does **not** acknowledge/resolve an Alert or Incident. Conversely, acknowledging an Alert does not automatically represent every related workflow notification as read unless explicitly defined by the lifecycle contract.
+
+---
+
+### 3.1 Supported candidate sources
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-011`**: Platform SHALL enforce: IP/CIDR/seed/site/IPAM scope + exclusions.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+The unified onboarding/review model applies first to:
+
+- Network Auto Discovery;
+- Windows Agent enrollment;
+- Linux Agent enrollment.
+
+It also applies to candidate-producing Cloud, virtualization, storage, database, Kubernetes and API/connector discovery as those sources expose candidate managed entities. A source-specific workflow may collect different evidence, but it may not invent a separate lifecycle that bypasses the common identity, review, audit and activation contract.
+
+### 3.2 Candidate decisions
+
+Authorized decisions are:
+
+- **Approve** — continue through normal preflight/provisioning and activate the effective monitoring configuration;
+- **Leave Unmanaged** — preserve inventory/reconciliation visibility but do not run normal monitoring/licence workload;
+- **Reject** — deny this candidate/enrollment outcome; for unauthorized Agent enrollment, identity/certificate is revoked/invalidated as policy requires;
+- **Exclude** — create a persistent/permanent exclusion for the matching scoped identity so rediscovery, Agent reconnect, later scans or passage of time do not automatically recreate or re-notify the candidate. Reversal requires an explicit authorized administrative action to remove/reopen the exclusion and must be audited.
+
+Temporary suppression, snooze or notification muting is a separate concept and must not be represented as **Exclude**.
+
+Every decision requires an operator comment/reason. Bulk actions require a common decision comment/reason and per-item result evidence; where an item requires a different reason, an authorized per-item override may be recorded.
+
+### 3.3 Review enrichment and policy preview
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-002`**: Platform SHALL enforce: Optional user display name and description; auto-derive when blank.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Before approval, authorized users can review/correct:
+
+- Display Name;
+- Alias;
+- Description;
+- Site;
+- Group and Sub-group;
+- Tags;
+- Criticality;
+- Monitoring Profile;
+- Alert/Validation Policy assignment or inherited group policy;
+- Sensor assignment mode/selection where allowed.
+
+The review screen shows effective policy inheritance, monitoring capability, Sensor MWU/capacity impact and material licence/entitlement impact before activation. An explicit override is visible and audited; the user is never required to infer whether a group policy will apply.
+
+### 3.4 Agent identity and dynamic addressing
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-003`**: Platform SHALL enforce: Do not use IP alone as canonical identity.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+For Agent-backed endpoints:
+
+- canonical `entity_id` identifies the monitored endpoint inside the tenant;
+- unique `agent_id` and enrolled mTLS certificate identity bind the installed Agent to that entity;
+- System/Host Name is the preferred human-readable technical name;
+- customer Display Name/Alias are presentation metadata;
+- IPv4/IPv6/MAC values are observed, time-varying identifiers with history/provenance.
+
+DHCP, Wi-Fi, VPN or network movement may change addresses repeatedly. Such changes update observations and network attachment history; they do not create a new endpoint or a 'new device' notification by themselves.
+
+### 3.5 Identity conflict and reconciliation
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-015`**: Platform SHALL enforce: Asset lifecycle/reconciliation and no automatic deletion.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The product shall surface an explicit review/security condition for cases including:
 
 - Agent reinstall with ambiguous previous identity;
@@ -348,6 +443,12 @@ ebpf_capability_state: UNSUPPORTED | UNAVAILABLE | PRIVILEGE_DENIED | KERNEL_INC
 
 ### 5.5 Sensor Control / Placement ownership
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-008`**: Platform SHALL enforce: Diagnostics execute from actual selected Sensor.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Sensor Control owns Region/Site/Pool-aware eligibility, membership state, placement generations, drain/maintenance state, Sensor reassignment and Agent→Sensor assignment. Provisioning/Onboarding requests placement and receives an authoritative result; it does not maintain a second placement registry.
 
 Enrollment/Identity owns bootstrap authority validation and certificate binding. Sensor Runtime owns execution of the assignment currently authorized by Core. Capacity policy remains governed by Platform_11/14 evidence and Sensor self-observability.
@@ -635,6 +736,13 @@ Mandatory security/platform-critical notifications may be non-mutable by policy.
 
 ### 8.2 Discovery & Onboarding Review
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-010`**: Platform SHALL enforce: Discovery review queue before licensing/monitoring.
+- **`REQ-PRV-012`**: Platform SHALL enforce: Provisioning capacity simulation before activation.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 `Inventory → Provisioning & Discovery` exposes a unified **Discovery & Onboarding Review** table/view while retaining the existing provisioning/discovery workspace.
 
 Required filters/columns include:
@@ -684,6 +792,12 @@ Routine identical observations, transient address changes and repeated scan/reco
 
 ### 8.5 Region / Sensor Pool and provisioning UX
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-PRV-014`**: Platform SHALL enforce: Environment/Deployment Readiness Test.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Where Region is enabled for a tenant, onboarding/provisioning surfaces expose **Region → Site → Sensor Pool → Sensor** as locality/placement context without forcing every deployment to use every level. Region names are customer-defined; examples such as EMEA/APAC/AMERICAS are not product enums.
 
 Sensor Pool administration shows pool scope, eligible Sensor roles/capabilities, capacity/headroom, health/degraded state, failure-domain/placement policy and current assignment counts. Operators may request placement/reassignment only through authorized Core control APIs; the UI never mutates Sensor-local ownership directly.

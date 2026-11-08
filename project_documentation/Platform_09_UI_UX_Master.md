@@ -13,49 +13,17 @@ This document expands the PRD's UI/UX and dashboard catalogue into an implementa
 The non-negotiable UX principles are: fast navigation; readable fonts; role-aware disclosure; UI-only normal administration; no silent failures; contextual troubleshooting; consistent filters/actions; light/dark theme; large-environment server-side data handling; and HTTPS/TLS-only access.
 
 
-### 1.0 Normative requirements — `REQ-UI` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-UI` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-UI-001` | Platform SHALL enforce: Native Platform Dashboard Studio with flexible composable dashboards; Grafana may inspire interaction patterns but is not copied/embedded. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-002` | Platform SHALL enforce: Create/group/folder/clone/import/export/share dashboards. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-003` | Platform SHALL enforce: Drag/drop/resizable panels and broad chart/table/topology/map/Sankey types. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-004` | Platform SHALL enforce: Light/dark theme, readable fonts, density options. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-005` | Platform SHALL enforce: Role-specific landing pages and permission-aware navigation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-006` | Platform SHALL enforce: Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-007` | Platform SHALL enforce: Inventory with server-side pagination, bulk actions and saved filters. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-008` | Platform SHALL enforce: Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-009` | Platform SHALL enforce: Report Studio PDF/CSV-only artifacts, effective commercial logo embedding in PDF, branding, schedules, obligations and attestation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-010` | Platform SHALL enforce: SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-011` | Platform SHALL enforce: Accessibility, keyboard navigation, contrast and no color-only status. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-012` | Platform SHALL enforce: Mobile incident/dashboard experience; desktop for full admin/studios. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-013` | Platform SHALL enforce: Query protection: timeout/row/scan/concurrency/async export. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-014` | Platform SHALL enforce: Fast UI with caching/preaggregation/virtualization/lazy loading/query cancellation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-015` | Platform SHALL enforce: No-context-switch NOC troubleshooting from entity/alert/incident context. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-016` | Platform SHALL enforce: Persistent contextual action bar + Troubleshoot drawer/workspace. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-017` | Platform SHALL enforce: On-demand bounded ICMP/traceroute/SNMP/TCP/DNS/SSH/API tests through eligible Sensor/Agent. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-018` | Platform SHALL enforce: Multi-vantage verification with contradictory evidence preserved. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-019` | Platform SHALL enforce: Verify Now deterministic diagnostic bundles/packs. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-020` | Platform SHALL enforce: Live Evidence distinguishes monitored state from fresh operator-triggered verification. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-021` | Platform SHALL enforce: Why/What Changed/Compare contextual investigation actions. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-022` | Platform SHALL enforce: Investigation Session preserves diagnostic/CLI/config/topology/flow evidence references and can link to incident. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-023` | Platform SHALL enforce: Risk-proportionate action friction; CLI supports stored/personal/one-time credentials without browser exposure of reusable secrets. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-024` | Platform SHALL enforce: Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-UI-025` | Platform SHALL enforce: AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
 ## 2. Global application shell
 
 ### 2.1 Primary navigation
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-005`**: Platform SHALL enforce: Role-specific landing pages and permission-aware navigation.
+- **`REQ-UI-008`**: Platform SHALL enforce: Map Studio, Report Studio, MIB Studio, API Studio, Device Pack Studio.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ```text
 Home
 Dashboards
@@ -83,6 +51,12 @@ Navigation entries are shown/hidden/read-only/action-limited according to RBAC, 
 
 ### 2.2 Global top bar
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-006`**: Platform SHALL enforce: Global search, command palette, breadcrumbs, context side panel, favorites/recent/saved views.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 - Brand block: Displays the effective commercial product name (**AmrudAi** by default) and product logo. In the default dark shell header, uses the white logo (`amrud_whi.png`); in light header themes, uses the black logo (`amrud_blk.png`) to ensure visual contrast. Logo rendering must preserve aspect ratio without stretching. In white-label or MSP tenant configurations, displays the tenant-configured brand name and logo while maintaining platform structural integrity.
 - Tenant/customer selector only for users authorized for multiple tenants.
 - Global search across device/IP/MAC/serial/site/tag/interface/circuit/incident/alert/ticket/IPAM/NCM/DB/VM/cloud/K8s entities.
@@ -141,12 +115,36 @@ The implementation's `screen-state.ts` and health-overview presentation types al
 
 ### 3.3 Accessibility/readability
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-004`**: Platform SHALL enforce: Light/dark theme, readable fonts, density options.
+- **`REQ-UI-011`**: Platform SHALL enforce: Accessibility, keyboard navigation, contrast and no color-only status.
+- **`REQ-UI-012`**: Platform SHALL enforce: Mobile incident/dashboard experience; desktop for full admin/studios.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Support Light/Dark/System theme; Compact/Comfortable/Large density; keyboard navigation; scalable typography; accessible contrast; status icon/text in addition to color; and NOC TV/full-screen layouts. Full admin/studios are desktop-first; mobile/tablet supports dashboards, alerts, incidents, acknowledgement and investigation summaries.
 
 Acceptance is observable: keyboard-only users can reach and operate every enabled control; tabs expose selected state and support arrow/Home/End navigation; drawers/dialogs have a named heading, preserve a logical focus order and return focus to their launching control on close. Modal confirmation retains focus inside its scope while open. Loading and result/error messages are announced without repeated interruption; a static unbound preview is not an assertive alarm. Labels identify units, timezone, required input and validation error without relying on placeholder text or color. Text zoom, supported theme/density and each declared desktop/tablet/mobile/wallboard layout must preserve critical values, errors and authorized actions without overlap or clipped controls; tables may use a labelled bounded scroll region. Each screen's frozen manifest declares supported viewport/layout cases and verification evidence. A responsive foundation alone does not certify all 98 screens.
 
 ### 3.4 NOC Operational Troubleshooting Experience
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-015`**: Platform SHALL enforce: No-context-switch NOC troubleshooting from entity/alert/incident context.
+- **`REQ-UI-016`**: Platform SHALL enforce: Persistent contextual action bar + Troubleshoot drawer/workspace.
+- **`REQ-UI-017`**: Platform SHALL enforce: On-demand bounded ICMP/traceroute/SNMP/TCP/DNS/SSH/API tests through eligible Sensor/Agent.
+- **`REQ-UI-018`**: Platform SHALL enforce: Multi-vantage verification with contradictory evidence preserved.
+- **`REQ-UI-019`**: Platform SHALL enforce: Verify Now deterministic diagnostic bundles/packs.
+- **`REQ-UI-020`**: Platform SHALL enforce: Live Evidence distinguishes monitored state from fresh operator-triggered verification.
+- **`REQ-UI-021`**: Platform SHALL enforce: Why/What Changed/Compare contextual investigation actions.
+- **`REQ-UI-022`**: Platform SHALL enforce: Investigation Session preserves diagnostic/CLI/config/topology/flow evidence references and can link to incident.
+- **`REQ-UI-023`**: Platform SHALL enforce: Risk-proportionate action friction; CLI supports stored/personal/one-time credentials without browser exposure of reusable secrets.
+- **`REQ-UI-024`**: Platform SHALL enforce: Diagnostic jobs bounded by tenant/scope/target/rate/concurrency/timeout/cancellation and isolated from routine monitoring capacity.
+- **`REQ-UI-025`**: Platform SHALL enforce: AI may explain/suggest permitted next tests but cannot fabricate results or bypass authorization/execution controls.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall optimize NOC workflow around **observe → verify → diagnose → act → preserve evidence**. Routine troubleshooting should not require an operator to leave Platform for external ping, traceroute, SSH terminal, SNMP tester, flow explorer or configuration-comparison tools. This does not remove safety controls; friction increases with action risk.
 
 **Contextual Action Bar.** Applicable entity, interface, alert and incident pages expose a persistent permission-aware action bar. Network-device defaults are **CLI, Ping, Trace/Path, SNMP Test, Flow, Config, Compare, Investigate, Maintenance**; alert/incident contexts additionally expose **Verify Now** where a deterministic pack exists. Entity types adapt actions to their domain.
@@ -217,6 +215,14 @@ Stable customer outcomes distinguish timeout/path, unknown v3 user, auth mismatc
 
 ### 3.6 Shared read, action and context contract
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-007`**: Platform SHALL enforce: Inventory with server-side pagination, bulk actions and saved filters.
+- **`REQ-UI-013`**: Platform SHALL enforce: Query protection: timeout/row/scan/concurrency/async export.
+- **`REQ-UI-014`**: Platform SHALL enforce: Fast UI with caching/preaggregation/virtualization/lazy loading/query cancellation.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every frozen view declares its authoritative query/read-model owner. Current configuration, authorization, workflow and other operational state use their owning contracts; eligible historical telemetry uses the selected ClickHouse raw/rollup resolution. A screen may combine these through governed APIs without turning ClickHouse, Valkey or browser state into a new authority. Query contracts specify supported filters/sorts, deterministic ordering, time-window semantics, units/precision/nullability, default and maximum page/row/scan/time bounds, freshness/provenance and explicit truncation. Server pagination and rendered-row virtualization solve different limits; neither authorizes downloading the entire estate into the browser. No data-source assumption follows from a screen's title.
 
 Every enabled action declares target identity/revision, current server permission and entitlement, allowed parameters, validation, risk/reason/confirmation or approval where required, idempotency/conflict behavior, asynchronous status and cancellation/recovery evidence. A request accepted into a job is not completed work. Cancel requested, cancelled, partially applied, validation failed and rollback unsupported must not be rendered as success. Unsupported actions are absent or explicitly unavailable with an actionable reason; a generic “Apply” label never grants an unspecified mutation.
@@ -228,6 +234,12 @@ These rules are inherited by §5. Domain-specific columns and actions are additi
 
 ## 4. Dashboard Studio
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-001`**: Platform SHALL enforce: Native Platform Dashboard Studio with flexible composable dashboards; Grafana may inspire interaction patterns but is not copied/embedded.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Dashboard library scopes: My, Team, Shared, Tenant/Customer, System and folders/groups. Actions: create, clone, move, rename, share, import/export, permissions, delete, variables and reusable panels. Editor supports drag/resize/duplicate/copy panels, undo/redo and preview. Panel editor tabs: Data, Query, Transformation, Visualization, Thresholds, Links, Overrides, Permissions. Panel types: stat, gauge, time series, bar, pie, table, heatmap, histogram, status grid, Sankey, topology, geo, text, alert list, incident list, RCA and domain-specific visualizations.
 
 ## 4.1 OOB workspace classification and manifest contract — v3.2.2 reconciliation
@@ -251,12 +263,24 @@ The 98 broad workspace specifications in §5 remain authoritative product scope.
 
 ### 4.2 Declarative System definitions and recoverability
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-002`**: Platform SHALL enforce: Create/group/folder/clone/import/export/share dashboards.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 System OOB definitions shall be schema-backed, versioned and CI-validated rather than being authoritative only as hard-coded React composition. The current presentation-schema family is the starting contract; future manifest/schema evolution remains versioned and backward-compatible according to normal Platform contract rules.
 
 System definitions are immutable product versions. Upgrade may introduce a newer System version, but shall not silently overwrite a customer clone or customer-owned dashboard. Authorized users can restore/reopen the current System definition and clone a newer System version. Team/Tenant/Shared mutable dashboards require revision history sufficient for safe rollback of accidental edits. A mandatory maker-checker workflow is **not** implied merely by this requirement.
 
 ### 4.3 Visualization styling and threshold separation
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-003`**: Platform SHALL enforce: Drag/drop/resizable panels and broad chart/table/topology/map/Sankey types.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Dashboard Studio shall expose only visualization controls that are meaningful for the selected panel type. The governed styling vocabulary may include series/palette, theme-aware color, line/fill/opacity/marker, axes and linear/log scale, unit/precision/min/max, legend/tooltip/stacking, display name, null display, value/status mapping, threshold colors, conditional/table formatting, text/title/subtitle/alignment, field overrides and links/drill-downs.
 
 Accessibility remains mandatory: status must not depend on color alone, contrast must remain usable in supported themes, and chart/table alternatives or summaries are provided where practical.
@@ -325,6 +349,12 @@ It owns Team identity/lifecycle, directory-group mapping, effective access expla
 
 ### 4.8 Presentation Query & Metric Catalogue and Presentation Capability Registry
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-009`**: Platform SHALL enforce: Report Studio PDF/CSV-only artifacts, effective commercial logo embedding in PDF, branding, schedules, obligations and attestation.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Current `queryRef`, `dataSourceClassRef`, `visualizationSettingsRef`, `thresholdPolicyRef` and `fieldOverrideRefs` are correct indirections, but current source does not contain authoritative registries behind all of them.
 
 Architecture requires two governed logical catalogues, preferably schema-backed/static plus existing Core/Query-service APIs before any new service/database is considered:
@@ -597,6 +627,12 @@ The abbreviated Java prefix above is `core/src/main/java/com/platform/core/`. Su
 
 ## 5. Dashboard/workspace screen specifications
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-UI-010`**: Platform SHALL enforce: SLA/OLA/Provider-SLA service-assurance engine with service-time, shift/team, maintenance, evidence-quality and audit rules.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The 98 out-of-box screens below are mandatory. Customers may clone/customize them; System versions remain recoverable as product defaults. Entity-detail pages may be contextual and need not be separate left-navigation items.
 
 ### UI-001 — Executive / CIO Overview
@@ -7633,7 +7669,7 @@ Raw payload/session-replay visibility SHALL be privacy-, tenant- and RBAC-govern
 
 ### 16.3 Shared Domain API Families (DAF) and permission/scope
 
-All reads are `GET /api/v1/tenants/{tenantId}/…` through the Query Service (BUILD-067) or the owning domain API; `Platform_17` §15.3 gives DTO/limit detail. Read permission = `<perm>.read`; resource scope = the listed scope type.
+All reads are `GET /api/v1/tenants/{tenantId}/…` through the Query Service (BUILD-067) or the owning domain API; `Platform_17` §15.4 (API operations) and §15.1 CC-API give DTO/limit detail (default page size 50 / max 200 unless an operation states otherwise). Read permission = `<perm>.read`; resource scope = the listed scope type.
 
 | DAF | Domain read family | Perm / scope | Owner BUILD |
 |---|---|---|---|

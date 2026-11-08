@@ -44,7 +44,7 @@
       "defaultWriter": false,
       "defaultGeneratedCapability": "read-only",
       "status": "authorized",
-      "notes": "Read-only/adversarial independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. mayCertify=false means Antigravity supplies independent certification-gate evidence/recommendation; ChatGPT + GitHub performs final technical certification. Generated adapters must not gain write tools. Antigravity is not an implementation writer and cannot validate its own changes."
+      "notes": "Read-only/adversarial independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. Antigravity is not the sole auditor: any suitable authorized tool may perform read-only/advisory review of another tool's candidate. mayCertify=false means Antigravity supplies independent certification-gate evidence/recommendation; ChatGPT + GitHub performs final technical certification. Generated adapters must not gain write tools. Antigravity is not an implementation writer and cannot validate its own changes."
     },
     "codex": {
       "id": "codex",
@@ -58,7 +58,7 @@
       "writeAgentSandboxMode": "workspace-write",
       "clientInterfaces": ["codex-cli", "chatgpt-desktop-codex-mode"],
       "status": "authorized",
-      "notes": "Founder-reactivated 2026-10-07 as an approved bounded implementation, test and debugging writer. Codex CLI and ChatGPT Desktop App Codex mode are client interfaces to this single authority, not independent writers or certification authorities. Plain ChatGPT Desktop conversation has no assumed repository filesystem/execution access. Codex cannot independently verify, act as gatekeeper, merge or self-certify. Read-only canonical agents remain read-only; write agents default to workspace-write without implied network or unrestricted host access."
+      "notes": "Founder-reactivated 2026-10-07 as an approved bounded implementation, test and debugging writer. Codex CLI and Codex Desktop (ChatGPT Desktop App Codex mode) are one Codex authority family — client interfaces to this single authority, not independent writers or independent certification sources from each other. Plain ChatGPT Desktop conversation has no assumed repository filesystem/execution access. Codex cannot independently verify, act as gatekeeper, merge or self-certify, and cannot certify its own candidate. Read-only canonical agents remain read-only; write agents default to workspace-write without implied network or unrestricted host access."
     },
     "github-copilot": {
       "id": "github-copilot",
@@ -98,17 +98,19 @@
       "codex is an authorized non-default bounded writer and requires no writerElevation",
       "exceptionalWriterTools is empty under the current active workflow; Antigravity cannot be elevated into a writer",
       "neverWriterTools (cursor-cloud, github-copilot, chatgpt-github, founder) cannot become writers via elevation",
-      "one writer may own a checkout/worktree; Cursor CLI and Codex may run concurrently only on isolated non-overlapping lanes",
+      "one writer may own a checkout/worktree; Cursor CLI and Codex may be bounded writers in isolated worktrees concurrently only on non-overlapping lanes",
+      "a writer cannot independently certify its own candidate",
       "verifierTool must be distinct from writerTool",
       "gatekeeper must be distinct from writerTool",
+      "any suitable authorized tool may perform read-only/advisory review of another tool's candidate; Antigravity is an independent adversarial reviewer, not the sole auditor",
       "Codex cannot self-certify, independently verify, act as gatekeeper or merge",
       "generated Antigravity adapters remain read-only and Antigravity cannot write or validate its own changes",
-      "Codex CLI and ChatGPT Desktop App Codex mode are client interfaces to one Codex authority, not separate authorities",
+      "Codex CLI and Codex Desktop are one Codex authority family, not separate authorities or independent certification sources",
       "generated Codex read agents use sandbox_mode=read-only and write agents use sandbox_mode=workspace-write; never generate danger-full-access or imply network access",
       "dot is not a Platform writer, verifier, gatekeeper, merge or certification authority; any later Codex orchestration requires a separately frozen environment, branch, SHA, permissions and scope",
       "github-copilot is never writer, verifier, gatekeeper, merge authority, or sole certification evidence",
       "cursor-cloud is prohibited as writerTool; elevation cannot authorize it under current policy",
-      "final technical certification authority remains ChatGPT + GitHub (Antigravity mayCertify=false supplies gate evidence only)"
+      "final technical gate/certification authority remains ChatGPT + GitHub (Antigravity mayCertify=false supplies gate evidence only)"
     ]
   }
 }

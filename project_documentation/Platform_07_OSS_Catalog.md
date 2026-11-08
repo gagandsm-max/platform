@@ -16,6 +16,12 @@
 
 ## 1. Purpose
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-001`**: Platform SHALL enforce: Clean-room Platform independent of ThoughtData and NetAI.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform is a clean-room proprietary commercial product that deliberately reuses mature permissively licensed protocol engines, SDKs, data infrastructure and UI libraries instead of rebuilding commodity functions. Platform must build its differentiated logic — canonical entity graph, Device Pack model, MIB/API Studios, monitoring scheduler, Sensor placement, policy hierarchy, false-alert qualification, incident correlation, RCA/GNN intelligence, NCM governance, IPAM authority, Dashboard/Report/Map Studios, multi-tenancy, audit semantics and licensing — as Platform-owned code.
 
 The rule is **libraries and infrastructure over nested products**: use mature OSS to avoid reinventing SNMP, Kafka, database engines, SSH, chart rendering, etc.; do not embed another complete NMS/IPAM/dashboard product as Platform's authority.
@@ -23,31 +29,16 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 **Namespace note:** Catalogue IDs use the `OSS-NNN` form (for example catalogue **OSS-008 = ClickHouse**). Formal Mother Reference requirements use `REQ-*` IDs. The former formal air-gap requirement ID `OSS-008` was migrated to **`REQ-OSS-008`** in A2.3 to end the catalogue/requirement namespace collision. Historical prose may mention the old formal ID only when explicitly marked migrated/historical.
 
 
-### 1.0 Normative requirements — `REQ-OSS` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-OSS` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-OSS-001` | Platform SHALL enforce: Clean-room Platform independent of ThoughtData and NetAI. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-002` | Platform SHALL enforce: Only approved OSS catalogue dependencies may ship. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-003` | Platform SHALL enforce: Green permissive licenses generally allowed; Yellow review; Red blocked by default. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-004` | Platform SHALL enforce: SBOM SPDX + CycloneDX, notices, license texts, provenance/checksums every release. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-005` | Platform SHALL enforce: Transitive dependency license/CVE scan mandatory. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-006` | Platform SHALL enforce: Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-OSS-007` | Platform SHALL enforce: Customer-supplied MIBs may be used for that customer but not automatically redistributed. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
 ## 2. Decision labels and truth states
 
 ### 2.1 Architectural decision labels (allow-list intent)
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-003`**: Platform SHALL enforce: Green permissive licenses generally allowed; Yellow review; Red blocked by default.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 - `USE`: approved architectural dependency, subject to pinned-version scan.
 - `USE/WRAP`: approved, but must be hidden behind a Platform adapter/interface.
 - `CANDIDATE`: technically suitable but not frozen until P0 benchmark/architecture review.
@@ -71,6 +62,12 @@ This subsection is the **primary normative owner contract** for the `REQ-OSS` fa
 
 ## 3. Approved/candidate catalogue
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-002`**: Platform SHALL enforce: Only approved OSS catalogue dependencies may ship.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 | ID | Domain | Capability | OSS / Technology | License | Decision | Truth state | Runtime | How Platform uses it | What remains custom |
 |---|---|---|---|---|---|---|---|---|---|
 | OSS-001 | Core Framework | Core control plane/API | Spring Boot | Apache-2.0 | USE | CURRENT_RUNTIME | Core | Java 21 modular Core framework, REST/API, security integration, configuration, lifecycle. | Do not build web/application framework plumbing. Platform-specific domain modules, policies, authorization semantics and workflows remain custom. |
@@ -171,6 +168,14 @@ This subsection is the **primary normative owner contract** for the `REQ-OSS` fa
 
 ## 5. Commercial redistribution requirements
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-004`**: Platform SHALL enforce: SBOM SPDX + CycloneDX, notices, license texts, provenance/checksums every release.
+- **`REQ-OSS-006`**: Platform SHALL enforce: Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights.
+- **`REQ-OSS-007`**: Platform SHALL enforce: Customer-supplied MIBs may be used for that customer but not automatically redistributed.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 1. **Version pinning:** every shipped Maven/NPM/Go/Python/OS package must be pinned or resolved through a reproducible lock/manifest.
 2. **Transitive scan:** top-level license is never enough. CI must inspect Maven transitive dependencies, Go modules, Python wheels, NPM packages, native libraries and bundled data.
 3. **Attribution:** required copyright and license notices must be preserved in `THIRD_PARTY_NOTICES.txt` and/or the release's license directory.
@@ -185,6 +190,12 @@ This subsection is the **primary normative owner contract** for the `REQ-OSS` fa
 
 ## 6. CI compliance pipeline
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-005`**: Platform SHALL enforce: Transitive dependency license/CVE scan mandatory.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ```text
 Dependency proposed
   -> catalogue check

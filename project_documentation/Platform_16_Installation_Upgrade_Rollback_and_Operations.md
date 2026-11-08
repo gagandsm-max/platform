@@ -8,26 +8,19 @@
 
 ## 1. Purpose
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-004`**: Platform SHALL enforce: Desired-vs-actual state and configuration drift.
+- **`REQ-LC-006`**: Platform SHALL enforce: Technology lifecycle/EOL/EOS/firmware risk visibility.
+- **`REQ-LC-008`**: Platform SHALL enforce: Migration Studio from incumbent tools/CMDB/CSV/API.
+- **`REQ-LC-009`**: Platform SHALL enforce: Template library and onboarding wizard.
+- **`REQ-LC-010`**: Platform SHALL enforce: Change freeze and business calendars.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Defines Core/Sensor/Agent installation and enrollment, auto-start and reboot behavior, HA pairing,
 upgrade/rollback sequencing, installer diagnostics, and operational runbooks for component failure, storage pressure,
 Kafka/PostgreSQL/ClickHouse faults, Sensor/Agent failures, certificate rotation, backup/restore and DR.
-
-
-### 1.0 Normative requirements — `REQ-LC` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-LC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-LC-001` | Platform SHALL enforce: Backup/restore with verification. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-002` | Platform SHALL enforce: Safe low-downtime upgrades and rollback. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-007` | Platform SHALL enforce: Support bundle with secret masking and error correlation IDs. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
 
 
 ## 2. Source-document provenance
@@ -41,10 +34,44 @@ This subsection is the **primary normative owner contract** for the `REQ-LC` fam
 
 ## 1. Core installation
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-004`**: Platform SHALL enforce: Desired-vs-actual state and configuration drift.
+- **`REQ-LC-006`**: Platform SHALL enforce: Technology lifecycle/EOL/EOS/firmware risk visibility.
+- **`REQ-LC-008`**: Platform SHALL enforce: Migration Studio from incumbent tools/CMDB/CSV/API.
+- **`REQ-LC-009`**: Platform SHALL enforce: Template library and onboarding wizard.
+- **`REQ-LC-010`**: Platform SHALL enforce: Change freeze and business calendars.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Required release procedure, subject to implemented/signed installer evidence. Install signed native package. Staged/unconfigured package installation is distinct from deliberate authorized activation (see §4 and `Platform_15` §4.3.1). Wizard/CLI selects the certified topology profile to activate. The installer must not expose uncertified HA activation or improvise promotion/failover. A planned wizard/CLI flow is not evidence that an accepted current installer exists.
 
 ### 1.1 Phase 1 — standalone Core installation, upgrade, rollback, restart/reboot and recovery
 
+Phase 1 certifies **one authoritative standalone Core**. Standalone installation, upgrade, rollback, restart/reboot and recovery obligations are mandatory and separate from Phase 1.5 two-Core HA obligations. Phase 1 preserves:
+
+- standalone durability for the certified standalone failure matrix (process/service crash/restart, governed host reboot and other explicitly certified recoverable failures);
+- security/hardening and identity/certificate continuity;
+- Sensor assignment generation/fencing, lease ownership and stale privileged-work rejection (multi-Sensor estates remain Phase 1 mandatory even with a standalone Core);
+- backup/restore of authoritative state/config;
+- site-loss DR for the declared Phase-1 DR profile (redeploy/endpoint redirection where applicable).
+
+Catastrophic single-Core/storage destruction is not Phase-1 zero-RPO HA; recovery uses backup/restore and the declared Phase-1 DR profile. HA ≠ DR. A Phase 1 standalone certificate must not imply Core-HA service continuity. Cross-reference `Platform_03`, `Platform_12` Issue #200/#202 entries and `Platform_14` quality gates.
+
+### 1.2 Phase 1.5 — exactly-two-Core HA installation and pairing
+
+Phase 1.5 certifies exactly two full Core nodes Active/Standby. In HA, first Core receives HA/peer addressing, starts as initial Active and waits for second Core. Second Core is installed with peer/current-master information; mutual identity/certificate handshake completes, state synchronization is verified, and one node remains Active while the other is Standby.
+
+Phase 1.5 HA obligations remain mandatory for that envelope and include positive fencing before automatic promotion, peer-partition fail-closed / `SPLIT_BRAIN_PREVENTED` behavior, former-Active rejoin protection, survivor-durability for the certified permanent single-Core HA failure matrix (`ACKED-FOR-DELETION TELEMETRY RPO = 0` for those HA scenarios; distinct from site/DR RPO), Sensor reconnect/re-anchor and push-protocol continuity. Do not invent a third Core, witness, quorum product or new topology. Physical HA mechanisms remain owned by BUILD-120–124 / `HA_DURABILITY_DESIGN_GATE` and are not selected by this operations document.
+
+### 1.1 Phase 1 — standalone Core installation, upgrade, rollback, restart/reboot and recovery
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-001`**: Platform SHALL enforce: Backup/restore with verification.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Phase 1 certifies **one authoritative standalone Core**. Standalone installation, upgrade, rollback, restart/reboot and recovery obligations are mandatory and separate from Phase 1.5 two-Core HA obligations. Phase 1 preserves:
 
 - standalone durability for the certified standalone failure matrix (process/service crash/restart, governed host reboot and other explicitly certified recoverable failures);
@@ -89,6 +116,26 @@ Installation certification requires both cold-reboot auto-start and process-kill
 
 ## 5. Upgrade
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-002`**: Platform SHALL enforce: Safe low-downtime upgrades and rollback.
+- **`REQ-LC-003`**: Platform SHALL enforce: Canary rollout and feature flags.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+### 5.1 Supported upgrade origins (`UPGRADE_ORIGIN`)
+
+Mother Reference migrations (`Platform_17` MIG-PLAN-*) and the upgrade journey (`Platform_06` §119.21) SHALL use only these supported origins:
+
+| Origin ID | Profile | Meaning |
+|---|---|---|
+| `EMPTY_INSTALL→CURRENT` | Phase 1 standalone | Fresh install of the current package/schema set |
+| `PREVIOUS_GA_PACKAGE→CURRENT` | Phase 1 standalone | Upgrade from the previous GA package/schema on one authoritative Core |
+| `HA_STANDBY_FIRST_ROLLING→CURRENT` | Phase 1.5 HA only | Rolling upgrade: Standby first, switchover, former Active — requires BUILD-120–124 design gate progress; not a Phase-1 claim |
+
+Mixed Sensor/Agent package versions are a **reported compatibility state**, not a Core partial-schema upgrade origin. Unlisted origins are unsupported until Founder/change-control expands this table.
+
 Preflight → capacity/free-space check → package signature → state/config backup → drain/standby orchestration (HA only) → package update → schema migration → service start → health verification → compatibility verification → completion.
 
 **Phase 1 standalone upgrades** exercise backup/restore prerequisites, signature/provenance checks, schema migration safety, identity/certificate continuity, unacknowledged spool continuity and post-upgrade health without Core-HA switchover claims.
@@ -101,6 +148,12 @@ Rollback restores compatible package/config/schema state where supported. One-wa
 
 ## 7. Failure diagnostics
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-007`**: Platform SHALL enforce: Support bundle with secret masking and error correlation IDs.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every installer returns stable error code, writes sanitized install log and points to remediation. Failed install must not leave ambiguous partially registered identities without cleanup/retry guidance. Native package acceptance evidence must bind exact source commit/tree, builder identity, binary/package hashes, commands, true exits and logs, activated lifecycle, upgrade/rollback, identity/certificate continuity, unacknowledged spool continuity, permissions/hardening, resource behavior and relevant failure/recovery evidence per `Platform_15` §4.8. Container fixtures and staged-only evidence remain bounded; unsigned internal development evidence is not release signing certification.
 
 For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required outcomes and blocked in-use binaries must be surfaced to the deployment operator with bounded retry/reboot procedure; an unattended install must not schedule an unapproved forced reboot. After any approved reboot, verify SCM start, identity/cert continuity, spool replay/ACK safety and actual telemetry freshness; MSI success alone is not recovery proof. An irreducible blocked native call/EDR lock requires explicit degraded state and operator path, not an infinite stop wait or silent deletion of queue segments.
@@ -112,6 +165,16 @@ For Windows Agent MSI, `3010`/other actual Windows Installer reboot-required out
 
 ## 1. Required runbooks
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-004`**: Platform SHALL enforce: Desired-vs-actual state and configuration drift.
+- **`REQ-LC-006`**: Platform SHALL enforce: Technology lifecycle/EOL/EOS/firmware risk visibility.
+- **`REQ-LC-008`**: Platform SHALL enforce: Migration Studio from incumbent tools/CMDB/CSV/API.
+- **`REQ-LC-009`**: Platform SHALL enforce: Template library and onboarding wizard.
+- **`REQ-LC-010`**: Platform SHALL enforce: Change freeze and business calendars.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Core process failure; repeated crash loop; **Phase 1 standalone Core recovery/backup/restore/site-loss DR**; **Phase 1.5 HA failover/fencing/peer-partition/former-Active rejoin** (distinct from Phase 1 standalone recovery); Sensor failure; Agent offline; Kafka unavailable/lag; PostgreSQL fault; ClickHouse fault; Valkey fault; ingestion backlog; Core storage ≥80%; Sensor disk ≥80%; certificate expiry/rotation; ITSM connector failure; **SNMP poll backlog/degradation; SNMPv3 authentication/engine/time-window failure; SNMP credential rotation; GETBULK/tooBig incompatibility; counter reset/discontinuity anomaly; trap/inform storm or receiver failure; MIB/Capability Pack mapping failure; interface-identity reconciliation conflict**; package upgrade failure; backup failure; restore; DR activation; corrupted/invalid Device Pack; licensing expiry; telemetry-quality degradation; support-bundle generation; staged-versus-activated lifecycle misconfiguration.
 
 ## 2. Runbook structure
@@ -159,6 +222,13 @@ Support bundles include sanitized SNMP component health, poll-plan/profile/versi
 
 ## 5. Linux Agent eBPF and active-path operational runbook supplement — v3.2.2
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-002`**: Platform SHALL enforce: Safe low-downtime upgrades and rollback.
+- **`REQ-LC-003`**: Platform SHALL enforce: Canary rollout and feature flags.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 > **Reconciliation reference:** Issue #142 (Master Chat comments `5909076167` and `5909787672`). Target Phase-1 capabilities are subject to applicable implementation, benchmark, and certification gates.
 
 ### 5.1 Linux Agent eBPF operational states and runbooks
@@ -218,6 +288,12 @@ Operations expose connector/binding counts, match-confidence/conflict states, st
 
 ### 13.4 NCM Change Assurance
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LC-005`**: Platform SHALL enforce: Change impact preview and dry-run.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Runbooks cover stale/failed backup, precheck failure, external approval unavailable/rejected/stale, plan mutation, canary/batch stop, postcheck/stabilization failure, unsupported rollback, partial rollback and escalation. A failed rollback must preserve evidence and stop further destructive rollout. Maintenance/suppression is always explicitly ended or left in a visible failed/attention state; no silent indefinite maintenance.
 
 ### 13.5 Firmware — Phase 1.5

@@ -162,9 +162,20 @@ RTM_SECTION_FORMAL_END_RE = re.compile(
 NON_NORMATIVE_SECTION_HEADING_RE = re.compile(
     r"^#{1,6}\s+.*\b("
     r"non-normative|ownership index|summary[- ]only|catalogue only|"
-    r"formal-id ownership|rtm section formal requirements"
+    r"formal-id ownership|rtm section formal requirements|"
+    r"family catalogue|index[- ]only|summary catalogue"
     r")\b.*$",
     re.I | re.M,
+)
+# Synthetic family ownership catalogues (rejected as primary semantic owners).
+SYNTHETIC_FAMILY_SECTION_HEADING_RE = re.compile(
+    r"^(#{2,6})\s+(\d+(?:\.\d+)*)\.0\s+Normative requirements\b.*$",
+    re.I | re.M,
+)
+SYNTHETIC_FAMILY_LOCATOR_RE = re.compile(
+    r"(?:§|Section\s+)\d+(?:\.\d+)*\.0\s+Normative requirements\b"
+    r"|Normative requirements\s*[—\-]\s*`?REQ-[A-Z]+`?\s+family",
+    re.I,
 )
 # Trailing/footer blocks that only list identifiers without requirement prose.
 BARE_ID_BULLET_RE = re.compile(
@@ -178,6 +189,12 @@ BARE_ID_TABLE_ROW_RE = re.compile(
 # Two-column summary catalogues that merely restatement RTM one-liners.
 SUMMARY_REQ_TABLE_HEADER_RE = re.compile(
     r"^\|\s*Requirement ID\s*\|\s*Normative requirement\s*\|\s*$",
+    re.I | re.M,
+)
+# Four-column synthetic family boilerplate tables.
+FOUR_COLUMN_FAMILY_TABLE_HEADER_RE = re.compile(
+    r"^\|\s*Requirement ID\s*\|\s*Normative SHALL contract\s*\|\s*"
+    r"Parent-section envelope\s*\|\s*Boundary\s*/\s*non-goal\s*\|\s*$",
     re.I | re.M,
 )
 # Extract numbered section references from Platform_08 locators.
@@ -269,25 +286,18 @@ def strip_non_normative_heading_sections(text: str) -> str:
     return "".join(parts)
 
 
-def strip_two_column_summary_req_tables(text: str) -> str:
-    """Remove two-column Requirement ID | Normative requirement summary catalogues.
-
-    These tables historically duplicated RTM one-liners and must not prove
-    ownership by themselves. Genuinely normative multi-column contract tables
-    and prose sections are retained. Semantic sufficiency of retained prose
-    remains an independent-audit concern.
-    """
-    if not SUMMARY_REQ_TABLE_HEADER_RE.search(text):
+def _strip_markdown_tables_matching(text: str, header_re: re.Pattern[str]) -> str:
+    """Remove markdown tables whose header line matches header_re."""
+    if not header_re.search(text):
         return text
     parts: list[str] = []
     idx = 0
-    for match in SUMMARY_REQ_TABLE_HEADER_RE.finditer(text):
+    for match in header_re.finditer(text):
         line_start = text.rfind("\n", 0, match.start()) + 1
         parts.append(text[idx:line_start])
         cursor = match.end()
         if cursor < len(text) and text[cursor] == "\n":
             cursor += 1
-        # Consume separator and subsequent table rows only.
         while cursor < len(text):
             eol = text.find("\n", cursor)
             line = text[cursor:] if eol < 0 else text[cursor:eol]
@@ -300,11 +310,46 @@ def strip_two_column_summary_req_tables(text: str) -> str:
     return "".join(parts)
 
 
+def strip_two_column_summary_req_tables(text: str) -> str:
+    """Remove two-column Requirement ID | Normative requirement summary catalogues.
+
+    These tables historically duplicated RTM one-liners and must not prove
+    ownership by themselves. Semantic sufficiency of retained prose remains an
+    independent-audit concern.
+    """
+    return _strip_markdown_tables_matching(text, SUMMARY_REQ_TABLE_HEADER_RE)
+
+
+def strip_four_column_family_boilerplate_tables(text: str) -> str:
+    """Remove four-column synthetic family SHALL/envelope/boundary tables."""
+    return _strip_markdown_tables_matching(text, FOUR_COLUMN_FAMILY_TABLE_HEADER_RE)
+
+
+def strip_synthetic_family_normative_sections(text: str) -> str:
+    """Drop `.0 Normative requirements — REQ-* family` catalogue sections.
+
+    These headings and their boilerplate tables are not accepted as primary
+    semantic requirement ownership. Substantive numbered sections remain.
+    """
+    if not SYNTHETIC_FAMILY_SECTION_HEADING_RE.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in SYNTHETIC_FAMILY_SECTION_HEADING_RE.finditer(text):
+        parts.append(text[idx : match.start()])
+        rest = text[match.end() :]
+        stop = re.search(r"\n#{1,6}\s+\S", rest)
+        idx = match.end() + (stop.start() if stop else len(rest))
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
 def strip_ownership_index_placeholders(text: str) -> str:
     """Remove index-only ownership placeholders that must not prove RTM ownership.
 
     Structural ownership indexes, RTM SECTION FORMAL REQUIREMENTS catalogues,
-    bare identifier bullets/rows, two-column summary catalogues and labelled
+    bare identifier bullets/rows, two-/four-column summary catalogues, synthetic
+    `.0 Normative requirements` family sections and labelled
     non-normative/summary sections are non-normative. Ownership must still bind
     through an exact Platform_08 section locator into remaining substantive
     owner text. A static validator cannot certify semantic completeness of that
@@ -312,8 +357,10 @@ def strip_ownership_index_placeholders(text: str) -> str:
     """
     text = strip_all_marker_blocks(text, OWNERSHIP_INDEX_START, OWNERSHIP_INDEX_END)
     text = strip_rtm_section_formal_requirement_blocks(text)
+    text = strip_synthetic_family_normative_sections(text)
     text = strip_non_normative_heading_sections(text)
     text = strip_two_column_summary_req_tables(text)
+    text = strip_four_column_family_boilerplate_tables(text)
     # Drop the ownership-index heading and following bare-ID list until the next
     # heading, when present without markers.
     if OWNERSHIP_INDEX_HEADING_RE.search(text):
@@ -366,7 +413,15 @@ def locator_binds_id(locator: str, rid: str, owner_text: str) -> tuple[bool, str
     """Structural check: locator names a real section and the ID appears there.
 
     Returns (ok, reason). Empty/coarse locators without numbered sections fail.
+    Synthetic `.0 Normative requirements — REQ-* family` locators always fail.
+    Catalogue/index/summary sections cannot satisfy primary ownership because
+    they are stripped before this check.
     """
+    if SYNTHETIC_FAMILY_LOCATOR_RE.search(locator or ""):
+        return (
+            False,
+            "locator points at synthetic .0 Normative requirements family catalogue",
+        )
     section_ids = extract_locator_section_ids(locator)
     if not section_ids:
         return False, "locator lacks numbered section reference"
@@ -872,6 +927,16 @@ class MotherReferenceValidator:
             owner_path = paths.get(owner) or (self.docs_root / owner)
             if not owner_path.is_file():
                 self.fail(f"{kind} {rid}: owner file does not exist: {owner}")
+                continue
+            # Reject synthetic family locators before presence checks so the
+            # failure names the catalogue defect rather than a stripped ID.
+            if locator and SYNTHETIC_FAMILY_LOCATOR_RE.search(locator):
+                self.fail(
+                    f"{kind} {rid}: source locator does not bind ID to a "
+                    f"substantive owner section (locator points at synthetic "
+                    f".0 Normative requirements family catalogue): "
+                    f"locator={locator!r} owner={owner}"
+                )
                 continue
             if owner not in owner_text_cache:
                 owner_text_cache[owner] = self._owner_text_without_primary_registry(

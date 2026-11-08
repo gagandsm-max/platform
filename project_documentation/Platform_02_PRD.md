@@ -212,9 +212,13 @@ Exact contractual/external RPO, RTO and automated/manual DR activation remain TB
 ### Native production packages and service continuity
 ### PRD-DEV-001 — Container-isolated engineering environment
 
+**Normative product requirement (`PRD-DEV-001`):** All routine local development and automated testing SHALL run in Docker Compose; project-specific host runtimes are prohibited.
+
 All normal development and automated test stacks shall run under Docker Compose. The repository shall provide a one-command startup path, health-aware startup, deterministic teardown and documented reset/recovery. Project services and databases shall not depend on host-native project runtimes.
 
 ### PRD-DEV-002 — Reboot-safe developer state
+
+**Normative product requirement (`PRD-DEV-002`):** Local developer state SHALL survive normal laptop reboot via named volumes, restart policy and health-aware recovery.
 
 The development environment shall distinguish durable named volumes from disposable test volumes. Normal laptop shutdown/reboot must not corrupt Platform state. After Docker daemon restart, services configured for development auto-resume must restart according to Compose policy and re-establish health without manual database repair.
 
@@ -250,48 +254,6 @@ The Administration and Platform Health workspaces shall expose service health, r
 
 ## 6. Sensor runtime, roles and local continuity
 
-### 6.0 Normative requirements — `REQ-S` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-S` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** - **Purpose/outcome:** One Universal Sensor runtime with role-based collection near the estate - **Subfeatures:** NETWORK/INFRASTRUCTURE/FLOW/LOG; conditional SYNTHETIC/CLOUD_API; COMBINED lab; local spool; 80% protection - **Primary persona:** Platform / Tenant Admin; NOC - **Dependencies:** Core desired-state, credentials, capacity, mTLS - **Preconditions:** Sensor enrolled and healthy - **Primary workflow:** deploy Sensor → assign role → receive work → spool → upload - **Product behavior:** headless; continues during Core/WAN loss while capacity remains - **Failure/degraded behavior:** backpressure/reclaim under 80%; role isolation so Flow does not starve SNMP - **Acceptance outcome:** Sensor continues through Core failover; durable replay idempotent - **Maturity boundary:** SPECIFIED; production entrypoint may not yet wire full governed scheduler — Architecture states target vs gap
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-S-001` | Platform SHALL enforce: Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-002` | Platform SHALL enforce: Sensor locality-aware placement close to devices. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-003` | Platform SHALL enforce: Capacity-aware placement; never overload Sensor for lower RTT. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-004` | Platform SHALL enforce: Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-005` | Platform SHALL enforce: Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-006` | Platform SHALL enforce: Distributed leases/fencing prevent duplicate polling. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-007` | Platform SHALL enforce: Local durable spool/store-and-forward. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-008` | Platform SHALL enforce: Sensor 80% disk protection and bounded junk/log cleanup. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-009` | Platform SHALL enforce: Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-010` | Platform SHALL enforce: Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-011` | Platform SHALL enforce: Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED). Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-012` | Platform SHALL enforce: Agentless infrastructure target ~800 endpoints per 4C/16G Sensor. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-013` | Platform SHALL enforce: Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-014` | Platform SHALL enforce: Windows/Linux Agent supports host metrics and edge network tests. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-015` | Platform SHALL enforce: Branch→DC and DC→branch test support for asymmetric-path evidence. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-S-016` | Platform SHALL enforce: Agent enrolls with Core and Core assigns correct available Sensor. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
-**Feature contract (summary):**
-- **Purpose/outcome:** One Universal Sensor runtime with role-based collection near the estate
-- **Subfeatures:** NETWORK/INFRASTRUCTURE/FLOW/LOG; conditional SYNTHETIC/CLOUD_API; COMBINED lab; local spool; 80% protection
-- **Primary persona:** Platform / Tenant Admin; NOC
-- **Dependencies:** Core desired-state, credentials, capacity, mTLS
-- **Preconditions:** Sensor enrolled and healthy
-- **Primary workflow:** deploy Sensor → assign role → receive work → spool → upload
-- **Product behavior:** headless; continues during Core/WAN loss while capacity remains
-- **Failure/degraded behavior:** backpressure/reclaim under 80%; role isolation so Flow does not starve SNMP
-- **Acceptance outcome:** Sensor continues through Core failover; durable replay idempotent
-- **Maturity boundary:** SPECIFIED; production entrypoint may not yet wire full governed scheduler — Architecture states target vs gap
-
 
 ### Canonical Sensor role taxonomy (normative product)
 
@@ -305,6 +267,12 @@ This subsection is the **primary normative owner contract** for the `REQ-S` fami
 
 ### 6.1 Universal runtime and roles
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-001`**: Platform SHALL enforce: Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 One Universal Sensor Runtime shall support selectable deployment roles. Product-facing production direction:
 
 **Standard production roles**
@@ -368,6 +336,15 @@ High-volume NetFlow/IPFIX/sFlow/J-Flow and high-rate log/event ingestion shall m
 
 ### 6.5 Sensor local continuity
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-006`**: Platform SHALL enforce: Distributed leases/fencing prevent duplicate polling.
+- **`REQ-S-007`**: Platform SHALL enforce: Local durable spool/store-and-forward.
+- **`REQ-S-008`**: Platform SHALL enforce: Sensor 80% disk protection and bounded junk/log cleanup.
+- **`REQ-S-009`**: Platform SHALL enforce: Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Sensors shall:
 
 - be headless for normal administration;
@@ -389,6 +366,12 @@ Sensors shall:
 ## 7. Sensor placement, pools and capacity
 ### 7.1 Placement modes
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-004`**: Platform SHALL enforce: Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 During provisioning customers shall be able to select:
 
 - **Automatic — Recommended**;
@@ -398,6 +381,13 @@ During provisioning customers shall be able to select:
 
 ### 7.2 Placement factors
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-002`**: Platform SHALL enforce: Sensor locality-aware placement close to devices.
+- **`REQ-S-003`**: Platform SHALL enforce: Capacity-aware placement; never overload Sensor for lower RTT.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The Sensor Placement Engine shall evaluate:
 
 - actual reachability;
@@ -420,6 +410,12 @@ Platform may recommend Sensor placement improvements from observed locality, cap
 
 ### 7.3 Sensor pools and redundancy
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-005`**: Platform SHALL enforce: Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Sensor Pools shall support:
 
 - no redundancy;
@@ -437,6 +433,15 @@ Platform shall monitor workload and may recommend or automatically rebalance wor
 
 ### 7.5 Capacity representation
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-010`**: Platform SHALL enforce: Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices.
+- **`REQ-S-011`**: Platform SHALL enforce: Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED).
+- **`REQ-S-012`**: Platform SHALL enforce: Agentless infrastructure target ~800 endpoints per 4C/16G Sensor.
+- **`REQ-S-013`**: Platform SHALL enforce: Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 UI shall show both:
 
 - approximate entity/device capacity;
@@ -450,6 +455,16 @@ Device count alone shall not be the sole enforcement model.
 **Maturity note:** logical Region/Site/Sensor Pool product model is required; physical persistence of pools/regions may be incomplete on current main (Architecture/#92). Do not treat UI/logical design as certified physical schema.
 
 ## 8. Agent requirements
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-002`**: Platform SHALL enforce: Windows/Linux Agents.
+- **`REQ-S-014`**: Platform SHALL enforce: Windows/Linux Agent supports host metrics and edge network tests.
+- **`REQ-S-015`**: Platform SHALL enforce: Branch→DC and DC→branch test support for asymmetric-path evidence.
+- **`REQ-S-016`**: Platform SHALL enforce: Agent enrolls with Core and Core assigns correct available Sensor.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 - Separate Windows and Linux Agent builds.
 - Initial Agent enrollment takes a stable Core endpoint.
 - Core authenticates/enrolls Agent and shall select an appropriate eligible Sensor during enrollment for a provisional authenticated Agent→Sensor control/transport association used for certificate/identity authority, onboarding/bootstrap validation, bounded health/bootstrap evidence and candidate reconciliation.
@@ -620,6 +635,15 @@ Canonical entity identity shall use tenant-aware combinations of stable signals 
 
 
 ## 10. Credential and security protocol requirements
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-GOV-004`**: Platform SHALL enforce: Credentials USE vs VIEW separated.
+- **`REQ-NET-005`**: Platform SHALL enforce: NETCONF/RESTCONF/gNMI/gRPC/streaming.
+- **`REQ-NET-006`**: Platform SHALL enforce: SSH/CLI; Telnet legacy disabled by default and audited.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Credential Profiles shall be centrally managed, encrypted and scoped by tenant/site/group/Sensor policy.
 
 Network/device provisioning must support the following protocol/security categories as certified by device/library compatibility:
@@ -648,33 +672,12 @@ Credential permissions shall distinguish **USE** from **REVEAL**.
 
 ## 11. Network monitoring requirements
 
-### 11.0 Normative requirements — `REQ-NET` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-NET-011`**: Platform SHALL enforce: DNS/DHCP/NTP operational monitoring.
 
-This subsection is the **primary normative owner contract** for the `REQ-NET` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** - **Purpose/outcome:** Low-noise, evidence-qualified operational alerting - **Subfeatures:** event/alert/incident model; qualification; storm/dedup/flapping; maintenance/suppression - **Primary persona:** NOC Operator / Manager - **Dependencies:** freshness, identity, topology, maintenance calendars, multi-evidence - **Preconditions:** monitors assigned and telemetry flowing or path-health known - **Primary workflow:** observe → qualify → correlate → incident → recover - **Product behavior:** SNMP/path failure alone must not auto-assert DEVICE DOWN when contradictory evidence remains credible - **Failure/degraded behavior:** UNKNOWN / MONITORING_DEGRADED / path-unavailable semantics preserved - **Acceptance outcome:** false-alert reduction measurable; severity ≠ confidence - **Maturity boundary:** SPECIFIED Platform shall distinguish: - **Event** — raw observation. - **Alert** — qualified actionable condition. - **Incident** — correlated operational problem grouping one or more alerts/events. Underlying events/child alerts shall remain inspectable even when incident correlation suppresses repetitive notifications. Alert/incident lifecycle shall support New, Acknowledged, Assigned,
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-NET-001` | Platform SHALL enforce: SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-002` | Platform SHALL enforce: ICMP/traceroute/TCP/DNS/TLS/HTTP probes. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-003` | Platform SHALL enforce: SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-004` | Platform SHALL enforce: NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-005` | Platform SHALL enforce: NETCONF/RESTCONF/gNMI/gRPC/streaming. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-006` | Platform SHALL enforce: SSH/CLI; Telnet legacy disabled by default and audited. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-008` | Platform SHALL enforce: BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-009` | Platform SHALL enforce: WLAN deep client/radio/controller experience. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-010` | Platform SHALL enforce: VPN/IPsec/IP SLA/CUCM/VoIP operational monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-011` | Platform SHALL enforce: DNS/DHCP/NTP operational monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-012` | Platform SHALL enforce: TLS/certificate lifecycle monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-013` | Platform SHALL enforce: Circuit/ISP inventory and SLA correlation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-014` | Platform SHALL enforce: Path Analysis workspace. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NET-015` | Platform SHALL enforce: IPv4/IPv6/dual-stack first-class support. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 11.1 SNMP
 
 Platform shall support:
@@ -764,7 +767,131 @@ Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/V
 ---
 
 
+### 11.1 SNMP
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-001`**: Platform SHALL enforce: SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols.
+- **`REQ-NET-003`**: Platform SHALL enforce: SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Platform shall support:
+
+- v1/v2c/v3 polling;
+- GET/GETNEXT/GETBULK/WALK for routine monitoring; SET only through privileged NCM/remediation where explicitly authorized;
+- tables/scalars/counters/gauges/enums;
+- traps/informs;
+- custom MIB upload and dependency resolution;
+- customer-defined polling profiles;
+- adaptive polling;
+- missing-data detection;
+- polling statistics and diagnostics.
+
+#### 11.1.1 Enterprise SNMP correctness and usability requirements
+
+| Requirement ID | PRD ID | Requirement |
+|---|---|---|
+| `REQ-SNMP-001` | `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
+| `REQ-SNMP-002` | `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`; it is not yet benchmarked/certified/deployed. Derived delta/rate/reset/wrap/discontinuity remains SPECIFIED but NOT IMPLEMENTED/CERTIFIED — remaining P0. |
+| `REQ-SNMP-003` | `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
+| `REQ-SNMP-004` | `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
+| `REQ-SNMP-005` | `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
+| `REQ-SNMP-006` | `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
+| `REQ-SNMP-007` | `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
+| `REQ-SNMP-008` | `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
+| `REQ-SNMP-009` | `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
+| `REQ-SNMP-010` | `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
+| `REQ-SNMP-011` | `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
+| `REQ-SNMP-012` | `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
+| `REQ-SNMP-013` | `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
+| `REQ-SNMP-014` | `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
+| `REQ-SNMP-015` | `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
+| `REQ-SNMP-016` | `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
+| `REQ-SNMP-017` | `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
+| `REQ-SNMP-018` | `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
+| `REQ-SNMP-019` | `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
+| `REQ-SNMP-020` | `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
+| `REQ-SNMP-021` | `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
+| `REQ-SNMP-022` | `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
+| `REQ-SNMP-023` | `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
+
+
+### 11.2 Availability and path
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-002`**: Platform SHALL enforce: ICMP/traceroute/TCP/DNS/TLS/HTTP probes.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+- ICMP reachability/RTT/loss.
+- Configurable device-down validation.
+- Traceroute/path history and changes.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and reduce false path-change artifacts from ECMP where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
+- TCP/DNS/TLS/HTTP validation where relevant.
+- Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
+
+### 11.3 Layer and protocol depth
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-008`**: Platform SHALL enforce: BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring.
+- **`REQ-NET-009`**: Platform SHALL enforce: WLAN deep client/radio/controller experience.
+- **`REQ-NET-010`**: Platform SHALL enforce: VPN/IPsec/IP SLA/CUCM/VoIP operational monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Device Packs/telemetry shall support deep monitoring for:
+
+- interfaces, errors, discards, utilization and optical metrics;
+- VLAN/STP/RSTP/MSTP;
+- LACP;
+- ARP/MAC/FDB;
+- CDP/LLDP;
+- BGP;
+- OSPF;
+- IS-IS;
+- BFD;
+- HSRP/VRRP;
+- MPLS/LSP/VRF;
+- VXLAN/EVPN/VNI/VTEP;
+- QoS/CBQoS;
+- multicast/PIM;
+- IP SLA;
+- VPN/IPsec;
+- SD-WAN;
+- WLAN AP/client/radio/controller metrics;
+- CUCM/VoIP where Device Pack support exists.
+
+### 11.4 Flow analytics
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-004`**: Platform SHALL enforce: NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor/J-Flow formats under configured exporter/source/tenant authority. Packet source IP alone is not tenant authority.
+
+Required engineering contracts include: v9/IPFIX template lifecycle/cache/expiry/withdrawal; sampling factor/provenance; sequence/gap/reset evidence; UDP pre-acceptance loss visibility; observation point; ingress/egress/direction evidence; duplicate/exporter-HA semantics; raw evidence preserved before enrichment; temporal entity/IP mapping; DNS/DHCP/IPAM evidence; authenticated user/session evidence where available; ASN/Geo/cloud/SaaS enrichment with confidence/time/provenance.
+
+Directory membership alone does not prove historical IP ownership. Domain/application identity does not equal full URL. Public-IP Geo is approximate. User-attributed Flow requires privacy/RBAC controls. Flow Coverage may compare compatible Flow vs interface evidence. **No Flow ≠ no traffic**. Flow anomaly ≠ device down/root cause.
+
+Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/VRF, ASN/BGP, cloud, service/application metadata when exporter provides it, QoS and tenant. Views shall include top talkers, source/destination, conversations, protocols/ports, site-to-site, interfaces, ASN, matrices, Sankey, anomalies and capacity. Platform shall not claim deep L7 application visibility without exporter-provided metadata or future DPI capability. ClickHouse remains high-volume Flow analytics authority; no new datastore. Production high-volume Flow uses the `FLOW` deployment role.
+
+---
+
+
 ## 12. Infrastructure, hardware, virtualization and storage
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-006`**: Platform SHALL enforce: UPS/PDU/environment/power/cooling/rack sensors.
+- **`REQ-INF-011`**: Platform SHALL enforce: Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 12.1 Server/OS
 
 Support agentless and optional Agent-based monitoring for:
@@ -835,6 +962,93 @@ On supported Linux distributions and kernels under the certified Ubuntu 24.x / R
 - Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
 
 
+### 12.1 Server/OS
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-001`**: Platform SHALL enforce: SSH/WMI/WinRM agentless infrastructure monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Support agentless and optional Agent-based monitoring for:
+
+- CPU/load;
+- memory/swap;
+- filesystem/disk capacity;
+- disk I/O/latency/IOPS;
+- network interfaces;
+- processes including command-line arguments where permitted;
+- services/daemons;
+- uptime/reboots;
+- selected logs/events.
+
+### 12.2 Hardware/OOB
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-003`**: Platform SHALL enforce: iDRAC/iLO/CIMC/Redfish/IPMI hardware lifecycle.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Redfish/vendor pack support shall cover:
+
+- chassis;
+- CPU/DIMM;
+- disks/RAID/controllers;
+- PSU;
+- fans;
+- temperature;
+- batteries;
+- firmware/BIOS;
+- NICs;
+- lifecycle events.
+
+### 12.3 Virtualization
+
+Support VMware/vCenter/ESXi, Hyper-V, Proxmox and Nutanix with normalized entity relationships such as cluster → host → VM → datastore/network.
+
+### 12.4 Storage/SAN
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-005`**: Platform SHALL enforce: Storage and SAN/FC monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput, latency, pools/volumes/controllers/disks, replication, FC switches/ports/fabrics/zones/WWNs, errors and congestion where vendor interfaces permit.
+
+---
+
+
+### Windows/Linux infrastructure monitoring modes
+
+Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
+
+Customer-visible server monitoring shall include, where the OS/version/privilege supports it:
+
+- CPU utilization and useful scheduler/resource-pressure evidence;
+- memory, swap/page/commit and resource-exhaustion evidence;
+- filesystem capacity/inodes and block-I/O throughput/IOPS/queue/latency/error evidence;
+- network-interface state/throughput/errors/drops and bounded transport-quality counters;
+- bounded process resource/state/restart information;
+- Linux systemd and Windows service state/restart/failure information;
+- OS/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
+- applicable hardware/thermal/power evidence through approved native or out-of-band sources.
+
+Linux Agent and Windows Agent are the richer local collection modes. Linux agentless monitoring uses governed SSH query packs; Windows agentless monitoring uses governed WinRM/WMI/CIM query packs. Product/UI/API shall disclose capability differences rather than imply identical raw coverage.
+
+Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
+
+### 12.5 Linux Agent eBPF process-to-network telemetry (REQ-INF-013)
+
+On supported Linux distributions and kernels under the certified Ubuntu 24.x / RHEL 9.x compatibility matrix (using BTF/CO-RE where the selected implementation requires/supports it), the Linux Agent shall collect bounded process-to-network evidence via eBPF probes:
+- Correlate active host processes, systemd services, and container workloads with local/remote socket communication endpoints (local IP/port, remote IP/port, protocol).
+- Measure connection performance: active/new/closed sockets, bytes TX/RX, mean TCP RTT, retransmissions, and connection failures.
+- Aggregate locally into bounded configurable aggregation intervals with bounded active-key cardinality ceilings and heavy-hitter overflow shedding; do not stream individual socket events over the network.
+- Enforce strict data minimization: zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
+- Implement resource governance: bounded eBPF memory and resource budgets derived from BUILD-019 / BUILD-130 benchmark certification; transitions to `RESOURCE_GUARDED` capability state with explicit drop/shed/resource-guard counters (`dropped_records_count`, `shed_records_count`) when thresholds are approached.
+- Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
+
 
 ## 13. Database monitoring requirements
 Platform shall provide database packs/connectors for major databases including PostgreSQL, MySQL/MariaDB, Microsoft SQL Server, Oracle, SAP HANA, MongoDB, ClickHouse and Elasticsearch/OpenSearch where interfaces/licensing permit.
@@ -858,26 +1072,6 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 
 ## 14. Cloud, Kubernetes and OpenTelemetry
-
-### 14.0 Normative requirements — `REQ-INF` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-INF` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** - **Purpose/outcome:** Low-noise, evidence-qualified operational alerting - **Subfeatures:** event/alert/incident model; qualification; storm/dedup/flapping; maintenance/suppression - **Primary persona:** NOC Operator / Manager - **Dependencies:** freshness, identity, topology, maintenance calendars, multi-evidence - **Preconditions:** monitors assigned and telemetry flowing or path-health known - **Primary workflow:** observe → qualify → correlate → incident → recover - **Product behavior:** SNMP/path failure alone must not auto-assert DEVICE DOWN when contradictory evidence remains credible - **Failure/degraded behavior:** UNKNOWN / MONITORING_DEGRADED / path-unavailable semantics preserved - **Acceptance outcome:** false-alert reduction measurable; severity ≠ confidence - **Maturity boundary:** SPECIFIED Platform shall distinguish: - **Event** — raw observation. - **Alert** — qualified actionable condition. - **Incident** — correlated operational problem grouping one or more alerts/events. Underlying events/child alerts shall remain inspectable even when incident correlation suppresses repetitive notifications. Alert/incident lifecycle shall support New, Acknowledged, Assigned,
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-INF-001` | Platform SHALL enforce: SSH/WMI/WinRM agentless infrastructure monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-002` | Platform SHALL enforce: Windows/Linux Agents. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-003` | Platform SHALL enforce: iDRAC/iLO/CIMC/Redfish/IPMI hardware lifecycle. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-005` | Platform SHALL enforce: Storage and SAN/FC monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-006` | Platform SHALL enforce: UPS/PDU/environment/power/cooling/rack sensors. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-009` | Platform SHALL enforce: Kubernetes/Docker/container monitoring. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-011` | Platform SHALL enforce: Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INF-012` | Platform SHALL enforce: Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
 
 
 ### 14.1 Cloud
@@ -922,6 +1116,12 @@ Maturity: **SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED**. Build ownership reuse
 
 ### 14.2 Kubernetes
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-009`**: Platform SHALL enforce: Kubernetes/Docker/container monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Hierarchy shall include:
 
 Cluster → Node → Namespace → Workload → Pod → Container → Service → Ingress.
@@ -938,6 +1138,14 @@ OpenTelemetry integration adheres to a two-phase contract boundary (`REQ-INF-010
 
 
 ## 15. Synthetics and service assurance
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-012`**: Platform SHALL enforce: Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS.
+- **`REQ-NET-012`**: Platform SHALL enforce: TLS/certificate lifecycle monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Synthetic Monitor Studio shall support structured, safe tests for:
 
 - ICMP;
@@ -955,126 +1163,29 @@ HTTP/API tests shall support method, headers, authentication, body, expected sta
 
 ## 16. Extensibility studios (MIB, API, Device Pack)
 
-### 16.0 Normative requirements — `REQ-EXT` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-EXT-001`**: Platform SHALL enforce: MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation.
+- **`REQ-EXT-002`**: Platform SHALL enforce: API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/.
+- **`REQ-EXT-003`**: Platform SHALL enforce: Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards.
+- **`REQ-EXT-004`**: Platform SHALL enforce: Device Packs signed/versioned/exportable/importable/rollback capable.
+- **`REQ-EXT-005`**: Platform SHALL enforce: Device Pack certification levels: Official/Partner/Customer/Experimental.
+- **`REQ-EXT-006`**: Platform SHALL enforce: Device Pack test simulator using sample SNMP walk/API/CLI/trap/syslog.
+- **`REQ-EXT-007`**: Platform SHALL enforce: Vendor MIB/YANG/API/icon/template provenance and redistribution rights tracked.
 
-This subsection is the **primary normative owner contract** for the `REQ-EXT` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** - **Purpose/outcome:** Low-noise, evidence-qualified operational alerting - **Subfeatures:** event/alert/incident model; qualification; storm/dedup/flapping; maintenance/suppression - **Primary persona:** NOC Operator / Manager - **Dependencies:** freshness, identity, topology, maintenance calendars, multi-evidence - **Preconditions:** monitors assigned and telemetry flowing or path-health known - **Primary workflow:** observe → qualify → correlate → incident → recover - **Product behavior:** SNMP/path failure alone must not auto-assert DEVICE DOWN when contradictory evidence remains credible - **Failure/degraded behavior:** UNKNOWN / MONITORING_DEGRADED / path-unavailable semantics preserved - **Acceptance outcome:** false-alert reduction measurable; severity ≠ confidence - **Maturity boundary:** SPECIFIED Platform shall distinguish: - **Event** — raw observation. - **Alert** — qualified actionable condition. - **Incident** — correlated operational problem grouping one or more alerts/events. Underlying events/child alerts shall remain inspectable even when incident correlation suppresses repetitive notifications. Alert/incident lifecycle shall support New, Acknowledged, Assigned,
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-EXT-001` | Platform SHALL enforce: MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-002` | Platform SHALL enforce: API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-003` | Platform SHALL enforce: Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-004` | Platform SHALL enforce: Device Packs signed/versioned/exportable/importable/rollback capable. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-005` | Platform SHALL enforce: Device Pack certification levels: Official/Partner/Customer/Experimental. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-006` | Platform SHALL enforce: Device Pack test simulator using sample SNMP walk/API/CLI/trap/syslog. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-EXT-007` | Platform SHALL enforce: Vendor MIB/YANG/API/icon/template provenance and redistribution rights tracked. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-MIB Studio remains part of the single Capability Pack extension architecture (not a second pack registry/SDK). Required contracts include import, revision/version, provenance/licensing, dependencies, compile/test, OID/table/notification mapping and firmware/model compatibility.
-
-
-Required capabilities:
-
-- MIB library;
-- upload one/multiple MIBs;
-- dependency/import resolution;
-- compile/validation;
-- OID tree/explorer;
-- scalar/table/counter/gauge/enum/trap identification;
-- connect/test against sample device;
-- walk/test;
-- AI-assisted semantic suggestions clearly labeled `AI Suggested`;
-- user confirmation;
-- normalized metric mapping;
-- alert/visualization suggestions;
-- trap registration/decoding;
-- creation/update of Device Pack;
-- versioning/export/import/signing/provenance.
-
-MIB provenance shall classify Platform Supplied, Customer Supplied, Partner Supplied and preserve source/licence/redistribution metadata. Customer-uploaded vendor MIBs shall not automatically be redistributed to other customers.
-
----
-
-
-API Studio collection runtime is **monitoring source collection**, distinct from external integration delivery queues. Required contracts include REST/API schema, authentication reference, pagination, extraction/mapping, rate-limit behavior, collection cadence/freshness, schema-drift handling and source provenance. Do not treat an outbound ITSM/webhook connector queue as the API monitoring scheduler.
-
-Webhook contracts distinguish inbound webhook, outbound webhook and callback, and require as applicable: authentication/signature verification, replay protection, tenant/source binding, SSRF/egress restrictions, allowlists, secret handling, schema validation, rate limits, idempotency and auditing. No arbitrary scripts. No second Pack registry/SDK.
-
-
-Wizard stages:
-
-1. Connection.
-2. Authentication.
-3. Endpoint/OpenAPI import.
-4. Test request.
-5. Schema inspection.
-6. Entity mapping.
-7. Metric mapping.
-8. Collections/pagination/chained requests.
-9. Alerts/monitor definitions.
-10. Dashboard suggestions.
-11. Publish/version.
-
-Support:
-
-- OpenAPI/Swagger import as highest automation path;
-- GET/POST/PUT/PATCH where safe/required;
-- Basic/Bearer/API key/OAuth2/custom header/mTLS;
-- JSON and XML;
-- JSONPath/JMESPath-like mappings through approved libraries;
-- nested arrays/objects;
-- pagination/cursors;
-- retries/rate limits/timeouts;
-- token refresh;
-- timestamp/unit/null transformations;
-- derived metrics;
-- chained endpoints.
-
-AI may suggest schema interpretation but an administrator confirms mappings before production publication.
-
----
-
-
-A Device Pack may contain:
-
-- identification rules;
-- discovery rules;
-- SNMP/MIB/OID/trap mappings;
-- REST/API mappings;
-- gNMI/YANG paths;
-- CLI/parsers;
-- NCM commands and modes;
-- normalized metrics;
-- inventory/entity mappings;
-- topology relationships;
-- dashboards;
-- alert semantics;
-- RCA semantics;
-- remediation/runbook metadata;
-- vendor/model/firmware/API/MIB compatibility;
-- provenance/licensing metadata.
-
-Certification levels:
-
-- Official Certified;
-- Partner Verified;
-- Customer Custom;
-- Experimental.
-
-A Device Pack Test Lab shall accept sample SNMP walks, REST responses, CLI output, traps/syslogs and validate extraction, enums, topology, alerts, NCM parsing and dashboards without repeatedly contacting a production device.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### OSS implementation basis (product constraint)
 Module SHALL use catalogue-approved OSS for commodity primitives and retain Platform-owned product layers (identity, policy, placement, qualification, RCA guardrails, UX). Exact component versions and licence class live in `Platform_07_OSS_Catalog.md`; runtime authority in `Platform_03_Architecture.md`. The historical PRD-OSS tables are absorbed as this constraint — not as a competing catalogue.
 
 ## 17. Canonical entity and operational graph
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-002`**: Platform SHALL enforce: Physical/L2/L3/routing/MPLS/VXLAN/SDWAN/traffic/infra/service/causal/geo views.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The same physical/logical resource shall not become duplicate entities merely because it is observed through SNMP, flow, syslog, NCM, API or Agent.
 
 Entity families include tenant, region, site, network device, chassis/module/interface, VRF/VLAN, route/peer, server/OS/NIC/disk/process/service, hypervisor/VM, storage, DB, Kubernetes, cloud and business service entities.
@@ -1091,6 +1202,13 @@ Historical topology shall support viewing the network/service graph as it existe
 
 
 ## 18. Grouping, hierarchy, ownership and circuits
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-013`**: Platform SHALL enforce: Circuit/ISP inventory and SLA correlation.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall support concurrently:
 
 - tags/attributes;
@@ -1304,37 +1422,26 @@ Every grouped/suppressed child remains inspectable with its governing rule/versi
 
 ## 21. Graph intelligence, GNN and RCA
 
-### 21.0 Normative requirements — `REQ-RCA` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-RCA` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-RCA-001` | Platform SHALL enforce: One temporal multi-layer canonical operational graph. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-002` | Platform SHALL enforce: Physical/L2/L3/routing/MPLS/VXLAN/SDWAN/traffic/infra/service/causal/geo views. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-003` | Platform SHALL enforce: Relationship provenance/confidence and historical topology. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-004` | Platform SHALL enforce: Hybrid deterministic+temporal+topology+protocol+change+anomaly RCA. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-005` | Platform SHALL enforce: Root cause, confidence, causal chain, blast radius, evidence, contradictions, missing evidence, recommendation. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-006` | Platform SHALL enforce: INCONCLUSIVE is a valid RCA outcome. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-007` | Platform SHALL enforce: GNN only as hypothesis/propagation/impact scorer, never automatic causal proof. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-008` | Platform SHALL enforce: Gemini through AI Gateway for NL search/explanation/summaries/recommendations. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-009` | Platform SHALL enforce: Future private/offline/local LLM provider. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-010` | Platform SHALL enforce: AI data boundaries, masking and audit. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-011` | Platform SHALL enforce: RCA correctness feedback and intelligence-quality dashboard. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-RCA-013` | Platform SHALL enforce: PIR/problem-management generation and customer runbook knowledge base. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
 
 ### 21.1 Architecture principle
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-001`**: Platform SHALL enforce: One temporal multi-layer canonical operational graph.
+- **`REQ-RCA-004`**: Platform SHALL enforce: Hybrid deterministic+temporal+topology+protocol+change+anomaly RCA.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform RCA is a **hybrid evidence-based graph reasoning system**. It shall not be an LLM-only system and shall not treat GNN output as proof of causality.
 
 ### 21.2 Evidence inputs
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-003`**: Platform SHALL enforce: Relationship provenance/confidence and historical topology.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 RCA shall combine, when available:
 
 - temporal event order;
@@ -1353,6 +1460,12 @@ RCA shall combine, when available:
 
 ### 21.3 GNN learning incorporated from graph-first products
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-007`**: Platform SHALL enforce: GNN only as hypothesis/propagation/impact scorer, never automatic causal proof.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall maintain a temporal multi-layer operational graph suitable for learned graph features. A GNN/graph-learning component may:
 
 - learn propagation signatures;
@@ -1367,6 +1480,13 @@ GNN results must remain subordinate to evidence/protocol constraints. Model outp
 
 ### 21.4 RCA output
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-005`**: Platform SHALL enforce: Root cause, confidence, causal chain, blast radius, evidence, contradictions, missing evidence, recommendation.
+- **`REQ-RCA-006`**: Platform SHALL enforce: INCONCLUSIVE is a valid RCA outcome.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every RCA shall expose:
 
 - probable root cause or `INCONCLUSIVE`;
@@ -1396,6 +1516,12 @@ Codebook input uses TRUE, FALSE and UNKNOWN; stale/absent evidence cannot silent
 
 ### 21.6 RCA quality benchmark
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-011`**: Platform SHALL enforce: RCA correctness feedback and intelligence-quality dashboard.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Engineering/QA shall maintain a labeled incident benchmark including at minimum representative cases such as physical link failure, interface shutdown, BGP/OSPF cascades, MPLS path failure, configuration blackhole, congestion, hardware/power fault, maintenance storm and multi-site dependency failure.
 
 Measure:
@@ -1430,6 +1556,15 @@ Platform shall incorporate graph-first learning without copying NetAI proprietar
 
 
 ## 22. AI Gateway and local intelligence placement
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-008`**: Platform SHALL enforce: Gemini through AI Gateway for NL search/explanation/summaries/recommendations.
+- **`REQ-RCA-009`**: Platform SHALL enforce: Future private/offline/local LLM provider.
+- **`REQ-RCA-010`**: Platform SHALL enforce: AI data boundaries, masking and audit.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Gemini shall be integrated through a provider-independent AI Gateway.
 
 Permitted uses include:
@@ -1468,6 +1603,13 @@ Detailed evidence, security, resource and release contracts are authoritative in
 
 
 ## 23. Operations timeline, troubleshooting, path analysis and EDS
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-014`**: Platform SHALL enforce: Path Analysis workspace.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 For device, site, service and incident contexts, Platform shall provide one time-ordered view combining, as available:
 
 - telemetry state changes;
@@ -1543,121 +1685,26 @@ No universal customer CPU/memory/disk threshold is fixed here. Effective values 
 
 ## 24. NCM and Privileged CLI Session Broker
 
-### 24.0 Normative requirements — `REQ-NCM` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-NCM-002`**: Platform SHALL enforce: NCM change evidence enters RCA timeline.
+- **`REQ-NCM-003`**: Platform SHALL enforce: Separate NCM concurrency/rate/window controls.
+- **`REQ-NCM-004`**: Platform SHALL enforce: Privileged browser CLI Session Broker; browser never gets credentials.
+- **`REQ-NCM-005`**: Platform SHALL enforce: CLI RBAC/command policy/JIT/approval/break-glass/session audit.
 
-This subsection is the **primary normative owner contract** for the `REQ-NCM` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** NCM is Day-1 important. Capabilities below are architecture/product scope; certification follows the Phase 1 / Phase 1.5 split (see also §58.4). **Phase 1 independently certifiable subset:** - credentialed SSH/NETCONF/API connections for authorized NCM/CLI paths; - configuration backup; - version history; - diff; - change detection; - compliance rules/golden configuration; - templates (non-executing authoring/storage where certified); - RBAC; - reports; - API; - browser CLI integration only when credential brokering/RBAC/audit are certified; - change audit; - RCA correlation as supporting evidence. **Phase 1.5 default (unless Founder change control promotes earlier):** - bulk push; - scheduling/windows for privileged mass execution; - maker-checker approval driving automated privileged execution; - canary/staged automated privileged rollout; - rollback where adapter/device supports it as part of automated remediation paths.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-NCM-002` | Platform SHALL enforce: NCM change evidence enters RCA timeline. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NCM-003` | Platform SHALL enforce: Separate NCM concurrency/rate/window controls. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NCM-004` | Platform SHALL enforce: Privileged browser CLI Session Broker; browser never gets credentials. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-NCM-005` | Platform SHALL enforce: CLI RBAC/command policy/JIT/approval/break-glass/session audit. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-NCM is Day-1 important. Capabilities below are architecture/product scope; certification follows the Phase 1 / Phase 1.5 split (see also §58.4).
-
-**Phase 1 independently certifiable subset:**
-- credentialed SSH/NETCONF/API connections for authorized NCM/CLI paths;
-- configuration backup;
-- version history;
-- diff;
-- change detection;
-- compliance rules/golden configuration;
-- templates (non-executing authoring/storage where certified);
-- RBAC;
-- reports;
-- API;
-- browser CLI integration only when credential brokering/RBAC/audit are certified;
-- change audit;
-- RCA correlation as supporting evidence.
-
-**Phase 1.5 default (unless Founder change control promotes earlier):**
-- bulk push;
-- scheduling/windows for privileged mass execution;
-- maker-checker approval driving automated privileged execution;
-- canary/staged automated privileged rollout;
-- rollback where adapter/device supports it as part of automated remediation paths.
-
-Semantic diff shall only be claimed where a Device Pack/parser supports it.
-
-NCM worker concurrency/rate limits are independent from routine monitoring workers so NCM jobs cannot starve polling.
-
-Bulk operations shall support dry-run/impact preview and canary/staged execution when the privileged-automation envelope is certified (Phase 1.5 by default).
-
----
-
-
-The browser shall never directly receive reusable device credentials.
-
-CLI launch may use an authorized stored Credential Profile, a user-scoped/personal credential where policy permits, or explicitly entered one-time session credentials. One-time credentials must be ephemeral, must not be persisted as reusable secrets unless the user explicitly invokes an authorized credential-management workflow, and must never be logged or exposed to unrelated browser/API clients.
-
-Flow: Browser HTTPS/WebSocket → Core Session Broker → assigned Network Sensor → SSH device.
-
-Controls:
-
-- CLI privilege tiers: no access / read-only / operational / configuration / full privileged, as applicable;
-- tenant/resource scope;
-- JIT/temporary access;
-- reason/ticket requirement;
-- MFA/re-auth where policy requires;
-- command allow/deny patterns;
-- high-risk approval;
-- session timeout/idle/concurrency/hours;
-- full command audit;
-- optional terminal/session playback where configured;
-- break-glass.
-
-Telnet is legacy, disabled by default and never automatic fallback.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 25. IPAM requirements
 
-### 25.0 Normative requirements — `REQ-IPAM` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-IPAM-001`**: Platform SHALL enforce: Native IPAM IPv4/IPv6/subnet/supernet/VLAN/VRF/address/DNS/DHCP/leases/conflicts/history/forecast.
+- **`REQ-IPAM-002`**: Platform SHALL enforce: Microsoft DHCP/DNS and Infoblox integration.
+- **`REQ-IPAM-003`**: Platform SHALL enforce: IPAM enriches canonical graph and Flow.
+- **`REQ-NET-015`**: Platform SHALL enforce: IPv4/IPv6/dual-stack first-class support.
 
-This subsection is the **primary normative owner contract** for the `REQ-IPAM` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** IPAM shall support: - IPv4 and IPv6 as first-class, including dual-stack estates; - subnet/supernet hierarchy; - VLAN/VRF association; - address state/reservation; - DNS/DHCP integration; - leases; - conflicts/duplicates; - history; - discovery/reconciliation; - utilization; - exhaustion forecasting; - APIs; - audit; - Microsoft DHCP/DNS and Infoblox integration where APIs are available. IPAM is integrated into the canonical graph and shall not be a separate competing inventory authority. ---
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-IPAM-001` | Platform SHALL enforce: Native IPAM IPv4/IPv6/subnet/supernet/VLAN/VRF/address/DNS/DHCP/leases/conflicts/history/forecast. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-IPAM-002` | Platform SHALL enforce: Microsoft DHCP/DNS and Infoblox integration. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-IPAM-003` | Platform SHALL enforce: IPAM enriches canonical graph and Flow. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-IPAM shall support:
-
-- IPv4 and IPv6 as first-class, including dual-stack estates;
-- subnet/supernet hierarchy;
-- VLAN/VRF association;
-- address state/reservation;
-- DNS/DHCP integration;
-- leases;
-- conflicts/duplicates;
-- history;
-- discovery/reconciliation;
-- utilization;
-- exhaustion forecasting;
-- APIs;
-- audit;
-- Microsoft DHCP/DNS and Infoblox integration where APIs are available.
-
-IPAM is integrated into the canonical graph and shall not be a separate competing inventory authority.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 26. Display timezone, scheduling and freshness
 | ID | Requirement |
 |---|---|
@@ -1730,146 +1777,27 @@ Financial/service-credit formulas may be represented as customer-defined metadat
 
 ## 28. ITSM and notification integrations
 
-### 28.0 Normative requirements — `REQ-INT` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-INT-001`**: Platform SHALL enforce: ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform hea.
+- **`REQ-INT-002`**: Platform SHALL enforce: Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels.
+- **`REQ-INT-003`**: Platform SHALL enforce: Bidirectional ITSM field/state/note synchronization where API allows.
+- **`REQ-INT-004`**: Platform SHALL enforce: Durable outbound integration queue/retry/idempotency/dead-letter/pause-drain-replay health.
+- **`REQ-INT-005`**: Platform SHALL enforce: Integration Test Sandbox before production enablement.
 
-This subsection is the **primary normative owner contract** for the `REQ-INT` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Supported adapters shall include architecture for: - ServiceNow; - BMC Helix/Remedy; - ServiceDesk Plus; - SummitAI; - Freshservice/Freshworks; - Jira Service Management; - generic REST/webhook; - email; - Microsoft Teams; - Slack; - approved WhatsApp Business provider/API; - SMS/PagerDuty adapters where configured. ITSM integration shall be bidirectional where the target API permits. Required connector contracts include: stable Platform incident ↔ external object binding; connector capability/version certification; guided preflight (DNS/TLS/proxy/auth/permissions); type-safe field mapping; required-field/state validation; payload preview before egress; idempotency keys; race-safe bidirectional lifecycle; signed/authenticated inbound callbacks; queue/retry/dead-letter health; pause/drain/replay; safe configuration promotion; credential rebinding; sanitized support evidence. External ticket closure/state/automation success does **not** prove monitored recovery or override Platform health. No arbitrary Python/JavaScript customer mapping runtime. No mandatory new Integration Fabric service.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-INT-001` | Platform SHALL enforce: ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform hea. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INT-002` | Platform SHALL enforce: Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INT-003` | Platform SHALL enforce: Bidirectional ITSM field/state/note synchronization where API allows. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INT-004` | Platform SHALL enforce: Durable outbound integration queue/retry/idempotency/dead-letter/pause-drain-replay health. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-INT-005` | Platform SHALL enforce: Integration Test Sandbox before production enablement. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-Supported adapters shall include architecture for:
-
-- ServiceNow;
-- BMC Helix/Remedy;
-- ServiceDesk Plus;
-- SummitAI;
-- Freshservice/Freshworks;
-- Jira Service Management;
-- generic REST/webhook;
-- email;
-- Microsoft Teams;
-- Slack;
-- approved WhatsApp Business provider/API;
-- SMS/PagerDuty adapters where configured.
-
-ITSM integration shall be bidirectional where the target API permits.
-
-Required connector contracts include: stable Platform incident ↔ external object binding; connector capability/version certification; guided preflight (DNS/TLS/proxy/auth/permissions); type-safe field mapping; required-field/state validation; payload preview before egress; idempotency keys; race-safe bidirectional lifecycle; signed/authenticated inbound callbacks; queue/retry/dead-letter health; pause/drain/replay; safe configuration promotion; credential rebinding; sanitized support evidence. External ticket closure/state/automation success does **not** prove monitored recovery or override Platform health. No arbitrary Python/JavaScript customer mapping runtime. No mandatory new Integration Fabric service.
-
-Ticket creation shall include root cause/confidence, affected scope, correlated alerts, evidence, config changes and recommended actions.
-
-Recovery policy options:
-
-- resolve only in Platform;
-- update ITSM but leave ticket open;
-- auto-resolve/close selected incident types;
-- resolved-monitoring-recovery state.
-
-A durable outbound integration queue, retries, idempotency/correlation IDs and connector health dashboard are required.
-
-An Integration Test Sandbox shall validate authentication, connection, field mapping, create/update/resolve flows before production enablement.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 29. RBAC, audit, API-first and query protection
 
-### 29.0 Normative requirements — `REQ-GOV` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-GOV-001`**: Platform SHALL enforce: Append-only/tamper-evident structured audit, SIEM export and protected retention.
+- **`REQ-GOV-002`**: Platform SHALL enforce: RBAC + resource scope + conditions; explicit deny wins.
+- **`REQ-GOV-003`**: Platform SHALL enforce: AD/LDAP/SAML/OIDC/Entra identity mapping.
+- **`REQ-GOV-005`**: Platform SHALL enforce: MFA/approval/reason/ticket for sensitive actions.
 
-This subsection is the **primary normative owner contract** for the `REQ-GOV` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Authorization model: **Who × Resource × Action × Where × Conditions**. Dimensions: - tenant; - region/site/group/device/service; - module; - action; - condition/time/MFA/ticket/approval. Explicit deny wins where supported. Built-in role templates are cloneable/customizable. Sensitive actions may require MFA, approval, reason or ticket. Access Simulator shall answer questions such as “Can user X execute configuration command on device Y?” and explain the effective permission path. All authorization is enforced server-side. --- Audit shall cover authentication, users/RBAC, provisioning, credentials, monitoring policies, alerts/incidents, maintenance, NCM/CLI, IPAM, dashboards/maps/reports, integrations, AI/remediation, Sensors/HA, licensing, retention, backup/restore and upgrades. Audit event fields include: - actor/service/policy engine; - tenant; - action; - object/resource; - timestamp; - source UI/API/system;
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-GOV-001` | Platform SHALL enforce: Append-only/tamper-evident structured audit, SIEM export and protected retention. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-GOV-002` | Platform SHALL enforce: RBAC + resource scope + conditions; explicit deny wins. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-GOV-003` | Platform SHALL enforce: AD/LDAP/SAML/OIDC/Entra identity mapping. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-GOV-004` | Platform SHALL enforce: Credentials USE vs VIEW separated. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-GOV-005` | Platform SHALL enforce: MFA/approval/reason/ticket for sensitive actions. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-Authorization model: **Who × Resource × Action × Where × Conditions**.
-
-Dimensions:
-
-- tenant;
-- region/site/group/device/service;
-- module;
-- action;
-- condition/time/MFA/ticket/approval.
-
-Explicit deny wins where supported.
-
-Built-in role templates are cloneable/customizable.
-
-Sensitive actions may require MFA, approval, reason or ticket.
-
-Access Simulator shall answer questions such as “Can user X execute configuration command on device Y?” and explain the effective permission path.
-
-All authorization is enforced server-side.
-
----
-
-
-Audit shall cover authentication, users/RBAC, provisioning, credentials, monitoring policies, alerts/incidents, maintenance, NCM/CLI, IPAM, dashboards/maps/reports, integrations, AI/remediation, Sensors/HA, licensing, retention, backup/restore and upgrades.
-
-Audit event fields include:
-
-- actor/service/policy engine;
-- tenant;
-- action;
-- object/resource;
-- timestamp;
-- source UI/API/system;
-- source IP/session/request ID;
-- before/after;
-- result;
-- reason/ticket.
-
-Audit storage should support append-only/tamper-evident controls, configurable retention/archival, SIEM export and restricted deletion.
-
----
-
-
-All normal customer operations remain UI-first, but the UI shall consume supported control-plane APIs rather than bypassing them with database access.
-
-API Management shall support service accounts, clients/tokens, scopes, rate limits, usage, failures, expiry/rotation and audit.
-
-Outbound event/webhook subscriptions shall include relevant alert, incident, device, NCM, SLA and state-change events.
-
----
-
-
-Platform shall protect itself from:
-
-- unbounded dashboard/raw queries;
-- high-cardinality custom metrics/labels;
-- API connector explosions;
-- excessive Flow/log rate;
-- excessive report concurrency.
-
-Controls include timeouts, maximum scan/rows, asynchronous large exports, cancellation, per-tenant/user concurrency, cardinality detection and recommendations to drop/normalize unstable labels.
-
----
-
-
-**Maturity note:** persistent production IdentityDirectory / PermissionGrantDirectory authority may be absent on current main; Discovery authorization may be intentionally fail-closed until permission integration is complete (#92). Target product requirements remain as specified above.
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 30. Retention, Storage Protection Engine and Legal/investigation hold
 Administration → Data & Retention shall allow configuration by data class/scope for:
 
@@ -2001,6 +1929,12 @@ RCA and AI may recommend or summarize approved runbooks. Customer-approved sourc
 
 ### 31.6 Post-Incident Review / Problem Management
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-013`**: Platform SHALL enforce: PIR/problem-management generation and customer runbook knowledge base.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall generate a draft PIR from incident timeline, RCA, impact, evidence, ITSM ticket, configuration changes, actions and recovery. Human operators add/approve final root cause, corrective action, preventive action and lessons learned. Output can be reported/exported.
 
 ### 31.7 Intelligence Quality / RCA Accuracy
@@ -2045,28 +1979,12 @@ A Housekeeping workspace shall show status/history/failures for rollups, TTL del
 
 ### 31.14 Usage and Licensing Forecast
 
-#### 31.14.0 Normative requirements — `REQ-LIC` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-LIC-006`**: Platform SHALL enforce: Usage/licensing dashboard and entitlement-aware UI.
 
-This subsection is the **primary normative owner contract** for the `REQ-LIC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-LIC-001` | Platform SHALL enforce: Commercial license supports annual/perpetual/device/element/module models. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LIC-002` | Platform SHALL enforce: 30-day expiry warning. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LIC-003` | Platform SHALL enforce: 7-day dashboard banner before expiry. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LIC-004` | Platform SHALL enforce: Post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30); polling stops after the 15-day grace expires unless manually extended/renewed. T-7 pre-expiry banner remains distinct. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LIC-005` | Platform SHALL enforce: Historical data remains accessible after polling stops. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LIC-006` | Platform SHALL enforce: Usage/licensing dashboard and entitlement-aware UI. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-
-Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 31.15 Contextual Help
 
 Complex settings and diagnostics shall expose `What is this?`, contextual documentation and, where allowed, AI explanation grounded in current Platform documentation/configuration. Help must never modify configuration without a separate explicit action.
@@ -2076,52 +1994,19 @@ Complex settings and diagnostics shall expose `What is this?`, contextual docume
 
 ## 32. Upgrade, canary, rollback and PKI
 
-### 32.0 Normative requirements — `REQ-LC` family
-
-
-This subsection is the **primary normative owner contract** for the `REQ-LC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Platform upgrade workflow shall include: - preflight; - backup/restore point; - compatibility check; - component/Sensor drain where required; - install/migrate; - health verification; - rollback strategy. Sensor/Agent/Device Pack changes should support canary/staged rollout (e.g., pilot group → larger group → full deployment) with configurable stop/rollback conditions. Feature flags may restrict new features to selected tenants/groups during controlled rollout. --- Administration shall show UI, Sensor, Agent, internal-service and integration certificates, issuer, expiry, days remaining, usage and status. Support customer CA, CSR/import/renewal, trust stores and certificate rotation. Expiring certificates produce proactive alerts. ---
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-LC-003` | Platform SHALL enforce: Canary rollout and feature flags. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-004` | Platform SHALL enforce: Desired-vs-actual state and configuration drift. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-005` | Platform SHALL enforce: Change impact preview and dry-run. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-006` | Platform SHALL enforce: Technology lifecycle/EOL/EOS/firmware risk visibility. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-008` | Platform SHALL enforce: Migration Studio from incumbent tools/CMDB/CSV/API. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-009` | Platform SHALL enforce: Template library and onboarding wizard. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-LC-010` | Platform SHALL enforce: Change freeze and business calendars. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-Platform upgrade workflow shall include:
-
-- preflight;
-- backup/restore point;
-- compatibility check;
-- component/Sensor drain where required;
-- install/migrate;
-- health verification;
-- rollback strategy.
-
-Sensor/Agent/Device Pack changes should support canary/staged rollout (e.g., pilot group → larger group → full deployment) with configurable stop/rollback conditions.
-
-Feature flags may restrict new features to selected tenants/groups during controlled rollout.
-
----
-
-
-Administration shall show UI, Sensor, Agent, internal-service and integration certificates, issuer, expiry, days remaining, usage and status.
-
-Support customer CA, CSR/import/renewal, trust stores and certificate rotation. Expiring certificates produce proactive alerts.
-
----
-
 
 ## 33. Licensing and usage forecast
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LIC-001`**: Platform SHALL enforce: Commercial license supports annual/perpetual/device/element/module models.
+- **`REQ-LIC-002`**: Platform SHALL enforce: 30-day expiry warning.
+- **`REQ-LIC-003`**: Platform SHALL enforce: 7-day dashboard banner before expiry.
+- **`REQ-LIC-004`**: Platform SHALL enforce: Post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30); polling stops after the 15-day grace expires unless manually extended/renewed. T-7 pre-expiry banner remains distinct..
+- **`REQ-LIC-005`**: Platform SHALL enforce: Historical data remains accessible after polling stops.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### Licensing grace — Founder-approved 15-day post-expiry grace
 
 **Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).

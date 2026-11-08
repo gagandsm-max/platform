@@ -136,6 +136,13 @@ The diagram is logical. Internal process boundaries may be consolidated to meet 
 **Role taxonomy note:** diagrams/text that say “Streaming/Event Sensor” map to product roles `FLOW` and/or `LOG`. Runtime `STREAMING_EVENT` is an implementation mismatch requiring reconciliation (see §9).
 
 ## 4. Deployment architecture
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-011`**: Platform SHALL enforce: VM/bare metal Linux first; Kubernetes not mandatory.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 4.1 Standalone deployment
 
 ```mermaid
@@ -198,10 +205,96 @@ Future federation should keep high-volume raw telemetry regional and move summar
 ---
 
 
+### 4.1 Standalone deployment
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-001`**: Platform SHALL enforce: Standalone = one Core; HA = exactly two full Core nodes.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+```mermaid
+flowchart LR
+    USERS[Users] -->|HTTPS| CORE1[Core-01\nActive]
+    CORE1 --> S1[Sensor Pool A]
+    CORE1 --> S2[Sensor Pool B]
+    S1 --> D1[Devices / Infra]
+    S2 --> D2[Devices / Infra]
+```
+
+Core-01 runs the complete Core stack. Sensors are separate installs and remain responsible for collection.
+
+### 4.2 Two-node HA deployment
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-002`**: Platform SHALL enforce: One Active Core and one Standby; continuous state synchronization.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. **Certification envelope:** Phase 1.5. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1; a Phase 1 standalone certificate must not imply this HA envelope. Unresolved P0 work includes active authority/fencing, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, push-protocol continuity, split-brain failure behavior, HA ACK RPO evidence (distinct from site/DR RPO), failover under load and backlog replay. Sensor assignment ownership/lease/fencing remains a Phase 1 mandatory multi-Sensor safety requirement even with standalone Core and must not be deferred solely because Core HA is Phase 1.5. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
+
+
+```mermaid
+flowchart TB
+    USERS[Users / Agents / Sensors] --> VIP[Stable Core HA Endpoint / VIP]
+    VIP --> A[Core-A\nACTIVE]
+    VIP -. failover .-> B[Core-B\nSTANDBY]
+    A <-->|continuous state sync| B
+    SENS[Sensor Pools] --> VIP
+    SENS -->|local poll independent of Core state| DEV[Monitored estate]
+```
+
+Requirements:
+
+- one Active and one Standby only;
+- both have the Core software and Core-local data components;
+- stable HA endpoint abstracts node identity;
+- Sensors/Agents must not require manual reconfiguration when Active changes;
+- Sensor local buffering protects monitoring during failover;
+- automatic promotion occurs only when the peer can be safely considered failed/fenced by the HA algorithm;
+- if the failure state is ambiguous, the system prefers preventing dual-active even if this delays UI promotion.
+
+### 4.3 Why no third Core
+
+The customer-facing architecture intentionally remains two full Core nodes, consistent with the requirement and lessons from incumbent NMS HA patterns. This does **not** mean every internal distributed technology is used in its textbook multi-node quorum mode. Core-local components must be adapted to a two-node active/passive product topology rather than forcing a third full server onto the customer.
+
+### 4.4 Future federation
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-012`**: Platform SHALL enforce: Future regional/multi-Core + Master Core architecture is future scalability extension only.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Future only, not initial scope:
+
+```mermaid
+flowchart TB
+    MC[Future Master Core\nGlobal Visualization / Federation]
+    MC --> RI[Regional Core - India]
+    MC --> RE[Regional Core - EMEA]
+    MC --> RU[Regional Core - US]
+    RI --> SI[Regional Sensors]
+    RE --> SE[Regional Sensors]
+    RU --> SU[Regional Sensors]
+```
+
+Future federation should keep high-volume raw telemetry regional and move summaries/incidents/global inventory upward, inspired by distributed NMS lessons such as SolarWinds EOC and ManageEngine LiteCentral patterns without copying their implementation.
+
+---
+
+
 ## 5. Control plane, data plane and Core modular architecture
 
 ### 5.1 Control plane responsibilities
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-005`**: Platform SHALL enforce: Core is brain; Sensors/Agents enroll through Core.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Core control plane owns: tenancy, IAM/RBAC policy evaluation targets, inventory identity, desired-state/policy versioning, Sensor/Agent enrollment and placement decisions, job/lease/fencing generation, alert/incident authority, NCM orchestration, integration configuration, licensing administration, audit authority, UI/API serving.
 
 ### 5.2 Data plane responsibilities
@@ -217,6 +310,12 @@ Data plane owns: Sensor/Agent collection, local durable spool, mTLS upload to Co
 
 ### 5.4 Modular Core
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-006`**: Platform SHALL enforce: All Core components run on Core nodes for standard deployments.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 To satisfy the 8 vCPU / 32 GB target for the reference ≤2,500-device workload, the Java control plane should be modular rather than split into dozens of always-running JVM microservices.
 
 Recommended runtime grouping:
@@ -318,35 +417,12 @@ Valkey is reconstructable ephemeral/cache state **ONLY** and must never become a
 
 ## 7. Exactly-two-Core HA and stateful-service strategy
 
-### 7.0 Normative requirements — `REQ-A` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-A-003`**: Platform SHALL enforce: Core HA failover under 60 seconds in certified scenario.
 
-This subsection is the **primary normative owner contract** for the `REQ-A` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members. This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-A-001` | Platform SHALL enforce: Standalone = one Core; HA = exactly two full Core nodes. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-002` | Platform SHALL enforce: One Active Core and one Standby; continuous state synchronization. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-003` | Platform SHALL enforce: Core HA failover under 60 seconds in certified scenario. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-004` | Platform SHALL enforce: Sensors continue polling during Core failover. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-005` | Platform SHALL enforce: Core is brain; Sensors/Agents enroll through Core. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-006` | Platform SHALL enforce: All Core components run on Core nodes for standard deployments. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-007` | Platform SHALL enforce: Sensor-to-Core HTTPS/gRPC mTLS ingestion; Kafka internal. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-008` | Platform SHALL enforce: DR architecture mandatory in v1.0; exact RPO/RTO TBD until business freeze. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-009` | Platform SHALL enforce: Ubuntu and RHEL Core/Sensor; no Windows Core/Sensor initially. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-010` | Platform SHALL enforce: Separate signed Core, Sensor, Windows Agent, Linux Agent builds. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-011` | Platform SHALL enforce: VM/bare metal Linux first; Kubernetes not mandatory. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-A-012` | Platform SHALL enforce: Future regional/multi-Core + Master Core architecture is future scalability extension only. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
-The two-Core topology creates special engineering requirements because textbook Kafka controller quorums and ClickHouse Keeper quorums normally prefer an odd number of voting members.
-
-This section is the **Phase 1.5 HA certification envelope**. Phase 1 certifies one authoritative standalone Core with mandatory backup/restore and site-loss DR; it does not claim two-Core service continuity. HA ≠ DR.
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 7.1 Transport/HA audit adjudication — 2026-10-30 (SPECIFIED, not certified)
 
 The adversarial transport review does **not** change the Phase-1/Phase-1.5 envelopes, select a coordination technology or grant an exactly-once claim:
@@ -527,6 +603,12 @@ SNMP trap/inform reception is a Streaming/Event Sensor capability when event vol
 
 ### 9.3 Sensor local storage
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-004`**: Platform SHALL enforce: Sensors continue polling during Core failover.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The Sensor stores only operational state required for continuity:
 
 - job/policy cache;
@@ -540,6 +622,12 @@ It is not a full independent historical NMS database.
 
 ### 9.4 Sensor communication
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-007`**: Platform SHALL enforce: Sensor-to-Core HTTPS/gRPC mTLS ingestion; Kafka internal.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ```mermaid
 sequenceDiagram
     participant S as Sensor
@@ -1073,24 +1161,13 @@ Emergency deletion must use efficient partition/TTL operations rather than billi
 
 ## 29. Security, IAM and audit architecture
 
-### 29.0 Normative requirements — `REQ-SEC` family
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-SEC-005`**: Platform SHALL enforce: PKI/certificate lifecycle management.
+- **`REQ-SEC-006`**: Platform SHALL enforce: Proxy/no-proxy support.
 
-This subsection is the **primary normative owner contract** for the `REQ-SEC` family in this document. Each row is an implementation-binding SHALL statement for this owner; it is not an RTM index, ownership footer or summary-only catalogue.
-
-**Shared normative envelope:** every Requirement ID in this subsection inherits the parent section's concrete feature/behavior contract (purpose, persona, dependencies, preconditions, primary workflow, failure/degraded behavior, acceptance outcome, maturity boundary). Implementation writers MUST use this envelope plus the distinctive SHALL below; the RTM one-liner alone is not a sufficient contract.
-
-**Parent-section obligations incorporated by reference:** Parent section obligations for purpose, workflow, failure/degraded behavior, authorization/tenant boundary, acceptance outcome and maturity boundary.
-
-| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |
-|---|---|---|---|
-| `REQ-SEC-003` | Platform SHALL enforce: mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-SEC-005` | Platform SHALL enforce: PKI/certificate lifecycle management. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-SEC-006` | Platform SHALL enforce: Proxy/no-proxy support. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-SEC-007` | Platform SHALL enforce: Data sovereignty/regional placement architecture. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-| `REQ-SEC-008` | Platform SHALL enforce: Tenant isolation enforced server/API/query layers. Distinctive obligations are binding together with the shared normative envelope above and must be implemented without inventing unspecified HA mechanisms, endpoints, schemas or silent scope expansion. | Inherits shared envelope + parent section | Do not treat the RTM summary as complete; do not invent load-bearing behavior absent from this owner section or an explicitly cross-referenced specialized master. |
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 29.1 Trust boundaries
 
 - Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
@@ -1127,7 +1204,62 @@ Platform is architected for highly regulated deployments: server-side tenant iso
 
 **Audit implementation truth:** enterprise target includes durable/tamper-evident audit. Current common emitter logging is **not equivalent** to durable audit persistence. Actor attribution gaps remain where applicable (#92).
 
+### 29.1 Trust boundaries
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-SEC-003`**: Platform SHALL enforce: mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+- Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
+- Sensor ↔ Core: mTLS.
+- Agent ↔ Core bootstrap and Agent ↔ Sensor telemetry: mTLS.
+- Core internal services: TLS/mTLS according to deployment threat model.
+- Device connections: protocol-specific secure method and credential policy.
+- External integrations: HTTPS/TLS/mTLS/OAuth etc.
+
+### 29.2 Secrets
+
+Secrets are encrypted at rest, accessed by reference, masked in UI/logs, never included in exports/AI by default and separated from ordinary inventory.
+
+### 29.3 Authorization
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-SEC-008`**: Platform SHALL enforce: Tenant isolation enforced server/API/query layers.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+Server-side resource authorization with tenant, scope, action and condition. UI hiding is only presentation.
+
+### 29.4 Audit
+
+All state-changing/security-sensitive operations produce structured audit events. Audit export to SIEM supported.
+
+### 29.5 Supply chain
+
+Release produces SBOM, checksums, provenance and third-party notices. Dependency additions pass OSS licence/security policy.
+
+---
+
+
+### Enterprise security readiness (absorbed from ARCH-SEC-READINESS)
+Platform is architected for highly regulated deployments: server-side tenant isolation, mTLS, TLS-only UI, MFA/SSO, least privilege, separate credential use/reveal permission, signed artifacts, audit, SIEM export, secret masking, KMS/HSM integration points, PKI rotation, offline installation and hardening profiles. Architecture must preserve pathways for FIPS-capable cryptographic modules and CIS/STIG-style OS hardening. No certification is claimed until actually completed.
+
+
+**IAM implementation truth (source baseline `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`):** bounded JDBC `IdentityDirectory` / `PermissionGrantDirectory` persistence is implemented in `core/src/main/java/com/platform/core/security/http/SecurityDirectoryConfiguration.java` with `V016__platform_identity_and_permission_grants.sql`. `platform.security.directories.persistence-enabled` defaults to `false`; disabled directories remain fail-closed, and enabled initialization/query failures must not fall back to permissive authority. This establishes source implementation of the directory boundary, not deployed activation, complete IAM/SSO or production certification. Discovery remains authorization-gated and fails closed when trusted identity or grants are absent. Target architecture is unchanged.
+
+**Audit implementation truth:** enterprise target includes durable/tamper-evident audit. Current common emitter logging is **not equivalent** to durable audit persistence. Actor attribution gaps remain where applicable (#92).
+
 ## 30. Data sovereignty and regional placement
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-SEC-007`**: Platform SHALL enforce: Data sovereignty/regional placement architecture.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform's canonical tenant/entity/data-class model must carry a placement/jurisdiction attribute so future regional Core federation can keep raw telemetry in designated regions while exposing only permitted summaries globally. The initial single-Core product must not pretend to provide multi-region sovereignty, but schemas/APIs/storage abstractions must not make regional placement impossible later. This is separate from tenant isolation.
 
 
@@ -1212,6 +1344,13 @@ Recommended development restart policy is `unless-stopped` for long-lived local 
 
 ### 32.3 Production is native-service first
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-009`**: Platform SHALL enforce: Ubuntu and RHEL Core/Sensor; no Windows Core/Sensor initially.
+- **`REQ-A-010`**: Platform SHALL enforce: Separate signed Core, Sensor, Windows Agent, Linux Agent builds.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Production Core/Sensor/Linux Agent are installed as native Linux packages and managed by `systemd`; Windows Agent is managed by Windows Service Control Manager. Container runtime is not a production prerequisite for the initial customer installation model.
 
 ### 32.4 Service supervision architecture
@@ -1278,6 +1417,13 @@ Large/global environments may later use autonomous regional Cores with a Master 
 **Capacity/cardinality:** Architecture requires per-tenant limits, API/query protection, high-cardinality protection, backpressure and workload profiles. Do not claim benchmark certification from this document alone.
 
 ## 34. Backup, restore, DR and upgrades
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-A-008`**: Platform SHALL enforce: DR architecture mandatory in v1.0; exact RPO/RTO TBD until business freeze.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Architecture must separate:
 
 - HA: same-deployment service continuity via exactly-two-Core Active/Standby (Phase 1.5 certification envelope).

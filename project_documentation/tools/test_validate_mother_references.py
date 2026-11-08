@@ -2598,8 +2598,48 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         (root / "Platform_03_Architecture.md").write_text(
             _header("PLATFORM-ARC-001")
             + "## 7. Exactly-two-Core HA\n\n"
-            + "### 7.0 Normative requirements — REQ-A family\n\n"
             + "Platform SHALL deploy exactly two Core nodes for HA (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md").write_text(
+            _header("PLATFORM-INTELVALUE-001")
+            + "## 1. Section\n\n"
+            + "Platform SHALL provide SaaS monitoring evidence (`REQ-OIV-001`).\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §7 Exactly-two-Core HA |",
+            1,
+        )
+        p08 = p08.replace(
+            "| REQ-OIV-001 | SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | §1 Section |",
+            "| REQ-OIV-001 | SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | §1 Section |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_81b_synthetic_dot_zero_family_locator_fails(self) -> None:
+        """Platform_08 may not point primary ownership at `.0 Normative requirements`."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "### 7.0 Normative requirements — REQ-A family\n\n"
+            + "Platform SHALL deploy exactly two Core nodes for HA (`REQ-A-001`).\n\n"
+            + "### 7.1 Substantive HA contract\n\n"
+            + "Exactly two Core nodes.\n",
             encoding="utf-8",
         )
         p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
@@ -2614,9 +2654,14 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             p08, encoding="utf-8"
         )
         errors = validate_docs_root(root)
-        self.assertEqual(errors, [], errors)
-
-
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e
+                and "synthetic .0 Normative requirements" in e
+                for e in errors
+            ),
+            errors,
+        )
 
     def test_82_unmarked_two_column_summary_table_alone_fails(self) -> None:
         """Two-column Requirement ID | Normative requirement tables alone cannot own."""
@@ -2658,8 +2703,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_83_valid_four_column_normative_table_passes(self) -> None:
-        """Multi-column normative contract tables remain valid ownership evidence."""
+    def test_83_four_column_synthetic_family_table_alone_fails(self) -> None:
+        """Four-column family boilerplate tables cannot satisfy primary ownership."""
         root = self._write_minimal(
             req_rows=[
                 ("REQ-OSS-003", "Licence review", "Platform_07_OSS_Catalog.md"),
@@ -2689,7 +2734,57 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             p08, encoding="utf-8"
         )
         errors = validate_docs_root(root)
-        self.assertEqual(errors, [], errors)
+        self.assertTrue(
+            any("REQ-OSS-003" in e for e in errors),
+            errors,
+        )
+
+    def test_84_differently_named_family_catalogue_fails(self) -> None:
+        """Named family-catalogue headings cannot own a requirement."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-DATA-001", "Retention", "Platform_11_Sizing_Capacity_Storage_Master.md"),
+            ],
+        )
+        (root / "Platform_11_Sizing_Capacity_Storage_Master.md").write_text(
+            _header("PLATFORM-SIZING-001")
+            + "## 10. Retention\n\nIntro only.\n\n"
+            + "### REQ-DATA family catalogue\n\n"
+            + "`REQ-DATA-001` Customer-configurable raw retention.\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §1 Section |",
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §10 Retention |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(any("REQ-DATA-001" in e for e in errors), errors)
+
+    def test_85_duplicate_conflicting_primary_owner_rows_fail(self) -> None:
+        """Duplicate primary ownership rows for the same ID fail."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+                ("REQ-A-001", "Conflicting HA", "Platform_02_PRD.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\nPlatform SHALL use two Cores (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("duplicate primary REQ row: REQ-A-001" in e for e in errors),
+            errors,
+        )
 
 
 if __name__ == "__main__":

@@ -1,16 +1,29 @@
 # DOC_P0 candidate evidence — 2026-11-08
 
 **Lane:** docs-only Mother Reference correction  
-**Branch:** `docs/p0-mother-reference-reconcile-20261108`  
-**Immutable audited starting head:** `63e4581664f02dbe1b7b866ca6b753d083eb77f3`  
-**Audited starting tree:** `e7e43b5ae90ff46795e261b8a69378f62c58404b`  
-**Canonical main/base:** `92f0fb37805c234be2869619abcc01ad26b5f30b`  
-**Candidate head after corrective commit:** `10c4ca3885a16a5191294d9f5571c198b274a8f1`  
-**Candidate tree after corrective commit:** `d425422ae3045ce3bc6a37438726a8332194784b`  
+**Branch:** `docs/p0-mother-reference-reconcile-20261108`
 
-This file is **writer evidence for the second independent exact-SHA audit**. It is not `DOC_P0_ACCEPTANCE` and does not certify product runtime.
+## Provenance (audited parent / candidate-generation)
 
-## Tests (pre-commit capture)
+| Role | SHA | Notes |
+|---|---|---|
+| Canonical main/base | `92f0fb37805c234be2869619abcc01ad26b5f30b` | USER-FIXED base for this lane |
+| Immutable audited starting candidate | `09ede46dfca9353305c98f355b9ee393d6ac1edb` | Starting head assigned to this writer pass |
+| Audited starting tree | `7fc3d239557d6f8b0abe17be53e35d3688294a7c` | Tree of starting candidate |
+| Prior corrective parent (historical) | `10c4ca3885a16a5191294d9f5571c198b274a8f1` | Previous in-lane corrective commit; not the final head |
+
+## Pre-finalization evidence (in-file hashes are NOT the exact final head)
+
+The hashes above record **audited parent / candidate-generation provenance** and **pre-finalization** evidence only.
+
+**Do not treat any SHA written inside this file as the exact final candidate head.**
+The final exact SHA/tree MUST be recorded externally in the final report / independent audit record after the commit that contains this file (in-repository self-reference to the commit that contains itself is deliberately avoided).
+
+This file is **writer evidence for multi-tool re-audit**. It is not `DOC_P0_ACCEPTANCE` and does not certify product runtime.
+
+## Tests (pre-finalization capture)
+
+Commands expected before push (re-run at exact final head by independent reviewers):
 
 ### `python3 project_documentation/tools/validate_mother_references.py`
 ```
@@ -20,11 +33,7 @@ exit=0
 
 ### `python3 -m unittest project_documentation.tools.test_validate_mother_references`
 ```
-.......................................................................................................................
-----------------------------------------------------------------------
-Ran 119 tests in 2.279s
-
-OK
+(expected OK; count may advance with new structural regression tests)
 exit=0
 ```
 
@@ -39,3 +48,4 @@ exit=0
 - No `DOC_P0_ACCEPTANCE=PASS`
 - No runtime Agent/Sensor/Core/UI source modified by this lane
 - No PR created; no shared CI triggered by PR; no merge
+- No writer self-certification of the candidate
