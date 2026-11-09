@@ -2882,7 +2882,56 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertIn("SNMP body", bodies["11.1"])
         self.assertIn("Path body", bodies["11.2"])
 
-    def test_91_varchar_enum_width_too_narrow_fails(self) -> None:
+    def test_91_req_alt_002_binds_to_substantive_threshold_contract(self) -> None:
+        """REQ-ALT-002 must bind to §6.1 threshold contract, not a one-line §6 header."""
+        from validate_mother_references import locator_binds_id, section_body_map
+
+        docs = Path(__file__).resolve().parents[1]
+        owner_path = (
+            docs / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        )
+        owner = owner_path.read_text(encoding="utf-8")
+        bodies = section_body_map(owner)
+        self.assertIn("6.1", bodies)
+        body_61 = bodies["6.1"]
+        self.assertIn("REQ-ALT-002", body_61)
+        # Substantive envelope + typed families must be present (not binding-only).
+        for needle in (
+            "Common threshold evaluation envelope",
+            "Static threshold",
+            "Duration threshold",
+            "Consecutive threshold",
+            "Rate threshold",
+            "Baseline threshold",
+            "Missing threshold",
+            "Composite threshold",
+            "Dependency threshold",
+            "Business-time threshold",
+            "TRUE | FALSE | UNKNOWN",
+            "Float64",
+            "IANA",
+        ):
+            self.assertIn(needle, body_61, needle)
+        ok, reason = locator_binds_id(
+            "§6.1 Alert threshold evaluation contract", "REQ-ALT-002", owner
+        )
+        self.assertTrue(ok, reason)
+        # Coarse §6-only binding header must not be treated as the RTM locator target
+        # once §6.1 owns the contract; §6 still contains the ID via children, but the
+        # primary Platform_08 locator is required to name §6.1.
+        rtm = (docs / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(
+            rtm,
+            r"REQ-ALT-002.*§6\.1 Alert threshold evaluation contract",
+        )
+        self.assertNotRegex(
+            rtm,
+            r"REQ-ALT-002.*§6 Alert-policy lifecycle and false-alert quality gates",
+        )
+
+    def test_92_varchar_enum_width_too_narrow_fails(self) -> None:
         """VARCHAR width must fit every declared enum literal."""
         root = self._write_minimal()
         p17 = (root / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(

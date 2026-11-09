@@ -1,6 +1,6 @@
 # DOC_P0 candidate evidence — 2026-11-08
 
-**Lane:** docs-only Mother Reference correction  
+**Lane:** docs-only Mother Reference correction
 **Branch:** `docs/p0-mother-reference-reconcile-20261108`
 
 ## Provenance (audited parent / candidate-generation)

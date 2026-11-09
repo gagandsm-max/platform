@@ -1,6 +1,6 @@
 # Platform — Security Threat Model
 
-**Document ID:** PLATFORM-THREAT-001  
+**Document ID:** PLATFORM-THREAT-001
 **Version:** 3.3.0
 **Status:** Authoritative Mother Reference
 **Last reconciliation:** 2026-10-12 — Issue #200/#203 Tranche B Phase 1/1.5 certification-envelope reconciliation (trust boundaries/tenant/NCM/HA peer)
@@ -247,4 +247,3 @@ The architecture audit identified preventive controls, not reproducible producti
 - **Counter-rate evidence poisoning:** Restart, alternate Sensor ownership, counter discontinuity, replay or precision truncation must not generate fabricated high rates, false threshold alerts or misleading RCA. Exact raw counters and uncertainty markers remain authoritative until valid rate derivation is proven.
 
 These are Phase-1 preventive and correctness tests where applicable; shared-customer/MSP and two-Core HA negative certification remain Phase 1.5. No cryptographic tenant-isolation certification, new dependency or production readiness is claimed by this clarification.
-

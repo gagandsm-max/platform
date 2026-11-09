@@ -196,6 +196,120 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-ALT-012`**: Platform SHALL enforce: Alert-policy effectiveness analytics.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+Alert policies are versioned authoritative configuration under hierarchical inheritance (`REQ-ALT-001`): Platform → Tenant → Region/BU → Site → Group → Device → Metric. Effective policy for evaluation is the resolved inheritance result identified by `policy_id` + `policy_version` (and Core-issued assignment/control-generation provenance where assignments apply). New or changed policies progress through governed `DRAFT → BACKTEST → SHADOW → ACTIVE` with approval, rollback and class-appropriate false-alert / missed-detection evidence before promotion; no universal numeric quality threshold is invented by this master. Flapping detection and reopen windows (`REQ-ALT-008`) operate on ACTIVE evaluation outcomes. Policy-effectiveness analytics (`REQ-ALT-012`) consume reproducible evaluation evidence without silently mutating ACTIVE policy.
+
+Threshold evaluation defined in §6.1–§6.10 is the authoritative `REQ-ALT-002` contract. It does not replace Alert Evidence Contracts (§4), telemetry-quality gates (§5) or severity/confidence separation. Evaluation output feeds qualification; it does not by itself assert Device Down.
+
+### 6.1 Alert threshold evaluation contract (`REQ-ALT-002`)
+
+`REQ-ALT-002` requires Platform to evaluate static, duration, consecutive, rate, baseline, missing, composite, dependency and business-time thresholds under one common envelope. Type-specific rules in §6.1.2–§6.1.10 refine that envelope; they do not create a second threshold authority.
+
+#### 6.1.1 Common threshold evaluation envelope
+
+Every threshold definition SHALL specify:
+
+1. **Metric/evidence input identity** — canonical metric, observation family, or evidence reference (entity/monitor scope, units, quality fields).
+2. **Operator / evaluation type** — one of the typed families in §6.1.2–§6.1.10 (or an explicit composition of those families).
+3. **Evaluation window** — the time or sample window over which the condition is assessed.
+4. **Qualified sample requirements** — minimum usable samples and which quality states count as qualified.
+5. **Evidence-quality prerequisites** — collector health, freshness, schema/time validity and other §5 trust gates that must pass before a TRUE failure assertion is eligible.
+6. **Threshold parameters** — typed parameters for the selected evaluation family (limits, N, duration, rate bounds, baseline identity, calendar identity, child condition refs).
+7. **Clear / reset / hysteresis behavior** — how TRUE clears to FALSE, reset conditions and any hysteresis band distinct from the fire threshold.
+8. **Missing / stale behavior** — explicit outcome when expected evidence is absent, late or stale (`UNKNOWN`, suppress fire, extend window, or other documented rule — never silent DOWN).
+9. **Schedule / business-time applicability** — whether evaluation is always-on or bound to a versioned business calendar/timezone (§6.1.10).
+10. **Evaluation result** — exactly one of `TRUE | FALSE | UNKNOWN` per evaluation tick.
+11. **Versioned policy authority** — `policy_id` / `policy_version` (and assignment/generation where applicable) that authorized the evaluation.
+12. **Deterministic evaluation** — identical qualified inputs + policy version produce identical results; no hidden randomness or silent self-learning mutation of ACTIVE parameters.
+13. **Audit / provenance** — retain enough evidence to reconstruct inputs used, quality gates, result and policy version.
+14. **Test / acceptance linkage** — finite positive and negative fixtures for the threshold type, including UNKNOWN/stale/collector-failure cases.
+
+`UNKNOWN`, stale evidence, collector failure, or missing monitoring-path evidence MUST NOT silently evaluate as monitored-object failure. Such conditions may yield `UNKNOWN`, `MONITORING_DEGRADED` / `STALE` semantic state, or withhold fire under the applicable Alert Evidence Contract; they MUST NOT coerce to Device Down solely by absence of a qualified TRUE/FALSE sample.
+
+#### 6.1.2 Static threshold
+
+A static threshold compares one qualified numeric (or ordered enum) observation to configured limit(s).
+
+- **Operators (normative set):** `GT`, `GE`, `LT`, `LE`, `EQ`, `NE`, and closed/open range forms `INSIDE` / `OUTSIDE` with inclusive/exclusive bound flags.
+- **Units:** comparison MUST use the metric’s declared unit; unit conversion is forbidden unless an explicit versioned unit-conversion rule is part of the policy parameters. Boolean/enum metrics use their declared enum order, not ad-hoc string inequality.
+- **Result:** `TRUE` when the qualified sample satisfies the operator; `FALSE` when it does not; `UNKNOWN` when the sample is missing, stale, or fails evidence-quality prerequisites.
+- **Hysteresis:** optional clear threshold distinct from fire threshold; clear evaluation uses the same unit/operator discipline.
+
+#### 6.1.3 Duration threshold
+
+A duration threshold requires a child condition (typically static or composite) to remain `TRUE` **continuously** for a configured duration `D`.
+
+- The duration clock starts when the child first becomes qualified `TRUE` and advances only while consecutive qualified evaluations remain `TRUE`.
+- **Interruption / reset:** any qualified `FALSE` resets the duration clock. `UNKNOWN` or stale/unqualified samples **do not** advance the clock; policy SHALL declare whether they **pause** (preserve elapsed) or **reset** (default = pause for transient quality gaps shorter than a configured grace, else reset). Unconfigured pause/reset MUST fail closed as `UNKNOWN` rather than fire.
+- Fire occurs only when continuous qualified `TRUE` time ≥ `D`. Clear/hysteresis follow the common envelope.
+
+#### 6.1.4 Consecutive threshold
+
+A consecutive threshold requires `N` **qualified consecutive** evaluations of a child condition to be `TRUE`.
+
+- Only samples that pass evidence-quality prerequisites count toward `N`.
+- A qualified `FALSE` resets the consecutive counter to 0.
+- `UNKNOWN`, stale, or otherwise unqualified samples **do not** increment `N` and **do not** count as `TRUE`; policy SHALL declare whether they reset the counter (default) or skip without reset. Default = reset on UNKNOWN/stale to prevent silent accumulation across evidence gaps.
+- Fire when the counter reaches `N`; clear/reset/hysteresis follow the common envelope.
+
+#### 6.1.5 Rate threshold
+
+A rate threshold evaluates change over elapsed time: `rate = Δvalue / Δt` (or an explicitly declared numerator/delta over an elapsed-time denominator).
+
+- **Numerator / delta:** computed from successive qualified observations of the same counter/gauge identity.
+- **Denominator:** elapsed time between the observation timestamps used for the delta (not wall-clock since last scheduler tick alone).
+- **Minimum valid interval:** if `Δt` is below the configured minimum valid interval, result is `UNKNOWN` (insufficient interval), not a fabricated high rate.
+- **Reset / wrap / discontinuity:** Counter reset, wrap, reboot or source discontinuity evidence MUST be applied before rate derivation. A decrease is not automatically a wrap; discontinuity evidence is evaluated first (aligned with Platform_17 Counter64 rules).
+- **Authoritative Counter64 path:** exact unsigned Counter64 delta/reset processing MUST complete before any floating-point rate/utilization field is derived. Authoritative Counter64 rate logic MUST NOT pass through Float64 (or Java `double` / JSON unsafe-number) coercion before exact delta/reset handling.
+- **Unavailable-rate outcome:** when either endpoint sample is missing/stale/unqualified, or discontinuity makes delta unsafe, result is `UNKNOWN` / unavailable-rate — never a silent TRUE failure.
+
+#### 6.1.6 Baseline threshold
+
+A baseline threshold compares a qualified observation (or short window aggregate) to a versioned baseline.
+
+- **Baseline identity / version:** every evaluation binds `baseline_id` + `baseline_version` (immutable reference once published for that version).
+- **Training / reference window:** parameters declare the reference window, aggregation and any seasonality key; training artifacts are versioned.
+- **Sample sufficiency:** if the baseline lacks the configured minimum qualified samples, result is `UNKNOWN` (insufficient baseline), not an invented deviation.
+- **Deviation operator:** absolute or relative deviation (`GT`/`LT` band, σ-multiple, or percent) with explicit units; operator parameters are part of the versioned policy, not runtime-mutable weights.
+- **Stale baseline behavior:** if the baseline version is expired, superseded without replacement, or older than the configured freshness/validity, evaluation yields `UNKNOWN` or the declared fallback (static threshold only when an explicit fallback policy version is bound).
+- **No silent self-learning policy mutation:** operator feedback or online learning MUST NOT silently mutate ACTIVE baseline parameters or promote a new baseline version without the governed policy lifecycle.
+
+#### 6.1.7 Missing threshold
+
+A missing threshold detects absence of expected observations.
+
+- **Expected observation cadence** and **freshness deadline** are mandatory parameters (e.g. expected every `P`, stale after `T`).
+- Result is `TRUE` only when no qualified observation arrives within the freshness deadline under healthy monitoring-path prerequisites that make absence attributable to the monitored signal path under policy — still as a **missing/no-data** condition, not Device Down.
+- Missing telemetry is evidence-quality / semantic-state information (`NO_DATA`, `STALE`, `MONITORING_DEGRADED`, or `UNKNOWN` as applicable) and MUST NOT automatically mean endpoint DOWN. Downstream Device-Down qualification remains owned by Alert Evidence Contracts and BUILD-082.
+
+#### 6.1.8 Composite threshold
+
+A composite threshold combines child conditions with deterministic Boolean operators over tri-state values.
+
+- **Operators:** `AND`, `OR`, `NOT` (and parenthesized grouping). No short-circuit that drops audit of evaluated children when those children were assessed.
+- **Tri-state logic (normative):**
+  - `AND`: `TRUE` iff all children `TRUE`; `FALSE` if any child `FALSE`; else `UNKNOWN`.
+  - `OR`: `TRUE` if any child `TRUE`; `FALSE` iff all children `FALSE`; else `UNKNOWN`.
+  - `NOT`: `NOT TRUE = FALSE`; `NOT FALSE = TRUE`; `NOT UNKNOWN = UNKNOWN`.
+- UNKNOWN handling is deterministic per the table above; policies MUST NOT treat UNKNOWN as FALSE (or TRUE) unless an explicit, versioned coercion operator is declared — default coercion is forbidden.
+
+#### 6.1.9 Dependency threshold
+
+A dependency threshold binds evaluation to qualified dependency/topology authority (canonical entity graph relationship with provenance/confidence/freshness).
+
+- Suppression or dependency-conditioned fire/clear rules MUST be reversible when the dependency evidence clears or is revoked.
+- A dependency assertion (parent down, path loss, maintenance on upstream) does **not** automatically prove child failure. It may suppress, defer, or annotate child alerting per policy; child technical evidence remains independently qualified.
+- Stale/low-confidence topology MUST NOT be treated as authoritative dependency proof; result is `UNKNOWN` or suppression withheld per policy.
+
+#### 6.1.10 Business-time threshold
+
+A business-time threshold restricts when another threshold family is eligible to fire/clear.
+
+- **Timezone:** IANA timezone identifiers only (e.g. `Asia/Kolkata`); offsets-without-zone are rejected.
+- **Calendar / freeze policy:** evaluation binds a versioned business calendar and optional freeze/blackout policy identity.
+- **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit policy rule (default: treat gap as outside business time / fold as earlier offset) and MUST be fixture-tested.
+- **Missing / invalid calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden unless an explicit alternate calendar version is bound in policy.
+
 ## 7. Active Evidence Acquisition
 
 <!-- P0-1 NORMATIVE BINDINGS -->
