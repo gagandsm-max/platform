@@ -2907,11 +2907,25 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "Composite threshold",
             "Dependency threshold",
             "Business-time threshold",
+            "GROUP / cross-entity threshold",
             "TRUE | FALSE | UNKNOWN",
             "Float64",
             "IANA",
+            "AlertPolicyDefinitionV1",
         ):
             self.assertIn(needle, body_61, needle)
+        self.assertIn("6.1.11", bodies)
+        body_group = bodies["6.1.11"]
+        for needle in (
+            "canonical inventory/group/service selector",
+            "ANY | ALL | COUNT | PERCENT",
+            "Minimum qualified member count",
+            "UNKNOWN",
+            "No Data ≠ Device Down",
+            "as_of",
+            "membership snapshot",
+        ):
+            self.assertIn(needle, body_group, needle)
         ok, reason = locator_binds_id(
             "§6.1 Alert threshold evaluation contract", "REQ-ALT-002", owner
         )
@@ -2963,6 +2977,141 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ),
             errors,
         )
+
+    def test_93_alert_policy_definition_v1_contract(self) -> None:
+        """Platform_17 freezes AlertPolicyDefinitionV1 + authoring ops."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "AlertPolicyDefinitionV1",
+            'schema_version: "1.0"',
+            "subject_selector",
+            "evidence_class",
+            "root_condition: ThresholdExprV1",
+            "recovery_condition",
+            "severity_mapping",
+            "evaluation_cadence",
+            "business_calendar_ref",
+            "evidence_contract_ref",
+            "ThresholdExprV1",
+            "STATIC | DURATION | CONSECUTIVE | RATE | BASELINE | MISSING",
+            "COMPOSITE | GROUP | DEPENDENCY | BUSINESS_TIME",
+            "opaque expression strings are **forbidden**",
+            "OP-POLICY-CREATE",
+            "POST /alert-policies",
+            "POST /alert-policies/{policyId}/versions",
+            ":validate",
+            "version_no",
+            "typed field/path",
+        ):
+            self.assertIn(needle, p17, needle)
+
+    def test_94_async_state_mapping_g05_cc_async(self) -> None:
+        """G-05 / CC-ASYNC freeze admission vs persisted async lifecycle."""
+        docs = Path(__file__).resolve().parents[1]
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "ACCEPTED_FOR_ASYNC_EXECUTION",
+            "state=QUEUED",
+            "QUEUED → RUNNING → SUCCEEDED",
+            "cancel_requested=true",
+            "COMPLETED` is **not** a second persisted state",
+        ):
+            self.assertIn(needle, p06, needle)
+        for needle in (
+            "CC-ASYNC",
+            "ACCEPTED_FOR_ASYNC_EXECUTION",
+            "SUCCEEDED",
+            "cancel_requested",
+            "COMPLETED` is not a second persisted",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Stale G-05 vocabulary must not remain as the sole mapping.
+        g05 = p06[p06.find("| G-05 |") : p06.find("| G-05 |") + 900]
+        self.assertNotIn("`ACCEPTED`, `RUNNING`, `COMPLETED`", g05)
+
+    def test_95_query_cursor_envelope_cc_cursor(self) -> None:
+        """Platform_17 CC-CURSOR envelope + BUILD-067 fixture bindings."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "CC-CURSOR",
+            "cursor_schema_version",
+            "query_operation_id",
+            "filter_fingerprint",
+            "resource_scope_fingerprint",
+            "sort_definition",
+            "last_sort_tuple",
+            "tie_break_resource_id",
+            "CURSOR_INVALID",
+            "CURSOR_EXPIRED",
+            "CURSOR_STALE",
+            "CURSOR_SCOPE_CHANGED",
+            "never grants authorization",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "CC-CURSOR",
+            "duplicate sort values",
+            "CURSOR_INVALID",
+            "CURSOR_SCOPE_CHANGED",
+        ):
+            self.assertIn(needle, register, needle)
+
+    def test_96_flow_observed_estimated_separation(self) -> None:
+        """Flow raw/DAF-FLW/BUILD-093 keep observed and estimated separate."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "observed_bytes",
+            "observed_packets",
+            "estimated_bytes",
+            "estimated_packets",
+            "estimate_method",
+            "sampling_metadata",
+            "UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN",
+            "INGRESS | EGRESS | UNKNOWN",
+            "never one unlabeled total",
+        ):
+            self.assertIn(needle, p17, needle)
+        self.assertIn("observed vs estimated", register.lower())
+        self.assertIn("SAMPLED_UNKNOWN", register)
+
+    def test_97_profile_freeze_gates_block_dispatch(self) -> None:
+        """BUILD-031/032/045 remain NOT DISPATCHABLE until named gates PASS."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p12 = (docs / "Platform_12_Decision_Source_Register.md").read_text(
+            encoding="utf-8"
+        )
+        for gate in (
+            "WIN_AGENTLESS_P1_PROFILE_FREEZE_GATE",
+            "REDFISH_P1_PROFILE_FREEZE_GATE",
+            "DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE",
+        ):
+            self.assertIn(gate, p12, gate)
+            self.assertIn(gate, register, gate)
+            self.assertIn("NOT DISPATCHABLE", register)
 
 
 if __name__ == "__main__":

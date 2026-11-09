@@ -8,9 +8,9 @@
 | Role | SHA | Notes |
 |---|---|---|
 | Canonical main/base | `92f0fb37805c234be2869619abcc01ad26b5f30b` | USER-FIXED base for this lane |
-| Immutable audited starting candidate | `09ede46dfca9353305c98f355b9ee393d6ac1edb` | Starting head assigned to this writer pass |
-| Audited starting tree | `7fc3d239557d6f8b0abe17be53e35d3688294a7c` | Tree of starting candidate |
-| Prior corrective parent (historical) | `10c4ca3885a16a5191294d9f5571c198b274a8f1` | Previous in-lane corrective commit; not the final head |
+| Immutable audited starting candidate | `58738efd82a4377e545681eea8277d1db0e49b7f` | Starting head assigned to this writer pass |
+| Audited starting tree | `1e42d958d34f86753824e0ade573f192c24f55a1` | Tree of starting candidate |
+| Prior corrective parent (historical) | `58738efd82a4377e545681eea8277d1db0e49b7f` | Previous in-lane corrective commit; not the final head |
 
 ## Pre-finalization evidence (in-file hashes are NOT the exact final head)
 

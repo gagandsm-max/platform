@@ -1795,7 +1795,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - View topology
 - View alerts/incidents
 
-**Domain contract:** Flow filters and grouping must not silently mix incompatible sampling, direction, observation windows or exporter domains. Unknown application/ASN/interface identity remains unknown. Derived rates use the actual qualified interval; raw counts and estimated sampled totals are labelled separately. This contract does not imply packet/DPI payload access.
+**Domain contract:** Flow filters and grouping must not silently mix incompatible sampling, direction, observation windows or exporter domains. Unknown application/ASN/interface identity remains unknown. Derived rates use the actual qualified interval. Displayed totals SHALL clearly identify **observed** versus **estimated** traffic (bind DAF-FLW `observed_*` / `estimated_*` / `estimate_method` / `sampling_metadata` from `Platform_17` §13.9/§15.7); never present one unlabeled mixed total. This contract does not imply packet/DPI payload access.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -1811,7 +1811,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Network
 **Primary roles:** Network/capacity
-**Purpose:** Inter-site traffic volumes, protocol mix, trends and capacity context.
+**Purpose:** Inter-site traffic volumes, protocol mix, trends and capacity context. Volume totals SHALL label **observed** versus **estimated** traffic per DAF-FLW (`Platform_17` §13.9/§15.7); never mix into one unlabeled total.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -4807,6 +4807,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context
+- **Policies tab / Alert Policy authoring (RBAC `policy.manage`):** create policy, create immutable version, validate definition, advance lifecycle — bind shared ops `OP-POLICY-CREATE`, `OP-POLICY-LIST/GET`, `OP-POLICY-VERSION-*`, `OP-POLICY-VERSION-VALIDATE`, `OP-POLICY-LIFECYCLE` (`Platform_17` §15.4). Do **not** invent one backend endpoint per UI panel. Validation surfaces typed field/path errors; never silent-normalize invalid thresholds. Lifecycle advance MUST name `version_no` + destination state + evidence/approval ref as applicable.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -7732,8 +7733,8 @@ Each row inherits §16.1 and its class from §16.2. **Panels** are the required 
 | UI-014 | Availability | ANALYTICAL_DASHBOARD | 1 | availability by scope; qualified downtime; UNKNOWN/STALE share; evidence quality | DAF-HLT, DAF-SLA, DAF-QLT | OP-RPT-RUN | scope, service time profile | UI-071, UI-076 |
 | UI-015 | Network Performance | ANALYTICAL_DASHBOARD | 1 | latency/loss/jitter; CPU/mem; interface trend; heatmap | DAF-OBS, DAF-PTH, DAF-NET | OP-RPT-RUN | site, role | UI-010, UI-016 |
 | UI-016 | Network Capacity | ANALYTICAL_DASHBOARD | 1 | utilization forecast; saturation list; growth trend | DAF-CAP, DAF-OBS | OP-RPT-RUN | site, link, horizon | UI-070, UI-012 |
-| UI-017 | Network Flow / Traffic Analytics | ANALYTICAL_DASHBOARD | 1 | top talkers/apps/conversations; interface traffic; baseline; exporter health | DAF-FLW, DAF-QLT | OP-RPT-RUN | exporter, interface, app, direction; cardinality-bounded top-N | UI-018, UI-011 |
-| UI-018 | Site-to-Site Traffic | ANALYTICAL_DASHBOARD | 1 | site-pair matrix; volume/trend; top apps | DAF-FLW, DAF-INV | OP-RPT-RUN | site pair, app | UI-017 |
+| UI-017 | Network Flow / Traffic Analytics | ANALYTICAL_DASHBOARD | 1 | top talkers/apps/conversations; interface traffic; baseline; exporter health; **observed vs estimated totals labelled** | DAF-FLW, DAF-QLT | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | exporter, interface, app, direction; cardinality-bounded top-N; sampling_metadata | UI-018, UI-011 |
+| UI-018 | Site-to-Site Traffic | ANALYTICAL_DASHBOARD | 1 | site-pair matrix; volume/trend; top apps; **observed vs estimated labelled** | DAF-FLW, DAF-INV | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | site pair, app | UI-017 |
 | UI-019 | Routing Health | NOC_DASHBOARD | 1 | adjacency states; route churn; protocol health; alerts | DAF-NET, DAF-ALR, DAF-TOP | — | protocol, site | UI-020, UI-010 |
 | UI-020 | BGP | ANALYTICAL_DASHBOARD | 1 | peer states; prefix counts; flap trend; session table | DAF-NET, DAF-ALR | — | peer, ASN, VRF | UI-019, UI-010 |
 | UI-021 | MPLS / VRF | ANALYTICAL_DASHBOARD | 1.5† | VRF health; LSP/LDP state; per-VRF utilization | DAF-NET, DAF-FLW | — | VRF, PE | UI-010 |
@@ -7774,7 +7775,7 @@ Each row inherits §16.1 and its class from §16.2. **Panels** are the required 
 | UI-056 | Incident Console | OPERATIONAL_CONSOLE | 1 | incident queue; state/owner; impact; RCA status; ITSM sync | DAF-INC, DAF-INT | OP-INC-ACK, OP-INC-ASSIGN, OP-INC-RESOLVE, OP-INC-REOPEN | state, priority, owner, service | UI-057 |
 | UI-057 | Incident Detail | INVESTIGATION | 1 | summary; linked alerts; RCA revision; timeline; diagnostics; ITSM state | DAF-INC, DAF-RCA, DAF-DIAG, DAF-INT | OP-INC-*, OP-DIAG-JOB-CREATE, OP-INV-SESSION-CREATE | incident | UI-058 |
 | UI-058 | RCA / Investigation Workspace | INVESTIGATION | 1 | pinned RCA revision; evidence (supporting/contradicting/missing); topology as-of; timeline; session evidence | DAF-RCA, DAF-TOP, DAF-DIAG, DAF-CHG | OP-RCA-FEEDBACK, OP-RCA-RERUN, OP-INV-SESSION-ATTACH, OP-DIAG-JOB-CREATE | incident, revision, as-of | UI-057, UI-061 |
-| UI-059 | False Alert Qualification | GOVERNANCE | 1 | false-alert measurement; policy cohorts; backtest/shadow results; feedback queue | DAF-POL, DAF-ALR | OP-POLICY-LIFECYCLE (backtest/shadow only) | policy, cohort, window | UI-091 |
+| UI-059 | False Alert Qualification | GOVERNANCE | 1 | false-alert measurement; policy cohorts; backtest/shadow results; feedback queue; Policies-tab authoring | DAF-POL, DAF-ALR | OP-POLICY-CREATE, OP-POLICY-LIST/GET, OP-POLICY-VERSION-*, OP-POLICY-VERSION-VALIDATE, OP-POLICY-LIFECYCLE (version_no-bound) | policy, cohort, window | UI-091 |
 | UI-060 | Maintenance & Suppression | CONFIGURATION | 1 | window list/calendar; editor; impact preview; active overlay list | DAF-POL | OP-MNT-CREATE, OP-MNT-UPDATE, OP-MNT-CANCEL, OP-MNT-END-EARLY | scope, status, timezone | UI-055 |
 | UI-061 | Change Timeline | ANALYTICAL_DASHBOARD | 1 | change/deployment/config events overlaid on health | DAF-CHG, DAF-HLT | — | entity, change type | UI-058, UI-065 |
 | UI-062 | NCM Overview | OPERATIONAL_CONSOLE | 1 (+1.5 plan panels not active) | backup job queue; last-backup coverage; compliance summary; change jobs | DAF-NCM | OP-NCM-JOB-CREATE (backup), OP-NCM-JOB-CANCEL | job kind, state, vendor | UI-063, UI-064 |
@@ -7806,7 +7807,7 @@ Each row inherits §16.1 and its class from §16.2. **Panels** are the required 
 | UI-088 | Shift Handover | OPERATIONAL_CONSOLE | 1 | open items; handover notes; ownership; unresolved evidence | DAF-HND, DAF-INC, DAF-ALR | OP-HANDOVER-CREATE | team, shift | UI-056 |
 | UI-089 | Migration Studio | CONFIGURATION | 1.5† | import mapping; validation; staged apply | DAF-KNW, DAF-INV | OP-MIGRATION-IMPORT | source, mapping | UI-066 |
 | UI-090 | Intelligence Quality | ANALYTICAL_DASHBOARD | 1 | RCA accuracy/INCONCLUSIVE rate; confidence calibration; model/data-drift | DAF-POL, DAF-RCA | — | model, window | UI-091 |
-| UI-091 | Alert Policy Effectiveness | ANALYTICAL_DASHBOARD | 1 | false-alert/noise by policy; backtest/shadow; recommendation queue | DAF-POL | OP-POLICY-LIFECYCLE | policy, window | UI-059 |
+| UI-091 | Alert Policy Effectiveness | ANALYTICAL_DASHBOARD | 1 | false-alert/noise by policy; backtest/shadow; recommendation queue | DAF-POL | OP-POLICY-LIST/GET, OP-POLICY-VERSION-LIST/GET, OP-POLICY-LIFECYCLE (version_no-bound) | policy, window | UI-059 |
 | UI-092 | Data Pipeline Integrity | PLATFORM_OPERATIONS | 1 | produced/accepted/normalized/inserted reconciliation per interval/stream | DAF-PIPE, DAF-QLT | — | stream, interval | UI-078 |
 | UI-093 | Storage & Retention | PLATFORM_OPERATIONS | 1 | volume/data-class measurements; headroom/shortfall; retention preview; protected data | DAF-STG | OP-STO-RETENTION-PREVIEW, OP-STO-RETENTION-ACTIVATE, OP-STO-ACTION | volume, data class | UI-079 |
 | UI-094 | Usage & Licensing | GOVERNANCE | 1 | licensed vs used; state (T-7/EXPIRED_GRACE_15D); forecast | DAF-LIC | OP-LIC-LOAD, OP-LIC-EXTEND | module | UI-093 |

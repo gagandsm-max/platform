@@ -203,18 +203,18 @@ Threshold evaluation defined in §6.1–§6.10 is the authoritative `REQ-ALT-002
 
 ### 6.1 Alert threshold evaluation contract (`REQ-ALT-002`)
 
-`REQ-ALT-002` requires Platform to evaluate static, duration, consecutive, rate, baseline, missing, composite, dependency and business-time thresholds under one common envelope. Type-specific rules in §6.1.2–§6.1.10 refine that envelope; they do not create a second threshold authority.
+`REQ-ALT-002` requires Platform to evaluate static, duration, consecutive, rate, baseline, missing, composite, group/cross-entity, dependency and business-time thresholds under one common envelope. Type-specific rules in §6.1.2–§6.1.11 refine that envelope; they do not create a second threshold authority. Persisted/authoring representation of these expressions is owned by `Platform_17` **`AlertPolicyDefinitionV1`** / **`ThresholdExprV1`** (referenced here; do not invent a second schema).
 
 #### 6.1.1 Common threshold evaluation envelope
 
 Every threshold definition SHALL specify:
 
 1. **Metric/evidence input identity** — canonical metric, observation family, or evidence reference (entity/monitor scope, units, quality fields).
-2. **Operator / evaluation type** — one of the typed families in §6.1.2–§6.1.10 (or an explicit composition of those families).
+2. **Operator / evaluation type** — one of the typed families in §6.1.2–§6.1.11 (or an explicit composition of those families).
 3. **Evaluation window** — the time or sample window over which the condition is assessed.
 4. **Qualified sample requirements** — minimum usable samples and which quality states count as qualified.
 5. **Evidence-quality prerequisites** — collector health, freshness, schema/time validity and other §5 trust gates that must pass before a TRUE failure assertion is eligible.
-6. **Threshold parameters** — typed parameters for the selected evaluation family (limits, N, duration, rate bounds, baseline identity, calendar identity, child condition refs).
+6. **Threshold parameters** — typed parameters for the selected evaluation family (limits, N, duration, rate bounds, baseline identity, calendar identity, child condition refs, group aggregation).
 7. **Clear / reset / hysteresis behavior** — how TRUE clears to FALSE, reset conditions and any hysteresis band distinct from the fire threshold.
 8. **Missing / stale behavior** — explicit outcome when expected evidence is absent, late or stale (`UNKNOWN`, suppress fire, extend window, or other documented rule — never silent DOWN).
 9. **Schedule / business-time applicability** — whether evaluation is always-on or bound to a versioned business calendar/timezone (§6.1.10).
@@ -309,6 +309,28 @@ A business-time threshold restricts when another threshold family is eligible to
 - **Calendar / freeze policy:** evaluation binds a versioned business calendar and optional freeze/blackout policy identity.
 - **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit policy rule (default: treat gap as outside business time / fold as earlier offset) and MUST be fixture-tested.
 - **Missing / invalid calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden unless an explicit alternate calendar version is bound in policy.
+
+#### 6.1.11 GROUP / cross-entity threshold (`ThresholdExprV1.kind=GROUP`)
+
+PRD §19 requires cross-device/group conditions. A GROUP threshold evaluates a child `ThresholdExprV1` across a canonical inventory/group/service membership set and aggregates the qualified child results.
+
+Frozen contract:
+
+1. **Selector** — canonical inventory/group/service selector only (tenant-scoped group, dynamic group, service membership, or explicit entity-set reference owned by Inventory). Opaque ad-hoc device lists outside inventory authority are rejected.
+2. **Membership resolution** — membership is resolved from authoritative inventory at the evaluation `as_of` instant for that tick.
+3. **Membership evidence** — evaluation evidence SHALL record membership snapshot/revision (selector identity, `as_of`, membership revision/hash, member entity IDs counted).
+4. **Child expression** — exactly one typed child `ThresholdExprV1` (any non-GROUP family, or COMPOSITE of non-GROUP families). Nested GROUP is forbidden unless a later schema major explicitly authorizes it.
+5. **Aggregation operator** — exactly one of `ANY | ALL | COUNT | PERCENT`.
+6. **Minimum qualified member count** — mandatory; if the count of members that produced a qualified child result (`TRUE` or `FALSE`) is below this minimum, the GROUP result is `UNKNOWN`.
+7. **Count / percentage threshold** — required when operator is `COUNT` or `PERCENT` (absolute count or percentage of qualified members whose child result is `TRUE`).
+8. **Common evaluation window and alignment tolerance** — all members share one evaluation window; per-member sample timestamps may differ only within a configured alignment tolerance. Outside tolerance ⇒ that member is unqualified for this tick.
+9. **Missing / stale members** — members with missing, stale, or evidence-quality-failed child inputs are **unqualified**; they do not count as `TRUE` or `FALSE`. Unqualified members do not satisfy ALL/ANY by silence.
+10. **Insufficient qualified membership** — when qualified members < minimum ⇒ `UNKNOWN` (never Device Down).
+11. **Tick isolation** — membership changes during an evaluation tick do not retroactively change that tick’s result; the tick binds the membership snapshot taken at evaluation start/`as_of`.
+12. **Historical immutability** — dynamic membership MUST NOT silently rewrite historical evaluation evidence; later membership changes create new ticks/evidence only.
+13. **No Data ≠ Device Down** — GROUP `UNKNOWN` / insufficient membership / collector failure remains monitoring-quality evidence and MUST NOT coerce Device Down.
+
+Persisted shape is the `GROUP` variant of `Platform_17` `ThresholdExprV1`.
 
 ## 7. Active Evidence Acquisition
 
