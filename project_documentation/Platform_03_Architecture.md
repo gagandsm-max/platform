@@ -145,74 +145,14 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 <!-- END P0-1 NORMATIVE BINDINGS -->
 ### 4.1 Standalone deployment
 
-```mermaid
-flowchart LR
-    USERS[Users] -->|HTTPS| CORE1[Core-01\nActive]
-    CORE1 --> S1[Sensor Pool A]
-    CORE1 --> S2[Sensor Pool B]
-    S1 --> D1[Devices / Infra]
-    S2 --> D2[Devices / Infra]
-```
-
-Core-01 runs the complete Core stack. Sensors are separate installs and remain responsible for collection.
-
-### 4.2 Two-node HA deployment
-
-**Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. **Certification envelope:** Phase 1.5. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1; a Phase 1 standalone certificate must not imply this HA envelope. Unresolved P0 work includes active authority/fencing, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, push-protocol continuity, split-brain failure behavior, HA ACK RPO evidence (distinct from site/DR RPO), failover under load and backlog replay. Sensor assignment ownership/lease/fencing remains a Phase 1 mandatory multi-Sensor safety requirement even with standalone Core and must not be deferred solely because Core HA is Phase 1.5. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
-
-
-```mermaid
-flowchart TB
-    USERS[Users / Agents / Sensors] --> VIP[Stable Core HA Endpoint / VIP]
-    VIP --> A[Core-A\nACTIVE]
-    VIP -. failover .-> B[Core-B\nSTANDBY]
-    A <-->|continuous state sync| B
-    SENS[Sensor Pools] --> VIP
-    SENS -->|local poll independent of Core state| DEV[Monitored estate]
-```
-
-Requirements:
-
-- one Active and one Standby only;
-- both have the Core software and Core-local data components;
-- stable HA endpoint abstracts node identity;
-- Sensors/Agents must not require manual reconfiguration when Active changes;
-- Sensor local buffering protects monitoring during failover;
-- automatic promotion occurs only when the peer can be safely considered failed/fenced by the HA algorithm;
-- if the failure state is ambiguous, the system prefers preventing dual-active even if this delays UI promotion.
-
-### 4.3 Why no third Core
-
-The customer-facing architecture intentionally remains two full Core nodes, consistent with the requirement and lessons from incumbent NMS HA patterns. This does **not** mean every internal distributed technology is used in its textbook multi-node quorum mode. Core-local components must be adapted to a two-node active/passive product topology rather than forcing a third full server onto the customer.
-
-### 4.4 Future federation
-
-Future only, not initial scope:
-
-```mermaid
-flowchart TB
-    MC[Future Master Core\nGlobal Visualization / Federation]
-    MC --> RI[Regional Core - India]
-    MC --> RE[Regional Core - EMEA]
-    MC --> RU[Regional Core - US]
-    RI --> SI[Regional Sensors]
-    RE --> SE[Regional Sensors]
-    RU --> SU[Regional Sensors]
-```
-
-Future federation should keep high-volume raw telemetry regional and move summaries/incidents/global inventory upward, inspired by distributed NMS lessons such as SolarWinds EOC and ManageEngine LiteCentral patterns without copying their implementation.
-
----
-
-
-### 4.1 Standalone deployment
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-A-001`**: Platform SHALL enforce: Standalone = one Core; HA = exactly two full Core nodes.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 ```mermaid
 flowchart LR
     USERS[Users] -->|HTTPS| CORE1[Core-01\nActive]
@@ -232,6 +172,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-A-002`**: Platform SHALL enforce: One Active Core and one Standby; continuous state synchronization.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 **Status:** SPECIFIED / **P0** / **NOT PRODUCTION CERTIFIED**. **Certification envelope:** Phase 1.5. Exactly two full Core nodes Active/Standby remains fixed architecture and must not be downgraded to P1; a Phase 1 standalone certificate must not imply this HA envelope. Unresolved P0 work includes active authority/fencing, Kafka consumer ownership, PostgreSQL replication/failover/fencing/rewind, ClickHouse replication/promotion/fencing, stable Core endpoint/VIP, Sensor reconnect/re-anchor, push-protocol continuity, split-brain failure behavior, HA ACK RPO evidence (distinct from site/DR RPO), failover under load and backlog replay. Sensor assignment ownership/lease/fencing remains a Phase 1 mandatory multi-Sensor safety requirement even with standalone Core and must not be deferred solely because Core HA is Phase 1.5. Exact mechanism selection is a dedicated P0 engineering spike constrained by exactly two Core nodes, no silent split-brain, minimal operational complexity and no unnecessary third full Core. This baseline does **not** select Patroni, repmgr, ClickHouse Keeper, Raft, Consul, etcd or a third coordination service.
 
 
@@ -267,6 +209,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-A-012`**: Platform SHALL enforce: Future regional/multi-Core + Master Core architecture is future scalability extension only.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Future only, not initial scope:
 
 ```mermaid
@@ -1170,48 +1114,14 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 <!-- END P0-1 NORMATIVE BINDINGS -->
 ### 29.1 Trust boundaries
 
-- Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
-- Sensor ↔ Core: mTLS.
-- Agent ↔ Core bootstrap and Agent ↔ Sensor telemetry: mTLS.
-- Core internal services: TLS/mTLS according to deployment threat model.
-- Device connections: protocol-specific secure method and credential policy.
-- External integrations: HTTPS/TLS/mTLS/OAuth etc.
-
-### 29.2 Secrets
-
-Secrets are encrypted at rest, accessed by reference, masked in UI/logs, never included in exports/AI by default and separated from ordinary inventory.
-
-### 29.3 Authorization
-
-Server-side resource authorization with tenant, scope, action and condition. UI hiding is only presentation.
-
-### 29.4 Audit
-
-All state-changing/security-sensitive operations produce structured audit events. Audit export to SIEM supported.
-
-### 29.5 Supply chain
-
-Release produces SBOM, checksums, provenance and third-party notices. Dependency additions pass OSS licence/security policy.
-
----
-
-
-### Enterprise security readiness (absorbed from ARCH-SEC-READINESS)
-Platform is architected for highly regulated deployments: server-side tenant isolation, mTLS, TLS-only UI, MFA/SSO, least privilege, separate credential use/reveal permission, signed artifacts, audit, SIEM export, secret masking, KMS/HSM integration points, PKI rotation, offline installation and hardening profiles. Architecture must preserve pathways for FIPS-capable cryptographic modules and CIS/STIG-style OS hardening. No certification is claimed until actually completed.
-
-
-**IAM implementation truth (source baseline `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`):** bounded JDBC `IdentityDirectory` / `PermissionGrantDirectory` persistence is implemented in `core/src/main/java/com/platform/core/security/http/SecurityDirectoryConfiguration.java` with `V016__platform_identity_and_permission_grants.sql`. `platform.security.directories.persistence-enabled` defaults to `false`; disabled directories remain fail-closed, and enabled initialization/query failures must not fall back to permissive authority. This establishes source implementation of the directory boundary, not deployed activation, complete IAM/SSO or production certification. Discovery remains authorization-gated and fails closed when trusted identity or grants are absent. Target architecture is unchanged.
-
-**Audit implementation truth:** enterprise target includes durable/tamper-evident audit. Current common emitter logging is **not equivalent** to durable audit persistence. Actor attribution gaps remain where applicable (#92).
-
-### 29.1 Trust boundaries
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-SEC-003`**: Platform SHALL enforce: mTLS Sensors/Agents, TLS, encrypted secrets, KMS/HSM support.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 - Browser/user ↔ Core: HTTPS/OIDC/SAML/local auth.
 - Sensor ↔ Core: mTLS.
 - Agent ↔ Core bootstrap and Agent ↔ Sensor telemetry: mTLS.
@@ -1231,6 +1141,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-SEC-008`**: Platform SHALL enforce: Tenant isolation enforced server/API/query layers.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Server-side resource authorization with tenant, scope, action and condition. UI hiding is only presentation.
 
 ### 29.4 Audit

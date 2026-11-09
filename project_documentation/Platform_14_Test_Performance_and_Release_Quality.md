@@ -6,19 +6,19 @@
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial/customer-facing product name)
 **Consolidation rule:** This document preserves the normative content of the listed v3.1 source documents (via v3.2/v3.2.1). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement. v3.2.2 adds specialized-master quality supplements in §6 without rewriting the base gates.
 
-## 1. Purpose
+## Purpose
 
 Defines all test layers and quality gates, mandatory negative/failure tests, false-alert validation,
 package/reboot testing, Core/Sensor performance certification, UI/HA/DR benchmarks, regression controls and the
 Alpha/Beta/RC/GA acceptance criteria and evidence bundle.
 
-## 2. Source-document provenance
+## Source-document provenance
 
 - `Platform_15_Test_Strategy_and_Quality_Gates.md` (v3.1) — fully incorporated below.
 - `Platform_22_Performance_and_Benchmark_Plan.md` (v3.1) — fully incorporated below.
 - `Platform_24_Release_Acceptance_Criteria.md` (v3.1) — fully incorporated below.
 
-## 3. Platform — Test Strategy & Quality Gates
+## Platform — Test Strategy & Quality Gates
 
 > Consolidated from `Platform_15_Test_Strategy_and_Quality_Gates.md` v3.1. Requirements in this section remain normative.
 
@@ -47,7 +47,7 @@ Platform targets banks, defence and large enterprises; testing therefore validat
 
 Wrong SNMP community/v3 user/auth/privacy, SNMP disabled, ACL/firewall drop, unreachable host, wrong API token, TLS failure, expired certificate, DNS failure, Kafka unavailable, ClickHouse unavailable, PostgreSQL failover, sensor disk pressure, Core loss, duplicate/replayed telemetry, malformed bulk import, high-cardinality explosion, clock skew, unauthorized/cross-tenant diagnostic target, arbitrary/ad-hoc target abuse, diagnostic rate/concurrency exhaustion, unbounded continuous test, cancellation/timeout failure, multi-vantage contradictory results, reused/expired diagnostic authorization, CLI session hijack, one-time/reusable credential leakage, command-policy bypass, privilege escalation/config-mode denial and missing diagnostic/CLI/investigation audit evidence.
 
-## 3.1 NOC troubleshooting acceptance tests
+### 3.1 NOC troubleshooting acceptance tests
 
 UI E2E/integration suites shall verify: device/alert/incident context is preserved while Troubleshoot/embedded CLI is used; on-demand Ping/Trace/SNMP returns source/vantage and bounded results; multi-vantage disagreement remains visible; `Verify Now` returns per-check evidence; Live Evidence distinguishes monitored from on-demand state; Investigation Sessions retain evidence references; stored/personal/one-time CLI credential modes obey policy; low-risk read-only diagnostics avoid unnecessary friction while privileged/configuration commands enforce configured controls; and interactive load cannot starve certified monitoring workload.
 
@@ -89,55 +89,55 @@ Modern Linux Agent certification profiles remain required. Native base-Linux Age
 
 No release promotion with failing P0/P1 tests, unresolved critical/high security defects without approved exception, tenant-isolation failure, data-loss defect in certified normal failure scenarios, failed upgrade/rollback gate, broken SBOM/license gate or performance regression beyond approved threshold.
 
-## 4. Platform — Performance & Benchmark Plan
+## Platform — Performance & Benchmark Plan
 
 > Consolidated from `Platform_22_Performance_and_Benchmark_Plan.md` v3.1. Requirements in this section remain normative.
 
-## 1. Core target
+## 21. Core performance target
 
 ≤2,500 reference network devices on 8 vCPU / 32 GB Core is a mandatory engineering target under a versioned Standard Network Workload Profile, not a blanket guarantee for arbitrary Flow/log/high-cardinality workloads.
 
-## 2. Sensor targets
+## 22. Sensor performance targets
 
 Planning baseline: **4 vCPU / 16 GB RAM / 150 GB SSD ≈ 800 normal network devices** under representative SNMP/ICMP/reference workload assumptions. High-density engineering benchmark objective / planning target (**NOT CERTIFIED**): **8 vCPU / 32 GB RAM** approaching approximately **2,000–2,500** comparable normal network devices where workload permits. This is not a product guarantee, hard device-count entitlement, installer rejection threshold, blanket workload guarantee, or certified capacity result; no additional SSD requirement is invented for the high-density profile. Device count alone is insufficient—benchmark and size by MWU/workload (interfaces, metrics, intervals, protocol cost, RTT/timeouts, Flow, syslog, streaming, NCM, users/query/report load, backlog/spool, retention). Core sizing targets in §1 remain unchanged by this Sensor objective. Streaming/Event Sensor is benchmarked separately by records/events per second.
 
 These are workload-specific planning/benchmark targets, not certified capacity. The approved internal 4 GB-per-vCPU planning recommendation and nonblocking installer warning/proceed behavior remain governed by Platform_11 and the Issue #206 decision in Platform_12; do not turn a RAM ratio into a new mandatory install rejection.
 
-## 3. Benchmark dimensions
+## 23. Benchmark dimensions
 
 Devices, interfaces, metrics, poll interval, SNMP version/security, RTT, timeouts, traps/events, flow rate, syslog EPS, gNMI subscriptions, concurrent users, dashboard queries, reports, RCA jobs and storage retention.
 
-## 4. UI targets
+## 24. UI performance targets
 
 Measure navigation shell, dashboard first meaningful render, common query latency, search suggestions, alert action acknowledgment, large table interaction and concurrent NOC users. Exact GA SLOs are frozen from benchmark evidence.
 
-## 5. HA/DR
+## 25. HA/DR performance
 
 **Phase 1 (standalone Core + DR):** measure standalone Core interruption and recovery (process/service restart, dependency-aware readiness, reboot recovery, configuration/state continuity), Sensor uninterrupted polling/buffering through bounded Core unavailability, backlog replay time and correctness, standalone deletion-authorizing ACK durability under the certified standalone failure matrix, and backup/restore plus site-loss DR/redeploy/recovery for the declared Phase-1 DR profile. Phase 1 does **not** require a second Core, Active/Standby pair, HA VIP, two-Core failover, <60s HA failover, two-Core replication/fencing, or former-Active rejoin. DR remains a Phase 1 obligation; HA ≠ DR.
 
 **Phase 1.5 (exactly-two-Core HA):** additionally measure Active→Standby Core service restoration under certified HA scenarios against the agreed <60-second target, safe authority transition, fencing, peer-partition fail-closed behavior, state/data replication, survivor durability, returning former-Active safe rejoin/resynchronization, and applicable MSP isolation certification. Do not weaken Phase 1.5 HA requirements. Contractual/external RPO/RTO remain TBD until frozen; internal technical targets remain Master technical authority.
 
-## 6. Regression gate
+## 26. Performance regression gate
 
 Each release compares CPU/RAM/disk/query/poll/ingestion metrics with baseline. Material regression requires documented approval or remediation before GA.
 
-## 5. Platform — Release Acceptance Criteria
+## Platform — Release Acceptance Criteria
 
 > Consolidated from `Platform_24_Release_Acceptance_Criteria.md` v3.1. Requirements in this section remain normative.
 
-## 1. Alpha
+## 27. Alpha
 
 Core workflows function in Docker test environment; schemas/contracts versioned; no known architecture violation; basic package builds available; critical diagnostics/logging implemented.
 
-## 2. Beta/Pilot
+## 28. Beta/Pilot
 
 Representative protocols/vendors certified; provisioning diagnostics actionable; Phase 1 standalone Core interruption/recovery, Sensor continuity/buffering and backup/restore/DR exercised; package install/reboot/upgrade tested for applicable activated profiles and the claimed OS profiles; security/tenant isolation passed; SBOM/license gates clean. Two-Core Active/Standby failover is a Phase 1.5 HA certification gate and is **not** an unconditional Phase 1 Beta/Pilot requirement; BUILD-120–124 fenced failover remains required for the Phase-1.5 HA profile.
 
-## 3. Release Candidate
+## 29. Release Candidate
 
 Full regression, performance certification, Phase 1 DR evidence (backup/restore and declared site-loss DR profile), phase/profile-applicable recovery evidence, migration/upgrade matrix, `.deb/.rpm` install tests covering staged-versus-activated lifecycle for applicable profiles, Windows MSI/service certification for the approved mandatory Windows Phase-1/first-GA scope, signed artifacts, vulnerability disposition, documentation and support runbooks complete. Two-Core HA evidence applies when certifying the Phase 1.5 HA profile and is not an unconditional Phase 1 RC prerequisite; Phase-1.5 HA claims additionally require BUILD-120–124 fenced failover/replication/rejoin evidence. A bounded Linux candidate/certificate is not full product release acceptance and does not waive the mandatory Windows requirements.
 
-## 4. GA blockers
+## 30. GA blockers
 
 - tenant isolation defect;
 - known critical security vulnerability without exceptional approved mitigation;
@@ -150,11 +150,11 @@ Full regression, performance certification, Phase 1 DR evidence (backup/restore 
 - unsupported silent data loss in certified normal failure scenarios;
 - unresolved RED OSS dependency.
 
-## 5. Evidence
+## 31. Release evidence
 
 Every GA build has a release evidence bundle containing test results, benchmark summary, package hashes/signatures, SBOMs, OSS notices, vulnerability scan, upgrade/rollback results, Phase 1 DR results (backup/restore and declared site-loss DR profile), applicable standalone recovery results, phase-applicable HA results when a Phase 1.5 HA profile is being certified, and known limitations. Evidence must name exact source/artifacts, OS/domain profile, workload and failure envelope; another profile’s passing result is not transferable certification.
 
-## 6. v3.2.2 specialized-master quality supplements
+## 32. v3.2.2 specialized-master quality supplements
 
 Generic test layers and Alpha/Beta/RC/GA gates above remain the base quality contract. Family-specific gates live in the owning specialized masters and are not duplicated here.
 
@@ -230,7 +230,7 @@ Applicable implementation may not be represented as production-ready until evide
 No fixed endpoint-overhead number is asserted by documentation alone. Release certification records measured idle and triggered overhead per supported OS/profile and establishes the admissible envelope. Specified ≠ implemented ≠ tested ≠ certified ≠ deployed.
 
 
-## 7. Enterprise SNMP quality and certification supplement
+## 33. Enterprise SNMP quality and certification supplement
 
 A release or Capability Pack shall not claim production SNMP support merely because GoSNMP unit tests, a single v2c GET, or an isolated Sensor spool test passes. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 

@@ -135,21 +135,37 @@ No contract may encode a universal “two signals always required” rule. Requi
 
 ### 4.1 Downstream dependency correlation and reversible suppression safety
 
-Topology-based qualification uses incident-time, versioned, tenant-scoped graph edges with type, direction, source protocol, first/last observation and freshness/quality. LLDP/CDP supplies L2 adjacency; parent-child failure propagation requires corroborated routing/path/service/CMDB evidence and redundancy-aware reachability. A failed parent may explain child UNREACHABLE symptoms, but must not automatically mark all children DEVICE_DOWN or assert a confirmed root from timing alone.
-
-Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
-
-### 4.1 Downstream dependency correlation and reversible suppression safety
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-ALT-009`**: Platform SHALL enforce: Maintenance, notification mute and dependency suppression separated.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Topology-based qualification uses incident-time, versioned, tenant-scoped graph edges with type, direction, source protocol, first/last observation and freshness/quality. LLDP/CDP supplies L2 adjacency; parent-child failure propagation requires corroborated routing/path/service/CMDB evidence and redundancy-aware reachability. A failed parent may explain child UNREACHABLE symptoms, but must not automatically mark all children DEVICE_DOWN or assert a confirmed root from timing alone.
 
 Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
+
+### 4.2 Alert ownership, assignment, escalation and shift handover
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-011`**: Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+Alert ownership is an operational workflow contract, distinct from model-learning feedback:
+
+- every active alert/incident SHALL support authorized **assignment** to a user, team or on-call roster reference (`assignee_ref` / owner) with actor, timestamp and reason/ticket where required by policy;
+- **acknowledgement** and **assignment** are separate lifecycle transitions; acknowledging does not imply ownership transfer unless explicitly combined by an authorized action;
+- **escalation** policies define time-based or severity-based promotion paths (primary → secondary → management) with freeze/maintenance awareness; escalation MUST NOT mutate alert severity or semantic state solely to force paging;
+- **shift handover** SHALL transfer open owned alerts/incidents to the incoming roster with auditable from/to actors, retained investigation context and no silent drop of ownership; unresolved items remain visible in the incoming queue;
+- ownership/escalation actions are tenant-scoped, RBAC-enforced and audited; they MUST NOT invoke privileged remediation or rewrite RCA conclusions;
+- Notification Center delivery of ownership/escalation events follows `Platform_20` dedupe/rate-limit rules and remains distinct from the underlying Alert/Incident object.
+
+This section does not authorize LLM/GNN output to assign owners, escalate or perform shift handover. Learning/feedback governance remains in §9 and cannot substitute for this operational contract.
 
 ## 5. Telemetry quality, evidence coverage and semantic state
 
@@ -218,12 +234,6 @@ The regression corpus must include parent-link-down with child UNREACHABLE, redu
 
 ## 9. Operator feedback and learning governance
 
-<!-- P0-1 NORMATIVE BINDINGS -->
-Primary normative bindings for this section (P0-1; not an RTM catalogue):
-
-- **`REQ-ALT-011`**: Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover.
-
-<!-- END P0-1 NORMATIVE BINDINGS -->
 Operator feedback is structured evidence, not an automatic production-policy mutation. Supported feedback may include confirmed/rejected cause, alert useful/not useful, false-positive reason, suppression reason, remediation success/failure and missing evidence. Feedback records actor, tenant, incident/policy/model version and timestamp.
 
 Use of feedback for model/policy training requires a governed evaluation/promotion process. Production policy, prompts or model weights must not silently self-modify from individual operator actions.

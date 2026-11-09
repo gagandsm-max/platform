@@ -123,100 +123,14 @@ Execution rules:
 
 ### 3.1 Supported candidate sources
 
-The unified onboarding/review model applies first to:
-
-- Network Auto Discovery;
-- Windows Agent enrollment;
-- Linux Agent enrollment.
-
-It also applies to candidate-producing Cloud, virtualization, storage, database, Kubernetes and API/connector discovery as those sources expose candidate managed entities. A source-specific workflow may collect different evidence, but it may not invent a separate lifecycle that bypasses the common identity, review, audit and activation contract.
-
-### 3.2 Candidate decisions
-
-Authorized decisions are:
-
-- **Approve** — continue through normal preflight/provisioning and activate the effective monitoring configuration;
-- **Leave Unmanaged** — preserve inventory/reconciliation visibility but do not run normal monitoring/licence workload;
-- **Reject** — deny this candidate/enrollment outcome; for unauthorized Agent enrollment, identity/certificate is revoked/invalidated as policy requires;
-- **Exclude** — create a persistent/permanent exclusion for the matching scoped identity so rediscovery, Agent reconnect, later scans or passage of time do not automatically recreate or re-notify the candidate. Reversal requires an explicit authorized administrative action to remove/reopen the exclusion and must be audited.
-
-Temporary suppression, snooze or notification muting is a separate concept and must not be represented as **Exclude**.
-
-Every decision requires an operator comment/reason. Bulk actions require a common decision comment/reason and per-item result evidence; where an item requires a different reason, an authorized per-item override may be recorded.
-
-### 3.3 Review enrichment and policy preview
-
-Before approval, authorized users can review/correct:
-
-- Display Name;
-- Alias;
-- Description;
-- Site;
-- Group and Sub-group;
-- Tags;
-- Criticality;
-- Monitoring Profile;
-- Alert/Validation Policy assignment or inherited group policy;
-- Sensor assignment mode/selection where allowed.
-
-The review screen shows effective policy inheritance, monitoring capability, Sensor MWU/capacity impact and material licence/entitlement impact before activation. An explicit override is visible and audited; the user is never required to infer whether a group policy will apply.
-
-### 3.4 Agent identity and dynamic addressing
-
-For Agent-backed endpoints:
-
-- canonical `entity_id` identifies the monitored endpoint inside the tenant;
-- unique `agent_id` and enrolled mTLS certificate identity bind the installed Agent to that entity;
-- System/Host Name is the preferred human-readable technical name;
-- customer Display Name/Alias are presentation metadata;
-- IPv4/IPv6/MAC values are observed, time-varying identifiers with history/provenance.
-
-DHCP, Wi-Fi, VPN or network movement may change addresses repeatedly. Such changes update observations and network attachment history; they do not create a new endpoint or a 'new device' notification by themselves.
-
-### 3.5 Identity conflict and reconciliation
-
-The product shall surface an explicit review/security condition for cases including:
-
-- Agent reinstall with ambiguous previous identity;
-- OS reimage;
-- VM/image clone carrying duplicated Agent identity;
-- certificate/Agent ID reuse from conflicting hosts;
-- hostname collision;
-- conflicting serial/hardware/cloud/OS identifiers;
-- improbable simultaneous heartbeats from the same Agent identity;
-- manual merge/split request.
-
-Platform shall preserve evidence and require an authorized reconciliation decision. It shall not silently merge distinct endpoints or allow two active bindings for one unique Agent identity.
-
-### 3.6 Notification Center semantics
-
-The global Notification Center/bell is a per-user operational inbox. Recommended categories include:
-
-- My Action Required;
-- Incidents;
-- Network;
-- Infrastructure;
-- Database;
-- SD-WAN / Cloud / Kubernetes where applicable;
-- Discovery & New Assets;
-- Approvals;
-- Platform Health;
-- Reports / Integrations / Licensing where applicable.
-
-Categories are views over typed notifications, not separate notification subsystems or separate bell icons.
-
-Marking a notification read does **not** acknowledge/resolve an Alert or Incident. Conversely, acknowledging an Alert does not automatically represent every related workflow notification as read unless explicitly defined by the lifecycle contract.
-
----
-
-### 3.1 Supported candidate sources
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-PRV-011`**: Platform SHALL enforce: IP/CIDR/seed/site/IPAM scope + exclusions.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 The unified onboarding/review model applies first to:
 
 - Network Auto Discovery;
@@ -246,6 +160,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-PRV-002`**: Platform SHALL enforce: Optional user display name and description; auto-derive when blank.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Before approval, authorized users can review/correct:
 
 - Display Name;
@@ -269,6 +185,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-PRV-003`**: Platform SHALL enforce: Do not use IP alone as canonical identity.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 For Agent-backed endpoints:
 
 - canonical `entity_id` identifies the monitored endpoint inside the tenant;
@@ -287,6 +205,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-PRV-015`**: Platform SHALL enforce: Asset lifecycle/reconciliation and no automatic deletion.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 The product shall surface an explicit review/security condition for cases including:
 
 - Agent reinstall with ambiguous previous identity;

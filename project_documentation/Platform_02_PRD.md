@@ -680,95 +680,6 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 <!-- END P0-1 NORMATIVE BINDINGS -->
 ### 11.1 SNMP
 
-Platform shall support:
-
-- v1/v2c/v3 polling;
-- GET/GETNEXT/GETBULK/WALK for routine monitoring; SET only through privileged NCM/remediation where explicitly authorized;
-- tables/scalars/counters/gauges/enums;
-- traps/informs;
-- custom MIB upload and dependency resolution;
-- customer-defined polling profiles;
-- adaptive polling;
-- missing-data detection;
-- polling statistics and diagnostics.
-
-#### 11.1.1 Enterprise SNMP correctness and usability requirements
-
-| Requirement ID | PRD ID | Requirement |
-|---|---|---|
-| `REQ-SNMP-001` | `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
-| `REQ-SNMP-002` | `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`; it is not yet benchmarked/certified/deployed. Derived delta/rate/reset/wrap/discontinuity remains SPECIFIED but NOT IMPLEMENTED/CERTIFIED — remaining P0. |
-| `REQ-SNMP-003` | `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
-| `REQ-SNMP-004` | `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
-| `REQ-SNMP-005` | `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
-| `REQ-SNMP-006` | `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
-| `REQ-SNMP-007` | `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
-| `REQ-SNMP-008` | `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
-| `REQ-SNMP-009` | `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
-| `REQ-SNMP-010` | `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
-| `REQ-SNMP-011` | `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
-| `REQ-SNMP-012` | `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
-| `REQ-SNMP-013` | `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
-| `REQ-SNMP-014` | `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
-| `REQ-SNMP-015` | `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
-| `REQ-SNMP-016` | `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
-| `REQ-SNMP-017` | `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
-| `REQ-SNMP-018` | `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
-| `REQ-SNMP-019` | `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
-| `REQ-SNMP-020` | `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
-| `REQ-SNMP-021` | `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
-| `REQ-SNMP-022` | `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
-| `REQ-SNMP-023` | `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
-
-
-### 11.2 Availability and path
-
-- ICMP reachability/RTT/loss.
-- Configurable device-down validation.
-- Traceroute/path history and changes.
-- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and reduce false path-change artifacts from ECMP where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
-- TCP/DNS/TLS/HTTP validation where relevant.
-- Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
-
-### 11.3 Layer and protocol depth
-
-Device Packs/telemetry shall support deep monitoring for:
-
-- interfaces, errors, discards, utilization and optical metrics;
-- VLAN/STP/RSTP/MSTP;
-- LACP;
-- ARP/MAC/FDB;
-- CDP/LLDP;
-- BGP;
-- OSPF;
-- IS-IS;
-- BFD;
-- HSRP/VRRP;
-- MPLS/LSP/VRF;
-- VXLAN/EVPN/VNI/VTEP;
-- QoS/CBQoS;
-- multicast/PIM;
-- IP SLA;
-- VPN/IPsec;
-- SD-WAN;
-- WLAN AP/client/radio/controller metrics;
-- CUCM/VoIP where Device Pack support exists.
-
-### 11.4 Flow analytics
-
-Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor/J-Flow formats under configured exporter/source/tenant authority. Packet source IP alone is not tenant authority.
-
-Required engineering contracts include: v9/IPFIX template lifecycle/cache/expiry/withdrawal; sampling factor/provenance; sequence/gap/reset evidence; UDP pre-acceptance loss visibility; observation point; ingress/egress/direction evidence; duplicate/exporter-HA semantics; raw evidence preserved before enrichment; temporal entity/IP mapping; DNS/DHCP/IPAM evidence; authenticated user/session evidence where available; ASN/Geo/cloud/SaaS enrichment with confidence/time/provenance.
-
-Directory membership alone does not prove historical IP ownership. Domain/application identity does not equal full URL. Public-IP Geo is approximate. User-attributed Flow requires privacy/RBAC controls. Flow Coverage may compare compatible Flow vs interface evidence. **No Flow ≠ no traffic**. Flow anomaly ≠ device down/root cause.
-
-Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/VRF, ASN/BGP, cloud, service/application metadata when exporter provides it, QoS and tenant. Views shall include top talkers, source/destination, conversations, protocols/ports, site-to-site, interfaces, ASN, matrices, Sankey, anomalies and capacity. Platform shall not claim deep L7 application visibility without exporter-provided metadata or future DPI capability. ClickHouse remains high-volume Flow analytics authority; no new datastore. Production high-volume Flow uses the `FLOW` deployment role.
-
----
-
-
-### 11.1 SNMP
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
@@ -776,6 +687,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-NET-003`**: Platform SHALL enforce: SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Platform shall support:
 
 - v1/v2c/v3 polling;
@@ -825,6 +738,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-NET-002`**: Platform SHALL enforce: ICMP/traceroute/TCP/DNS/TLS/HTTP probes.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
@@ -842,6 +757,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-NET-010`**: Platform SHALL enforce: VPN/IPsec/IP SLA/CUCM/VoIP operational monitoring.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Device Packs/telemetry shall support deep monitoring for:
 
 - interfaces, errors, discards, utilization and optical metrics;
@@ -872,6 +789,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-NET-004`**: Platform SHALL enforce: NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor/J-Flow formats under configured exporter/source/tenant authority. Packet source IP alone is not tenant authority.
 
 Required engineering contracts include: v9/IPFIX template lifecycle/cache/expiry/withdrawal; sampling factor/provenance; sequence/gap/reset evidence; UDP pre-acceptance loss visibility; observation point; ingress/egress/direction evidence; duplicate/exporter-HA semantics; raw evidence preserved before enrichment; temporal entity/IP mapping; DNS/DHCP/IPAM evidence; authenticated user/session evidence where available; ASN/Geo/cloud/SaaS enrichment with confidence/time/provenance.
@@ -894,82 +813,14 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 <!-- END P0-1 NORMATIVE BINDINGS -->
 ### 12.1 Server/OS
 
-Support agentless and optional Agent-based monitoring for:
-
-- CPU/load;
-- memory/swap;
-- filesystem/disk capacity;
-- disk I/O/latency/IOPS;
-- network interfaces;
-- processes including command-line arguments where permitted;
-- services/daemons;
-- uptime/reboots;
-- selected logs/events.
-
-### 12.2 Hardware/OOB
-
-Redfish/vendor pack support shall cover:
-
-- chassis;
-- CPU/DIMM;
-- disks/RAID/controllers;
-- PSU;
-- fans;
-- temperature;
-- batteries;
-- firmware/BIOS;
-- NICs;
-- lifecycle events.
-
-### 12.3 Virtualization
-
-Support VMware/vCenter/ESXi, Hyper-V, Proxmox and Nutanix with normalized entity relationships such as cluster → host → VM → datastore/network.
-
-### 12.4 Storage/SAN
-
-Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput, latency, pools/volumes/controllers/disks, replication, FC switches/ports/fabrics/zones/WWNs, errors and congestion where vendor interfaces permit.
-
----
-
-
-### Windows/Linux infrastructure monitoring modes
-
-Platform shall support both **Agent-based** and **agentless/remote** Windows/Linux infrastructure monitoring as separately certifiable modes.
-
-Customer-visible server monitoring shall include, where the OS/version/privilege supports it:
-
-- CPU utilization and useful scheduler/resource-pressure evidence;
-- memory, swap/page/commit and resource-exhaustion evidence;
-- filesystem capacity/inodes and block-I/O throughput/IOPS/queue/latency/error evidence;
-- network-interface state/throughput/errors/drops and bounded transport-quality counters;
-- bounded process resource/state/restart information;
-- Linux systemd and Windows service state/restart/failure information;
-- OS/boot/uptime/time-quality facts and selected bounded operational/kernel/Event Log evidence;
-- applicable hardware/thermal/power evidence through approved native or out-of-band sources.
-
-Linux Agent and Windows Agent are the richer local collection modes. Linux agentless monitoring uses governed SSH query packs; Windows agentless monitoring uses governed WinRM/WMI/CIM query packs. Product/UI/API shall disclose capability differences rather than imply identical raw coverage.
-
-Collection, credential, privilege or path failure is **monitoring-health evidence**. It shall not automatically become host/service DOWN when the monitored state cannot be established.
-
-### 12.5 Linux Agent eBPF process-to-network telemetry (REQ-INF-013)
-
-On supported Linux distributions and kernels under the certified Ubuntu 24.x / RHEL 9.x compatibility matrix (using BTF/CO-RE where the selected implementation requires/supports it), the Linux Agent shall collect bounded process-to-network evidence via eBPF probes:
-- Correlate active host processes, systemd services, and container workloads with local/remote socket communication endpoints (local IP/port, remote IP/port, protocol).
-- Measure connection performance: active/new/closed sockets, bytes TX/RX, mean TCP RTT, retransmissions, and connection failures.
-- Aggregate locally into bounded configurable aggregation intervals with bounded active-key cardinality ceilings and heavy-hitter overflow shedding; do not stream individual socket events over the network.
-- Enforce strict data minimization: zero payload capture, zero TLS decryption, zero HTTP/SQL inspection, zero continuous profiling/stack traces, and no environment variable reading.
-- Implement resource governance: bounded eBPF memory and resource budgets derived from BUILD-019 / BUILD-130 benchmark certification; transitions to `RESOURCE_GUARDED` capability state with explicit drop/shed/resource-guard counters (`dropped_records_count`, `shed_records_count`) when thresholds are approached.
-- Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
-
-
-### 12.1 Server/OS
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-INF-001`**: Platform SHALL enforce: SSH/WMI/WinRM agentless infrastructure monitoring.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Support agentless and optional Agent-based monitoring for:
 
 - CPU/load;
@@ -990,6 +841,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-INF-003`**: Platform SHALL enforce: iDRAC/iLO/CIMC/Redfish/IPMI hardware lifecycle.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Redfish/vendor pack support shall cover:
 
 - chassis;
@@ -1015,6 +868,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 - **`REQ-INF-005`**: Platform SHALL enforce: Storage and SAN/FC monitoring.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput, latency, pools/volumes/controllers/disks, replication, FC switches/ports/fabrics/zones/WWNs, errors and congestion where vendor interfaces permit.
 
 ---

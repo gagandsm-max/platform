@@ -207,8 +207,14 @@ LOCATOR_SECTION_RE = re.compile(
     re.I | re.M,
 )
 MARKDOWN_NUMBERED_HEADING_RE = re.compile(
-    # Accept "## 3. Title" and "### 3.1 Title"; reject "### 3.1A" collapsing to "3".
-    r"^(#{2,6})\s+(\d+(?:\.\d+)*)(?!\.\d)(?![A-Za-z0-9])[^\n]*$",
+    # Accept "## 3. Title" (bare int requires trailing ". ") and
+    # "### 3.1 Title" / "#### 3.1.1 Title". Reject date headings like
+    # "## 2026-10-30" and letter-suffixed "### 3.1A".
+    r"^(#{2,6})\s+("
+    r"\d+(?:\.\d+)+"  # dotted subsection ids
+    r"|"
+    r"\d+(?=\.\s)"  # bare top-level id only when followed by ". "
+    r")(?:\.\s|\s)\S[^\n]*$",
     re.M,
 )
 
@@ -271,17 +277,40 @@ def strip_rtm_section_formal_requirement_blocks(text: str) -> str:
     return text
 
 
+def _heading_level_at(text: str, pos: int) -> int | None:
+    """Return markdown heading level for a match starting at pos, else None."""
+    m = re.match(r"#{1,6}", text[pos:])
+    return len(m.group(0)) if m else None
+
+
+def _end_of_section_at_level(text: str, body_start: int, level: int) -> int:
+    """Return absolute end index of a section body starting at body_start.
+
+    Consumes nested child headings and stops at the next heading of equal or
+    higher level (fewer '#'), or EOF.
+    """
+    for hm in re.finditer(r"\n(#{1,6})\s+\S", text[body_start:]):
+        child_level = len(hm.group(1))
+        if child_level <= level:
+            return body_start + hm.start()
+    return len(text)
+
+
 def strip_non_normative_heading_sections(text: str) -> str:
-    """Drop sections whose heading declares index/summary/non-normative ownership."""
+    """Drop sections whose heading declares index/summary/non-normative ownership.
+
+    Stripping continues through nested child headings until the next heading of
+    equal or higher level (not an arbitrary first child heading).
+    """
     if not NON_NORMATIVE_SECTION_HEADING_RE.search(text):
         return text
     parts: list[str] = []
     idx = 0
     for match in NON_NORMATIVE_SECTION_HEADING_RE.finditer(text):
         parts.append(text[idx : match.start()])
-        rest = text[match.end() :]
-        stop = re.search(r"\n#{1,6}\s+\S", rest)
-        idx = match.end() + (stop.start() if stop else len(rest))
+        level = _heading_level_at(text, match.start()) or 2
+        end = _end_of_section_at_level(text, match.end(), level)
+        idx = end
     parts.append(text[idx:])
     return "".join(parts)
 
@@ -330,6 +359,7 @@ def strip_synthetic_family_normative_sections(text: str) -> str:
 
     These headings and their boilerplate tables are not accepted as primary
     semantic requirement ownership. Substantive numbered sections remain.
+    Stripping continues through nested children until equal/higher heading.
     """
     if not SYNTHETIC_FAMILY_SECTION_HEADING_RE.search(text):
         return text
@@ -337,9 +367,9 @@ def strip_synthetic_family_normative_sections(text: str) -> str:
     idx = 0
     for match in SYNTHETIC_FAMILY_SECTION_HEADING_RE.finditer(text):
         parts.append(text[idx : match.start()])
-        rest = text[match.end() :]
-        stop = re.search(r"\n#{1,6}\s+\S", rest)
-        idx = match.end() + (stop.start() if stop else len(rest))
+        level = len(match.group(1))
+        end = _end_of_section_at_level(text, match.end(), level)
+        idx = end
     parts.append(text[idx:])
     return "".join(parts)
 
@@ -368,10 +398,8 @@ def strip_ownership_index_placeholders(text: str) -> str:
         idx = 0
         for match in OWNERSHIP_INDEX_HEADING_RE.finditer(text):
             parts.append(text[idx : match.start()])
-            rest = text[match.end() :]
-            stop = re.search(r"\n#{1,6}\s+\S", rest)
-            idx_end = match.end() + (stop.start() if stop else len(rest))
-            idx = idx_end
+            level = _heading_level_at(text, match.start()) or 2
+            idx = _end_of_section_at_level(text, match.end(), level)
         parts.append(text[idx:])
         text = "".join(parts)
     # Remove bare identifier-only bullets/rows so they cannot satisfy presence.
@@ -392,10 +420,19 @@ def extract_locator_section_ids(locator: str) -> list[str]:
     return found
 
 
+class DuplicateSectionError(ValueError):
+    """Raised when a numbered section identifier appears more than once."""
+
+
 def section_body_map(text: str) -> dict[str, str]:
-    """Map numbered heading ids to body text until the next same/higher heading."""
+    """Map numbered heading ids to body text until the next same/higher heading.
+
+    Duplicate numeric section identifiers are a hard failure — this function
+    never silently overwrites an earlier section key.
+    """
     matches = list(MARKDOWN_NUMBERED_HEADING_RE.finditer(text))
     bodies: dict[str, str] = {}
+    first_line: dict[str, str] = {}
     for i, match in enumerate(matches):
         level = len(match.group(1))
         sid = match.group(2)
@@ -405,7 +442,13 @@ def section_body_map(text: str) -> dict[str, str]:
             if len(nxt.group(1)) <= level:
                 end = nxt.start()
                 break
+        if sid in bodies:
+            raise DuplicateSectionError(
+                f"duplicate numbered section identifier {sid!r} "
+                f"(first={first_line[sid]!r}; later={match.group(0)!r})"
+            )
         bodies[sid] = text[start:end]
+        first_line[sid] = match.group(0)
     return bodies
 
 
@@ -425,12 +468,21 @@ def locator_binds_id(locator: str, rid: str, owner_text: str) -> tuple[bool, str
     section_ids = extract_locator_section_ids(locator)
     if not section_ids:
         return False, "locator lacks numbered section reference"
-    bodies = section_body_map(owner_text)
-    # Also allow the heading line itself to contain the ID.
-    heading_only = {
-        m.group(2): m.group(0)
-        for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(owner_text)
-    }
+    try:
+        bodies = section_body_map(owner_text)
+    except DuplicateSectionError as exc:
+        return False, f"ambiguous section locator (duplicate ids): {exc}"
+    # Also allow the heading line itself to contain the ID. Reject ambiguous
+    # heading maps the same way section_body_map rejects duplicate bodies.
+    heading_only: dict[str, str] = {}
+    for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(owner_text):
+        sid = m.group(2)
+        if sid in heading_only:
+            return (
+                False,
+                f"ambiguous section locator (duplicate heading id {sid})",
+            )
+        heading_only[sid] = m.group(0)
     matched_existing = False
     for sid in section_ids:
         if sid not in bodies and sid not in heading_only:
@@ -1196,6 +1248,85 @@ class MotherReferenceValidator:
                     f"{line.strip()[:80]}"
                 )
 
+    def validate_unique_section_identifiers(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Reject duplicate numeric section IDs at every numbered heading depth.
+
+        Applies to all Mother Reference markdown files. Duplicate `## N`,
+        `### N.M`, `#### N.M.x`, etc. fail closed; `section_body_map` must never
+        silently overwrite a colliding key.
+        """
+        for rel, path in paths.items():
+            if not rel.endswith(".md") or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            # Strip fenced code so example markdown cannot create false collisions.
+            cleaned_parts: list[str] = []
+            in_fence = False
+            for line in text.splitlines(keepends=True):
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if not in_fence:
+                    cleaned_parts.append(line)
+            cleaned = "".join(cleaned_parts)
+            try:
+                section_body_map(cleaned)
+            except DuplicateSectionError as exc:
+                self.fail(f"{rel}: {exc}")
+            # Also report via Counter for clearer multi-collision messages.
+            ids = [
+                m.group(2) for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(cleaned)
+            ]
+            for sid, count in Counter(ids).items():
+                if count > 1:
+                    msg = (
+                        f"{rel}: duplicate numbered section identifier "
+                        f"{sid} (count={count})"
+                    )
+                    if msg not in self.errors and not any(
+                        rel in e and f"duplicate numbered section identifier {sid!r}" in e
+                        for e in self.errors
+                    ):
+                        self.fail(msg)
+
+    _VARCHAR_ENUM_FIELD_RE = re.compile(
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?\s+"
+        r"VARCHAR\((\d+)\)\s+NN?"
+        r"[^\n]*?"
+        r"(?:CHECK\s+IN\s*\(([^)]+)\)|\(([^)]+)\))",
+        re.I,
+    )
+
+    def validate_postgres_enum_varchar_widths(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Fail when a declared VARCHAR(n) cannot hold every listed enum literal."""
+        rel = "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        path = paths.get(rel)
+        if path is None or not path.is_file():
+            return
+        text = path.read_text(encoding="utf-8")
+        for m in self._VARCHAR_ENUM_FIELD_RE.finditer(text):
+            field, width_s, check_list, paren_list = m.groups()
+            width = int(width_s)
+            raw = check_list or paren_list or ""
+            # Only treat as enum list when tokens look like quoted/UPPER literals.
+            literals = re.findall(r"'([A-Z][A-Z0-9_]*)'|\b([A-Z][A-Z0-9_]{2,})\b", raw)
+            values = [a or b for a, b in literals]
+            if len(values) < 2:
+                continue
+            # Skip likely non-enum parenthetical notes.
+            if any(v in {"UUID", "JSONB", "BYTEA", "TIMESTAMPTZ", "INET"} for v in values):
+                continue
+            longest = max(values, key=len)
+            if len(longest) > width:
+                self.fail(
+                    f"{rel}: VARCHAR({width}) too narrow for {field} enum "
+                    f"(longest literal {longest!r} len={len(longest)})"
+                )
+
     def validate_maturity_language(self, paths: dict[str, Path]) -> None:
         banned = [
             re.compile(r"\bSPECIFIED\s*=\s*IMPLEMENTED\b"),
@@ -1651,6 +1782,8 @@ class MotherReferenceValidator:
         self.validate_legacy_and_malformed(manifest, paths)
         self.validate_cross_references(manifest, paths)
         self.validate_normalized_structure(paths)
+        self.validate_unique_section_identifiers(paths)
+        self.validate_postgres_enum_varchar_widths(paths)
         self.validate_maturity_language(paths)
         self.validate_normalized_rtm_licence_grace(paths)
         self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)

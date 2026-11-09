@@ -557,8 +557,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_09+ remain TRANSITIONAL_LEGACY; duplicate ## numbers allowed.
+    def test_18_transitional_legacy_duplicate_sections_are_blocked(self) -> None:
+        # All Mother References reject duplicate numeric section identifiers,
+        # including TRANSITIONAL_LEGACY documents.
         root = self._write_minimal()
         (root / "Platform_09_UI_UX_Master.md").write_text(
             _header("PLATFORM-UIUX-001")
@@ -566,9 +567,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
-        self.assertFalse(
+        self.assertTrue(
             any(
-                "Platform_09_UI_UX_Master.md: duplicate normalized" in e for e in errors
+                "Platform_09_UI_UX_Master.md" in e
+                and "duplicate numbered section identifier" in e
+                for e in errors
             ),
             errors,
         )
@@ -2783,6 +2786,132 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         errors = validate_docs_root(root)
         self.assertTrue(
             any("duplicate primary REQ row: REQ-A-001" in e for e in errors),
+            errors,
+        )
+
+    def test_86_duplicate_subsection_11_1_fails(self) -> None:
+        """Duplicate ### 11.1 headings fail closed."""
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 11. Network\n\n"
+            + "### 11.1 SNMP\n\nFirst body.\n\n"
+            + "### 11.1 SNMP\n\nDuplicate body.\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "duplicate numbered section identifier" in e
+                and "11.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_87_duplicate_nested_11_1_1_fails(self) -> None:
+        """Duplicate #### 11.1.1 headings fail closed."""
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 11. Network\n\n"
+            + "### 11.1 SNMP\n\n"
+            + "#### 11.1.1 Enterprise SNMP\n\nOne.\n\n"
+            + "#### 11.1.1 Enterprise SNMP\n\nTwo.\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "duplicate numbered section identifier" in e
+                and "11.1.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_88_duplicate_section_with_req_id_is_ambiguous(self) -> None:
+        """Locator into a duplicated section fails closed even if one copy has the REQ."""
+        from validate_mother_references import locator_binds_id
+
+        owner = (
+            "## 4. Alerts\n\n"
+            "### 4.2 Ownership\n\n`REQ-ALT-011` ownership contract.\n\n"
+            "### 4.2 Ownership\n\nDuplicate without id.\n"
+        )
+        ok, reason = locator_binds_id(
+            "§4.2 Alert ownership", "REQ-ALT-011", owner
+        )
+        self.assertFalse(ok)
+        self.assertIn("ambiguous", reason)
+
+    def test_89_synthetic_subtree_strips_through_nested_children(self) -> None:
+        """Non-normative stripping continues past nested child headings."""
+        from validate_mother_references import strip_ownership_index_placeholders
+
+        text = (
+            "## 1. Purpose\n\nKeep.\n\n"
+            "### Non-normative ownership index\n\n"
+            "#### Nested child still non-normative\n\n"
+            "`REQ-OSS-001` bare.\n\n"
+            "### 1.1 Real subsection\n\n"
+            "Platform SHALL enforce OSS admission (`REQ-OSS-001`).\n"
+        )
+        cleaned = strip_ownership_index_placeholders(text)
+        self.assertNotIn("Nested child still non-normative", cleaned)
+        self.assertIn("### 1.1 Real subsection", cleaned)
+        self.assertIn("REQ-OSS-001", cleaned)
+
+    def test_90_valid_unique_hierarchy_passes_section_map(self) -> None:
+        """Unique numbered hierarchy maps without collision."""
+        from validate_mother_references import section_body_map
+
+        text = (
+            "## 11. Network\n\n"
+            "### 11.1 SNMP\n\nSNMP body.\n\n"
+            "#### 11.1.1 Enterprise\n\nNested.\n\n"
+            "### 11.2 Path\n\nPath body.\n"
+        )
+        bodies = section_body_map(text)
+        self.assertIn("11", bodies)
+        self.assertIn("11.1", bodies)
+        self.assertIn("11.1.1", bodies)
+        self.assertIn("11.2", bodies)
+        self.assertIn("SNMP body", bodies["11.1"])
+        self.assertIn("Path body", bodies["11.2"])
+
+    def test_91_varchar_enum_width_too_narrow_fails(self) -> None:
+        """VARCHAR width must fit every declared enum literal."""
+        root = self._write_minimal()
+        p17 = (root / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(
+            encoding="utf-8"
+        )
+        if "outcome VARCHAR(" not in p17:
+            p17 += (
+                "\n| `rca_revision` | outcome VARCHAR(14) NN "
+                "(CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE) |\n"
+            )
+        else:
+            p17 = p17.replace(
+                "outcome VARCHAR(16) NN (CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE)",
+                "outcome VARCHAR(14) NN (CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE)",
+            )
+            if "PARTIAL_EVIDENCE" not in p17:
+                p17 += (
+                    "\n| `rca_revision` | outcome VARCHAR(14) NN "
+                    "(CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE) |\n"
+                )
+        (root / "Platform_17_API_Event_and_Data_Model_Contracts.md").write_text(
+            p17, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "VARCHAR(14) too narrow" in e and "PARTIAL_EVIDENCE" in e
+                for e in errors
+            ),
             errors,
         )
 

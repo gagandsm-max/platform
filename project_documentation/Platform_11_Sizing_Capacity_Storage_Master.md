@@ -254,37 +254,14 @@ The initial recommended `planning_utilization` is **0.70**; an authorized policy
 
 ### 9.2 Emergency boundary and worked example
 
-`conservative_used / 0.80` is the **exact emergency-equality boundary**, not safe capacity below 80%. Strictly below 80% requires provisioned capacity greater than that boundary, rounded upward as required by the physical allocation unit. This does not replace the more conservative initial 70% planning recommendation.
-
-For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (10³); production results disclose bytes/unit conventions and allocation rounding.
-
-### 9.3 Assurance, simulation and protected retention
-
-For each volume and data class, expose actual usage/free space, safely reclaimable versus protected bytes, growth and data-age evidence, forecast shortfall/exhaustion and expansion deadline where supported, uncertainty and measurement freshness. Values MUST be labelled `OBSERVED`, `ESTIMATED`, `UNKNOWN` or `PROJECTED` with measurement freshness; do not silently promote estimates to observed facts.
-
-Simulate retention, topology and capacity-policy changes against a **version-bound policy revision** before activation. Activation requires the same reviewed policy revision and estimate/scope identity presented in the simulation; a concurrent policy mutation or stale preview MUST be rejected (`STALE_PREVIEW` / concurrent-change conflict) and force re-simulation. An impossible retention/capacity proposal cannot be certified as sufficient; it requires correction or an explicitly authorized and audited exception that preserves hard safety and protected-retention/legal-hold rules. Unknown or unstable growth yields an unknown forecast, not a guessed date. No calculator, preview or notification may bypass protected-retention or legal-hold requirements.
-
-The normal warning/pre-emergency/emergency model remains 70% / 75% / at-or-above 80% (`Platform_05` §37); adjustable warning and planning policies do not disable the hard 80% boundary. Recovery uses safe headroom, hysteresis and bounded reclamation work to prevent oscillation and monitoring starvation. Legal holds and protected governance/security/control data are not silently deleted to satisfy a capacity target. If eligible reclamation is insufficient, enter `CRITICAL`, identify the responsible operator and escalate for authorized capacity/retention action. Sensor emergency shedding remains explicit, accounted and governed by §11.2.
-
-### 9.3.1 Integer-byte authority and unit display
-
-Backend/API storage quantities are authoritative as **non-negative integer bytes** (64-bit range with overflow detection; reject or fail closed on arithmetic overflow rather than wrapping). JSON encodings that cannot safely represent the integer in IEEE-754 Number form MUST use a decimal-string integer field (or an equivalent exact integer representation already approved for Counter64-class exactness) and MUST NOT coerce through JavaScript/`double` Number. UI and reports may display decimal **GB/TB** (10³/10⁶) and/or binary **GiB/TiB** (2¹⁰/2²⁰) but MUST label the unit system explicitly and convert only from the integer-byte authority. Mixed unlabeled GB/GiB arithmetic is prohibited.
-
-### 9.4 Existing-owner notification and acceptance gates
-
-Storage Lifecycle owns assessment/policy authority; Platform Operations and existing Notification Center/ITSM/email integration own authorized delivery and response. Capacity cases require deduplication/correlation, configurable procurement lead times, authorized recipient profiles, retry/dead-letter custody, actual delivery status, acknowledgement, reopen/close and maintenance behavior. Example advance-notice intervals are not hardcoded defaults. A delivered notification does not prove capacity is safe or authorize protected-data deletion.
-
-Existing BUILD-061/064/074/086/094/097/130 gates own this bounded specification; no new service, database, report engine or BUILD ID is introduced. `Platform_05` §37.6–37.7 defines logical assessment/notification contracts and required arithmetic, mixed-volume, UNKNOWN, burst/drift, impossible-policy, 70/75/80 recovery, hold, audit, restore/replay and tenant/delivery-negative evidence. These requirements do not assert that a calculator, live forecast or notification path is implemented or certified.
-
-
-### 9.2 Emergency boundary and worked example
-
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 - **`REQ-DATA-010`**: Platform SHALL enforce: Preserve recent operational window within safety limits.
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 `conservative_used / 0.80` is the **exact emergency-equality boundary**, not safe capacity below 80%. Strictly below 80% requires provisioned capacity greater than that boundary, rounded upward as required by the physical allocation unit. This does not replace the more conservative initial 70% planning recommendation.
 
 For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (10³); production results disclose bytes/unit conventions and allocation rounding.

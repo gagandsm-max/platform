@@ -6,19 +6,19 @@
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
-## 1. Purpose
+## Purpose
 
 Defines the mandatory engineering execution model and the Docker Compose development/test environment.
 It governs repository structure, modularity, coding discipline, OSS dependency use, performance rules, logging,
 developer-laptop isolation, reboot-safe local state, Compose profiles, secrets, networks, volumes and the Windows
 Agent certification exception.
 
-## 2. Source-document provenance
+## Source-document provenance
 
 - `Platform_13_Engineering_Execution_Standards.md` (v3.1) — fully incorporated below.
 - `Platform_14_Docker_Development_Environment.md` (v3.1) — fully incorporated below.
 
-## 3. Platform — Engineering Execution Standards
+## Platform — Engineering Execution Standards
 
 > Consolidated from `Platform_13_Engineering_Execution_Standards.md` v3.1. Requirements in this section remain normative.
 
@@ -83,19 +83,19 @@ A change cannot merge until relevant tests pass, architecture/OSS/security impac
 
 "Done" means code + tests + observability + upgrade/migration behavior + documentation + acceptance evidence. A compile-success or passing happy-path test is not completion.
 
-## 4. Platform — Docker Development & Test Environment
+## Platform — Docker Development & Test Environment
 
 > Consolidated from `Platform_14_Docker_Development_Environment.md` v3.1. Requirements in this section remain normative.
 
-## 1. Decision
+## 11. Docker decision
 
 Platform local development and routine automated testing standardize on **Docker Compose**. Podman compatibility is not required for v1. The goal is deterministic isolation from other projects on the developer laptop and reproducibility across engineers/coding agents.
 
-## 2. Host prerequisites
+## 12. Host prerequisites
 
 The host should require only Docker Engine/Moby-compatible runtime with Compose plugin, Git, an editor/IDE and normal OS tooling. Project-specific JDK, Go, Python, Node.js, Kafka, PostgreSQL, ClickHouse and Valkey installations on the host are prohibited as development prerequisites.
 
-## 3. Reboot requirement
+## 13. Reboot requirement
 
 The laptop is frequently shut down/rebooted. Development must therefore be restart-safe:
 
@@ -109,7 +109,7 @@ The laptop is frequently shut down/rebooted. Development must therefore be resta
 
 `dev-reset` must be explicit/destructive and must not silently delete unrelated Docker assets or intentional named volumes.
 
-## 4. Compose profiles
+## 14. Compose profiles
 
 Required profiles: `dev`, `test`, `ha`, `scale`, `security`, `dr`. Optional module-specific profiles may exist.
 
@@ -131,31 +131,31 @@ Negative auth/TLS/protocol cases, dependency scans and security regression suite
 ### `dr`
 Backup/export, site-loss simulation, restore and data-integrity verification.
 
-## 5. Network isolation
+## 15. Network isolation
 
 Use named Docker networks. Expose only ports needed by the developer. Avoid globally common host ports where collisions are likely; allow `.env`/profile port overrides without changing source. Production protocol defaults must not be confused with local host mappings.
 
-## 6. Secrets
+## 16. Secrets
 
 No real customer credentials in Compose files or repository. Use local secret files ignored by Git, test-only generated credentials or secret injection. Example `.env` files contain placeholders only.
 
-## 7. Volumes
+## 17. Volumes
 
 Separate durable service state from generated caches/build artifacts. Named volumes require documented ownership and backup/reset behavior. Test profiles use disposable unique volumes.
 
-## 8. Build caching
+## 18. Build caching
 
 Use multi-stage images and BuildKit cache appropriately, while maintaining reproducible lockfiles and pinned base images/digests for CI certification.
 
-## 9. Laptop resource control
+## 19. Laptop resource control
 
 The default `dev` profile must be usable without starting all scale/HA services. Heavy data services start only when required. Resource limits/reservations should prevent runaway local workloads. Synthetic scale tests may require dedicated CI hardware rather than the laptop.
 
-## 10. Logs
+## 20. Docker logs
 
 Container stdout/stderr must be structured and bounded by Docker logging settings. Stateful service logs must not grow without limit. Development logs remain searchable by component/correlation ID.
 
-## 11. Windows Agent exception
+## 21. Windows Agent exception
 
 Agent business logic and cross-compilation can run in Docker. Final Windows Service/SCM/MSI/reboot testing requires an isolated Windows VM/CI runner. This is required for correctness; Linux containers cannot certify Windows service semantics.
 
