@@ -977,11 +977,35 @@ This refines the existing Flow/NTA/tenant/data-integrity contracts and reconcile
 
 **Raw flow evidence (observed ≠ estimated).** Canonical raw facts MUST preserve OBSERVED values separately from derived estimates. Minimum logical fields: exporter/source identity; observation domain; interface/source vantage; source/destination addresses and ports; protocol; **observed** bytes; **observed** packets; flow count where applicable; event/start/end time; sampling mode; sampling algorithm; sampling selector/id where supplied; sampling rate/probability where known; direction `INGRESS | EGRESS | UNKNOWN`; application/classification identity nullable; application/classification provenance; quality/provenance. Do **not** fabricate direction or application. If direction cannot be derived from a certified observation point/interface relation ⇒ `direction=UNKNOWN`. If application classification is unavailable ⇒ classification remains `UNKNOWN` (not a guessed application).
 
-**Sampling state.** Explicit sampling state is one of `UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN`. Estimation is eligible only when the exporter/protocol supplies a valid certified sampling model (`SAMPLED_KNOWN` with usable algorithm/rate/probability/selector evidence). Unknown/unsupported sampling (`SAMPLED_UNKNOWN` or missing certified model) MUST NOT silently scale observed traffic.
+**Sampling state.** Explicit sampling state is one of `UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN`. Estimation is eligible only when the exporter/protocol supplies a valid certified sampling model (`SAMPLED_KNOWN` with usable algorithm/rate/probability/selector evidence). Unknown/unsupported sampling (`SAMPLED_UNKNOWN` or missing certified model) MUST NOT silently scale observed traffic. Never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`. Never silently average different sampling rates/models.
 
-The template used for decoding must be valid for the exporter transport/session/observation-domain and event window. Data Templates and Options Templates share one Template ID namespace per Observation Domain/exporter scope. Under UDP, enforce refresh/redefinition semantics and **ignore UDP Template Withdrawal messages**. After collector restart, do not decode UDP Data Sets using an unvalidated persisted template; require appropriate live template validation/session continuity. Unknown, expired, conflicting or missing templates produce explicit loss/quality evidence rather than fabricated decoded flow rows. Sampling metadata preserves selector/algorithm, rate/interval/probability, scope, observation-domain identity and valid time window where available. Distinguish **sFlow sampled-frame evidence**, **sFlow interface/device counter samples**, and IPFIX/NetFlow flow counters: an sFlow Counter sample is not an ordinary per-flow `network_flow` fact and must use existing typed metric/device-counter evidence paths (no new database). sFlow sampled header **capture length** is not automatically original packet/frame octet length; preserve original frame length only where the protocol supplies it and it is qualified. Never interpret cumulative sFlow interface counters as per-flow `bytes`/`packets`, nor scale those counters by packet sample rate. Raw exported `bytes`/`packets` (or sFlow qualified sampled-frame length evidence) are immutable **observed** source facts and must not be silently overloaded with estimates; any sampling-normalized/estimated bytes, packets, rates or utilization use separately identified fields (`observed_bytes`/`observed_packets` retained; `estimated_bytes`/`estimated_packets` nullable; `estimate_method`; `sampling_metadata`; quality), never one unlabeled total. No blanket multiplication or duplicate normalization is permitted. Authenticated Sensor→Core mTLS does not make unauthenticated exporter UDP data intrinsically trusted.
+**Sampling cohort identity.** Aggregation MUST identify a deterministic `sampling_cohort_id` for the effective sampling model comprising: `sampling_state`; `sampling_algorithm`; `sampling_selector_id`; sampling rate/probability; exporter + observation domain; model/version; validity window. `UNSAMPLED` has an explicit unsampled cohort. `SAMPLED_UNKNOWN` remains a distinct non-estimable cohort. Rollup keys MUST retain `sampling_cohort_id` (or equivalent fields sufficient to prevent incompatible models being irreversibly merged).
 
-**Query/rollup semantics.** DAF-FLW (§15.7) and rollups MUST return/maintain observed aggregates separately from any estimates. Replay/dedupe occurs before aggregation, or rollups must be rebuildable/reconciled so replay does not double-count (CC-CH rollup rule).
+The template used for decoding must be valid for the exporter transport/session/observation-domain and event window. Data Templates and Options Templates share one Template ID namespace per Observation Domain/exporter scope. Under UDP, enforce refresh/redefinition semantics and **ignore UDP Template Withdrawal messages**. After collector restart, do not decode UDP Data Sets using an unvalidated persisted template; require appropriate live template validation/session continuity. Unknown, expired, conflicting or missing templates produce explicit loss/quality evidence rather than fabricated decoded flow rows. Sampling metadata preserves selector/algorithm, rate/interval/probability, scope, observation-domain identity and valid time window where available. Distinguish **sFlow sampled-frame evidence**, **sFlow interface/device counter samples**, and IPFIX/NetFlow flow counters: an sFlow Counter sample is not an ordinary per-flow `network_flow` fact and must use existing typed metric/device-counter evidence paths (no new database). sFlow sampled header **capture length** is not automatically original packet/frame octet length; preserve original frame length only where the protocol supplies it and it is qualified. Never interpret cumulative sFlow interface counters as per-flow `bytes`/`packets`, nor scale those counters by packet sample rate. Raw exported `bytes`/`packets` (or sFlow qualified sampled-frame length evidence) are immutable **observed** source facts and must not be silently overloaded with estimates; any sampling-normalized/estimated bytes, packets, rates or utilization use separately identified fields (`observed_bytes`/`observed_packets` retained; `estimated_bytes`/`estimated_packets` nullable; `estimate_method`; cohort/`sampling_breakdown`; quality), never one unlabeled total. No blanket multiplication or duplicate normalization is permitted. Authenticated Sensor→Core mTLS does not make unauthenticated exporter UDP data intrinsically trusted.
+
+**Query/rollup semantics.** DAF-FLW (§15.7) and rollups MUST return/maintain observed aggregates separately from any estimates. Observed values MAY aggregate across sampling cohorts because they remain labelled observed source evidence. Estimated values may be computed only per certified `SAMPLED_KNOWN` cohort; no estimate is generated for `SAMPLED_UNKNOWN`. Do not irreversibly mix sampling cohorts before the query layer has enough information to disclose their semantics. Replay/dedupe occurs before rollup, or rollups are rebuilt/reconciled from deduped raw facts so replay does not double-count (CC-CH rollup rule).
+
+**DAF-FLW aggregate result coverage.** A Flow aggregate result MUST expose conceptually:
+
+```text
+observed_bytes
+observed_packets
+estimated_bytes | null
+estimated_packets | null
+estimate_coverage: FULL | PARTIAL | NONE
+sampling_breakdown[]
+```
+
+Each `sampling_breakdown[]` entry identifies: `sampling_cohort_id`; `sampling_state`; algorithm/model; selector; rate/probability where known; validity interval; observed bytes/packets; estimated bytes/packets nullable; `estimate_method` nullable; quality.
+
+Rules:
+
+- `FULL`: every contributing record/cohort has a valid certified estimate.
+- `PARTIAL`: some contributing evidence is estimable and some is not.
+- `NONE`: no valid estimate exists.
+- Top-level `estimated_bytes`/`estimated_packets` may be populated ONLY for `FULL`.
+- For `PARTIAL`, top-level estimate is null; cohort breakdown exposes the estimable portions without pretending they are whole-traffic totals.
+- Observed totals always remain explicitly labelled observed.
 
 ## 14. Phase 1 / Phase 1.5 certification envelopes — Issue #200 / #203
 
@@ -1077,7 +1101,11 @@ An outbound SIEM destination has independently bounded tenant-scoped queue/backl
 
 **CC-ASYNC (shared `async_operation` admission vs lifecycle — maps `Platform_06` G-05).** HTTP `202` means admission outcome `ACCEPTED_FOR_ASYNC_EXECUTION` only; it is **not** a persisted lifecycle state. A `202` response SHALL include `operation_id`, persisted initial `state=QUEUED`, correlation id, and status URL/ref where applicable. Persisted shared lifecycle for `async_operation` is exactly `QUEUED → RUNNING → SUCCEEDED | PARTIAL | FAILED | CANCELLED | TIMED_OUT`. `SUCCEEDED` is the persisted successful terminal state; UI MAY render it as **Completed**, but `COMPLETED` is not a second persisted `async_operation` state. Cancellation request sets `cancel_requested=true` while state remains `QUEUED` or `RUNNING`; only executor confirmation transitions to `CANCELLED`. Domain-specific machines (`platform_operation`, NCM, report/storage kinds with their own enums) keep their governed vocabularies.
 
-**CC-CURSOR (Query Service cursor envelope — BUILD-067).** List/query pages return an opaque server-generated cursor token. Clients MUST treat the token as opaque; client modification is invalid. Logical binding fields (integrity-protected inside the token; not client-editable JSON):
+**CC-CURSOR (Query Service cursor envelope — BUILD-067).** List/query pages return an opaque server-generated cursor token. Clients MUST treat the token as opaque; client modification is invalid. Do **not** add a growing `seen_ids` list to cursors. Do **not** invent heavyweight server session state merely to satisfy UI pagination. Two explicit consistency modes are frozen:
+
+###### `LIVE_KEYSET` (default for ordinary operational UI lists)
+
+Cursor binds (integrity-protected inside the token; not client-editable JSON):
 
 | Binding field | Requirement |
 |---|---|
@@ -1089,10 +1117,37 @@ An outbound SIEM destination has independently bounded tenant-scoped queue/backl
 | `sort_definition` | requested sort keys |
 | `last_sort_tuple` | last returned sort key values |
 | `tie_break_resource_id` | canonical unique resource identifier of the last row |
-| `as_of` / snapshot boundary | required when the query contract supports `as_of`/snapshot; omitted only for non-snapshot operational lists that declare mutation semantics below |
 | `issued_at` / `expires_at` | issue and expiry timestamps |
+| `consistency_mode` | literal `LIVE_KEYSET` |
 
-Stable order is `requested sort keys + canonical unique resource identifier tie-break`. Every page request re-runs authorization; the cursor never grants authorization. Stable errors: `CURSOR_INVALID`, `CURSOR_EXPIRED`, `CURSOR_STALE`, `CURSOR_SCOPE_CHANGED`. Permission/resource-scope change between pages MUST fail closed or re-evaluate safely and MUST NOT expose rows no longer authorized. For non-snapshot operational lists: already-returned rows are never duplicated solely because of mutation; newly inserted/moved rows are visible only according to keyset position; strict historical consistency requires an `as_of`-capable contract. Measured scale remains BUILD-130 — this envelope invents no capacity number.
+Guarantees:
+
+- Stable dataset ⇒ no duplicates or omissions across pages.
+- Keyset order uses requested sort keys + immutable unique resource ID tie-break.
+- Each page re-authorizes; the cursor never grants authorization.
+- Filter/scope/sort/token mutation fails closed (`CURSOR_INVALID` / `CURSOR_SCOPE_CHANGED`).
+- Concurrent insert/update/delete: a row whose sort tuple changes during paging MAY move before/after the cursor and therefore MAY be omitted or reappear. This is explicitly LIVE/evolving-list behavior, **not** snapshot consistency.
+- UI MAY expose refresh/new-data indication where applicable.
+- `LIVE_KEYSET` MUST NOT be used as an implicit closed "select all pages" membership set.
+- Destructive bulk operation uses explicit IDs or a separately frozen server-side selection/snapshot contract.
+- Remove any reading that promises mutation-proof no-duplicate behavior in `LIVE_KEYSET` mode — that guarantee is not implementable for arbitrary mutable sort keys with ordinary stateless keyset pagination without snapshotting or unbounded seen-row tracking.
+
+###### `SNAPSHOT`
+
+Use only where the owning query/storage contract can supply a stable immutable snapshot/`as_of` revision. Cursor additionally binds:
+
+| Binding field | Requirement |
+|---|---|
+| `consistency_mode` | literal `SNAPSHOT` |
+| `snapshot_ref` or authoritative `as_of` boundary | required; omitted ⇒ query MUST NOT advertise SNAPSHOT |
+
+Guarantees within that snapshot:
+
+- Stable membership; stable sort values; no duplicates; no omissions across pages.
+
+If the owner cannot provide a real snapshot, the query MUST NOT advertise SNAPSHOT consistency. Expired/unavailable snapshot produces `CURSOR_EXPIRED` or `CURSOR_STALE`. Not every query is required to support SNAPSHOT.
+
+Stable cursor errors (both modes): `CURSOR_INVALID`, `CURSOR_EXPIRED`, `CURSOR_STALE`, `CURSOR_SCOPE_CHANGED`. Permission/resource-scope change between pages MUST fail closed or re-evaluate safely and MUST NOT expose rows no longer authorized. Measured scale remains BUILD-130 — this envelope invents no capacity number.
 
 **CC-EVT.** Topics follow `<domain>.<family>.v<major>` (existing `telemetry.numeric.v1`). Common envelope (§3.4): `schema_version, tenant_id, source identity, event_id (UUID) + sequence where ordered, event_time, ingest_time, quality/provenance, correlation_id, payload`. Physical topic/partition/serialization selection is BUILD-063; names below are logical. Breaking change = new major topic + migration window (§3.5). Secrets, one-time credentials and keystrokes never appear.
 
@@ -1131,7 +1186,7 @@ Legend: NN = NOT NULL, N = nullable. "Idx" = indexes. "Ver/Idem/Conc" = versioni
 
 ##### `AlertPolicyDefinitionV1` (frozen logical JSON schema; owned by this document; evaluation semantics owned by `Platform_22` §6.1)
 
-`alert_policy_version.definition` SHALL store exactly one versioned `AlertPolicyDefinitionV1` document. `Platform_22` §6.1 owns threshold **evaluation** semantics; this schema owns the persisted/authoring shape. Arbitrary executable code, SQL, JavaScript, Python or opaque expression strings are **forbidden**.
+`alert_policy_version.definition` SHALL store exactly one versioned `AlertPolicyDefinitionV1` document. `Platform_22` §6.1 owns threshold **evaluation** semantics (including tri-state TRUE/FALSE/UNKNOWN, Counter64 rate authority, GROUP membership evidence and business-time calendar behavior); this schema owns the persisted/authoring shape. Arbitrary executable code, SQL, JavaScript, Python, regex-based estate selectors or opaque free-form predicate/expression strings are **forbidden**. Server-side validation returns typed field/path errors and **never** silently normalizes an invalid definition.
 
 ```text
 AlertPolicyDefinitionV1 {
@@ -1146,29 +1201,238 @@ AlertPolicyDefinitionV1 {
   evidence_contract_ref: string                  # required; versioned evidence-contract identity
   metadata: object                               # bounded, non-authoritative labels/notes only
 }
+```
 
+###### `SubjectSelectorV1`
+
+```text
+SubjectSelectorV1 {
+  scope_kind: TENANT | REGION | SITE | GROUP | SERVICE | ENTITY
+  scope_id: UUID | null
+  metric_ref: string | null
+  monitor_ref: string | null
+  include_descendants: boolean
+}
+```
+
+Validation:
+
+- `scope_id` MUST be null only for `scope_kind=TENANT`; every other `scope_kind` requires a canonical same-tenant `scope_id`.
+- At least one applicable metric/evidence input MUST ultimately be referenced by the threshold expression tree (via `metric_ref` / `monitor_ref` and/or descendant `input_ref` values).
+- `metric_ref` and `monitor_ref` are canonical governed catalogue references, not arbitrary query/expression text.
+- No embedded SQL, regex-based estate selector, JavaScript, Python or free-form predicate language.
+- Server validates referenced scope/metric/monitor is authorized and belongs to the policy tenant.
+
+###### `SeverityMappingV1`
+
+```text
+SeverityMappingV1 {
+  on_true: INFO | WARNING | MINOR | MAJOR | CRITICAL
+  on_false: NO_FIRE | CLEAR
+  on_unknown: NO_FIRE | PRESERVE_ACTIVE
+}
+```
+
+`UNKNOWN` never automatically becomes a firing state. Severity remains separate from evidence/causal confidence (`Platform_22`).
+
+###### `EvaluationCadenceV1`
+
+```text
+EvaluationCadenceV1 {
+  mode: ON_EVIDENCE | FIXED_INTERVAL
+  interval_seconds: uint32 | null
+  max_staleness_seconds: uint32
+}
+```
+
+Rules:
+
+- `FIXED_INTERVAL` requires `interval_seconds > 0`.
+- `ON_EVIDENCE` requires `interval_seconds = null`.
+- `max_staleness_seconds > 0`.
+- Exact capacity/estate scheduling ceilings remain owned by `Platform_11` / BUILD-130 — do not invent a commercial/performance number here.
+- Cadence is not a wall-clock business calendar; business-time policy uses `CalendarRefV1`.
+
+###### `CalendarRefV1`
+
+```text
+CalendarRefV1 {
+  calendar_id: UUID
+  version_no: uint32
+}
+```
+
+Rules:
+
+- `version_no >= 1`.
+- Calendar is same-tenant and immutable/version-addressed.
+- IANA timezone/DST/gap/fold behavior remains owned by the business-calendar contract (`Platform_22` §6.1.10).
+- Evaluation evidence records the exact calendar version used.
+
+###### `ThresholdExprV1` (discriminated union)
+
+```text
 ThresholdExprV1 = discriminated union on kind ∈ {
   STATIC | DURATION | CONSECUTIVE | RATE | BASELINE | MISSING |
   COMPOSITE | GROUP | DEPENDENCY | BUSINESS_TIME
 }
 ```
 
-Each `kind` variant SHALL contain **only** its applicable strongly typed fields (common envelope fields from `Platform_22` §6.1.1 plus type-specific parameters). Normative field sets:
+Every variant carries a stable `expr_id` (string) unique within the policy version for evidence/audit references. Each `kind` contains **only** its frozen fields below.
 
-| `kind` | Required typed fields (minimum) | Forbidden |
-|---|---|---|
-| `STATIC` | `input_ref`, `operator` (`GT\|GE\|LT\|LE\|EQ\|NE\|INSIDE\|OUTSIDE`), bounds/units, hysteresis? | free-form expression string |
-| `DURATION` | `child: ThresholdExprV1`, `duration`, `unknown_behavior` (`PAUSE\|RESET`) | opaque duration DSL |
-| `CONSECUTIVE` | `child: ThresholdExprV1`, `n`, `unknown_behavior` (`RESET\|SKIP`) | opaque counters |
-| `RATE` | `input_ref`, `operator`, `rate_bounds`, `min_valid_interval`, discontinuity policy | Float64-before-Counter64 authority |
-| `BASELINE` | `input_ref`, `baseline_id`, `baseline_version`, deviation operator, sufficiency | silent self-learning mutation |
-| `MISSING` | `expected_cadence`, `freshness_deadline`, monitoring-path prerequisites | treating missing as Device Down |
-| `COMPOSITE` | `op` (`AND\|OR\|NOT`), `children: ThresholdExprV1[]` | UNKNOWN-as-FALSE coercion by default |
-| `GROUP` | `member_selector` (canonical inventory/group/service), `child: ThresholdExprV1`, `aggregation` (`ANY\|ALL\|COUNT\|PERCENT`), `min_qualified_members`, count/percent threshold when applicable, `evaluation_window`, `alignment_tolerance`, missing/stale member rule | nested GROUP (unless later major); ad-hoc non-inventory lists; rewriting historical membership evidence |
-| `DEPENDENCY` | `dependency_ref` (graph relationship + provenance/confidence/freshness), suppression/condition rules | treating stale topology as proof |
-| `BUSINESS_TIME` | `child: ThresholdExprV1`, `calendar_ref`, IANA `timezone`, DST/gap/fold rule | offset-without-zone; missing calendar → fire |
+**STATIC**
 
-Validation returns typed field/path errors and **never** silently normalizes an invalid threshold into a different kind or coerces illegal fields.
+```text
+{
+  expr_id: string
+  kind: STATIC
+  input_ref: string
+  operator: GT | GE | LT | LE | EQ | NE | INSIDE | OUTSIDE
+  threshold: number
+  threshold_high: number | null
+  unit: string
+  hysteresis: number | null
+}
+```
+
+`threshold_high` is required (non-null) only for range operators `INSIDE` / `OUTSIDE`; otherwise it MUST be null.
+
+**DURATION**
+
+```text
+{
+  expr_id: string
+  kind: DURATION
+  child: ThresholdExprV1
+  duration_seconds: uint32
+}
+```
+
+`duration_seconds > 0`. UNKNOWN-child pause/reset behavior remains `Platform_22` §6.1 evaluation authority (not a free-form DSL).
+
+**CONSECUTIVE**
+
+```text
+{
+  expr_id: string
+  kind: CONSECUTIVE
+  child: ThresholdExprV1
+  required_true_count: uint32
+}
+```
+
+`required_true_count >= 1`.
+
+**RATE**
+
+```text
+{
+  expr_id: string
+  kind: RATE
+  input_ref: string
+  operator: GT | GE | LT | LE | EQ | NE
+  threshold: number
+  unit_per_second: string
+  minimum_interval_seconds: uint32
+}
+```
+
+`minimum_interval_seconds > 0`. Counter reset/wrap/discontinuity semantics remain `Platform_22` §6.1 authority. Authoritative Counter64 input MUST never be converted through Float64 before delta calculation.
+
+**BASELINE**
+
+```text
+{
+  expr_id: string
+  kind: BASELINE
+  input_ref: string
+  baseline_ref: string
+  comparison: ABOVE | BELOW | OUTSIDE_BAND
+  sensitivity: number
+}
+```
+
+Baseline version/provenance is immutable in evaluation evidence; silent self-learning mutation of the referenced baseline is forbidden.
+
+**MISSING**
+
+```text
+{
+  expr_id: string
+  kind: MISSING
+  input_ref: string
+  expected_cadence_seconds: uint32
+  freshness_deadline_seconds: uint32
+}
+```
+
+Both `expected_cadence_seconds` and `freshness_deadline_seconds` MUST be `> 0`. Missing evidence never means Device Down by itself.
+
+**COMPOSITE**
+
+```text
+{
+  expr_id: string
+  kind: COMPOSITE
+  operator: AND | OR | NOT
+  children: ThresholdExprV1[]
+}
+```
+
+`NOT` requires exactly one child. `AND` / `OR` require at least two children and use the frozen tri-state semantics in `Platform_22` §6.1. UNKNOWN MUST NOT be coerced to FALSE by default.
+
+**GROUP**
+
+```text
+{
+  expr_id: string
+  kind: GROUP
+  member_selector: SubjectSelectorV1
+  child: ThresholdExprV1
+  aggregation: ANY | ALL | COUNT | PERCENT
+  min_qualified_members: uint32
+  count_threshold: uint32 | null
+  percent_threshold: number | null
+  evaluation_window_seconds: uint32
+  alignment_tolerance_seconds: uint32
+}
+```
+
+Rules:
+
+- Nested GROUP remains prohibited in V1 (`child` MUST NOT itself be GROUP).
+- `COUNT` requires non-null `count_threshold`; `PERCENT` requires non-null `percent_threshold`; other aggregations require both thresholds null.
+- `min_qualified_members >= 1`; `evaluation_window_seconds > 0`; `alignment_tolerance_seconds` is non-negative.
+- Insufficient qualified membership ⇒ UNKNOWN (`Platform_22` §6.1.11).
+- Evaluation evidence records membership snapshot/revision/hash and member IDs.
+- Ad-hoc non-inventory member lists and rewriting historical membership evidence are forbidden.
+
+**DEPENDENCY**
+
+```text
+{
+  expr_id: string
+  kind: DEPENDENCY
+  dependency_ref: string
+  child: ThresholdExprV1
+}
+```
+
+`dependency_ref` MUST resolve through canonical topology/dependency authority. Stale/unqualified dependency evidence ⇒ UNKNOWN; stale topology is never treated as proof.
+
+**BUSINESS_TIME**
+
+```text
+{
+  expr_id: string
+  kind: BUSINESS_TIME
+  calendar_ref: CalendarRefV1
+  applicability: IN_WINDOW | OUTSIDE_WINDOW
+  child: ThresholdExprV1
+}
+```
+
+Calendar unavailable/invalid ⇒ UNKNOWN. IANA timezone/DST/gap/fold rules remain owned by the business-calendar contract (not duplicated as free-form offset-without-zone fields here).
 
 | Table | Columns | PK / FK / Unique / Check | Idx | Ver/Idem/Conc | Ret / Aud | Mig |
 |---|---|---|---|---|---|---|
@@ -1277,7 +1541,7 @@ All engines follow CC-CH (`ReplacingMergeTree` with a `FINAL` view unless an app
 
 | Table | Columns (key) | Engine / Partition | ORDER BY | event vs ingest time | Replay/dedupe | TTL / Rollup | Cardinality bound |
 |---|---|---|---|---|---|---|---|
-| `flow_record_raw` | tenant_id; exporter_id / source identity; observation_domain; ingress_context_id (interface/source vantage); event_time (flow start/export) + optional flow_end_time; ingest_time; src_ip, dst_ip (IPv6-capable); src_port, dst_port; proto; in_if, out_if; **observed_bytes UInt64**; **observed_packets UInt64**; flow_count UInt32 N; tcp_flags; **sampling_state** LowCardinality (`UNSAMPLED`\|`SAMPLED_KNOWN`\|`SAMPLED_UNKNOWN`); sampling_algorithm N; sampling_selector_id N; sampling_rate/probability N; **direction** LowCardinality (`INGRESS`\|`EGRESS`\|`UNKNOWN`); app_id N; app_classification_provenance N; **estimated_bytes UInt64 N**; **estimated_packets UInt64 N**; estimate_method N; template_id; sequence_id; vrf_id; src_entity_id/dst_entity_id N; quality UInt8 | ReplacingMergeTree / daily `toYYYYMMDD(event_time)` | `(tenant_id, exporter_id, observation_domain, event_time, sequence_id, src_ip, dst_ip, src_port, dst_port, proto)` | both stored; export/capture time = event_time | key includes exporter/domain/sequence; unknown-template/ambiguous-tenant records are **quarantined, never inserted** (§13.9); observed columns never overwritten by estimates | TTL raw class; MV → `flow_rollup_1m/1h` maintaining **separate observed vs estimated aggregates** (`SummingMergeTree` keyed by tenant, exporter, interface, app, direction) **only after** raw FINAL/dedupe; post-replay rebuild/reconcile of rollups is mandatory (CC-CH rollup rule) — replay must not double-count | heavy-hitter + top-N caps per tenant/exporter; rollup dimension budget per tenant; never fabricate direction/app (`UNKNOWN` when uncertified) |
+| `flow_record_raw` | tenant_id; exporter_id / source identity; observation_domain; ingress_context_id (interface/source vantage); event_time (flow start/export) + optional flow_end_time; ingest_time; src_ip, dst_ip (IPv6-capable); src_port, dst_port; proto; in_if, out_if; **observed_bytes UInt64**; **observed_packets UInt64**; flow_count UInt32 N; tcp_flags; **sampling_state** LowCardinality (`UNSAMPLED`\|`SAMPLED_KNOWN`\|`SAMPLED_UNKNOWN`); sampling_algorithm N; sampling_selector_id N; sampling_rate/probability N; sampling_model_version N; sampling_validity_from/to N; **sampling_cohort_id** String (deterministic cohort identity per §13.9); **direction** LowCardinality (`INGRESS`\|`EGRESS`\|`UNKNOWN`); app_id N; app_classification_provenance N; **estimated_bytes UInt64 N**; **estimated_packets UInt64 N**; estimate_method N; template_id; sequence_id; vrf_id; src_entity_id/dst_entity_id N; quality UInt8 | ReplacingMergeTree / daily `toYYYYMMDD(event_time)` | `(tenant_id, exporter_id, observation_domain, event_time, sequence_id, src_ip, dst_ip, src_port, dst_port, proto)` | both stored; export/capture time = event_time | key includes exporter/domain/sequence; unknown-template/ambiguous-tenant records are **quarantined, never inserted** (§13.9); observed columns never overwritten by estimates; `SAMPLED_UNKNOWN` never treated as `UNSAMPLED` | TTL raw class; MV → `flow_rollup_1m/1h` maintaining **separate observed vs estimated aggregates** (`SummingMergeTree` keyed by tenant, exporter, interface, app, direction, **`sampling_cohort_id`** [or equivalent cohort fields]) **only after** raw FINAL/dedupe; estimated aggregates computed only inside certified `SAMPLED_KNOWN` cohorts; post-replay rebuild/reconcile of rollups is mandatory (CC-CH rollup rule) — replay must not double-count; do not irreversibly merge incompatible sampling cohorts | heavy-hitter + top-N caps per tenant/exporter; rollup dimension budget per tenant; never fabricate direction/app (`UNKNOWN` when uncertified); never silently average different sampling rates/models |
 | `log_event_raw` (syslog/OTLP logs/Agent logs) | tenant_id, source_id, source_type, host/entity_id N, event_time, ingest_time, severity UInt8, facility, program, message String (bounded), attributes Map(String,String) (bounded keys), trace_id/span_id N, event_id/sequence_id, quality UInt8, parse_state | ReplacingMergeTree / daily | `(tenant_id, source_id, event_time, sequence_id)` | source timestamp-quality flag when untrusted | event_id replay-collapse; dedupe-after-ACK counter | TTL log class; MV → `log_volume_1m` (counts by severity/program) after raw dedupe; rebuild/reconcile after replay | message/attribute size caps; attribute-key allowlist; per-source rate budget with drop counters |
 | `trap_event_raw` | tenant_id, source_ip, entity_id N, engine_id, trap_oid, varbinds String (bounded JSON), event_time, ingest_time, inform_acked UInt8, storm_aggregate_count UInt32, quality, sequence_id | ReplacingMergeTree / daily | `(tenant_id, source_ip, trap_oid, event_time, sequence_id)` | device time vs receive time | sequence_id; storm aggregation recorded | TTL event class | per-source storm aggregation; varbind size cap |
 | `audit_history` | tenant_id, audit_id, tenant_seq, occurred_at, ingest_time, actor_type, actor_id, action, resource_type, resource_id N, result, correlation_id N, integrity_ref N, _version UInt64 (backfill/generation watermark; higher wins) | **ReplacingMergeTree(_version)** / monthly `toYYYYMM(occurred_at)` | `(tenant_id, tenant_seq)` (**not** uniqueness by ORDER BY alone) | occurred_at / ingest_time | **Physically replay-safe:** replacement key `(tenant_id, tenant_seq)` + `_version`; readers use `audit_history_final` (`FINAL`). Repeated PostgreSQL backfill upserts the same `(tenant_id, tenant_seq)` and must **not** create duplicate authoritative analytical rows. Cutover watermark = max `(tenant_id, tenant_seq)` successfully copied + recorded in migration/job state; overlap = re-copy `[watermark−overlap_window, max]` then collapse via ReplacingMergeTree; restart/resume continues from persisted watermark. Alternate path: drop+rebuild from PostgreSQL `audit_event` (always authoritative). | TTL AUDIT class (legal-hold aware: partitions under hold are not dropped); **no incremental Summing/Aggregating rollup of audit counts that would double-count under replay** — any audit rollup is rebuild/reconcile-from-FINAL only | bounded fields; no detail blobs |
@@ -1369,13 +1633,13 @@ Auth column = permission; every operation also enforces resource scope, entitlem
 | OP-UPG-RUN / OP-UPG-ROLLBACK | `POST /platform/upgrades`, `POST /platform/upgrades/{id}:rollback` | platform.upgrade (+approver) | → PlatformOperation | – | key | single active per scope | 202 | PREFLIGHT_FAILED, MIGRATION_FAILED, ROLLBACK_UNSUPPORTED, STALE_ARTIFACT | 119.21 |
 | OP-LIC-LOAD / OP-LIC-EXTEND / OP-LIC-GET | `POST /licence`, `POST /licence:extend`, `GET /licence` | licence.manage / licence.read | {artifact}/{until, reason} → LicenceState | – | artifact hash | If-Match | sync | LICENCE_INVALID | 119.22 |
 | OP-PROFILE-ASSIGN | `PUT /entities/{id}/monitoring-profile` | profile.assign | {profile_id, mode} → assignment | – | key | If-Match | sync | PROFILE_CAPACITY_BLOCKED | 119.1/UI-032 |
-| OP-POLICY-CREATE | `POST /alert-policies` | policy.manage | AlertPolicyCreate{name, evidence_class, scope, definition:`AlertPolicyDefinitionV1`} → AlertPolicy(+version_no=1, lifecycle=DRAFT) | – | key | – | sync | VALIDATION_FAILED (typed field/path errors; never silent normalize) | UI-059 Policies / Dashboard→Alert Policy |
+| OP-POLICY-CREATE | `POST /alert-policies` | policy.manage | AlertPolicyCreate{name, evidence_class, scope, definition:`AlertPolicyDefinitionV1`} → AlertPolicy(+version_no=1, lifecycle=DRAFT) | server-side `AlertPolicyDefinitionV1` validator runs **before persist**; same typed field/path errors as OP-POLICY-VERSION-VALIDATE | key | – | sync | VALIDATION_FAILED (typed field/path errors; never silent normalize) | UI-059 Policies / Dashboard→Alert Policy |
 | OP-POLICY-LIST | `GET /alert-policies` | policy.read | → `PageResult<AlertPolicySummary>` | lifecycle, evidence_class, name; cursor (CC-CURSOR) | – | ETag | – | – | UI-059/091 |
 | OP-POLICY-GET | `GET /alert-policies/{policyId}` | policy.read | → AlertPolicy(+current version summary) | – | – | ETag | – | RESOURCE_NOT_FOUND | UI-059/091 |
-| OP-POLICY-VERSION-CREATE | `POST /alert-policies/{policyId}/versions` | policy.manage | {definition:`AlertPolicyDefinitionV1`, change_reason?} → immutable AlertPolicyVersion | – | key | If-Match on policy aggregate | sync | VALIDATION_FAILED (typed field/path); STALE_VERSION | UI-059 Policies |
+| OP-POLICY-VERSION-CREATE | `POST /alert-policies/{policyId}/versions` | policy.manage | {definition:`AlertPolicyDefinitionV1`, change_reason?} → immutable AlertPolicyVersion | create/version requests are themselves the pre-persist validation boundary (same validator as OP-POLICY-VERSION-VALIDATE) | key | If-Match on policy aggregate | sync | VALIDATION_FAILED (typed field/path); STALE_VERSION | UI-059 Policies |
 | OP-POLICY-VERSION-LIST | `GET /alert-policies/{policyId}/versions` | policy.read | → page of versions | cursor | – | – | – | – | UI-059/091 |
 | OP-POLICY-VERSION-GET | `GET /alert-policies/{policyId}/versions/{versionNo}` | policy.read | → AlertPolicyVersion{definition:`AlertPolicyDefinitionV1`, content_hash, state_at_creation, …} | – | – | immutable | – | RESOURCE_NOT_FOUND | UI-059/091 |
-| OP-POLICY-VERSION-VALIDATE | `POST /alert-policies/{policyId}/versions/{versionNo}:validate` **or** validate body `{definition}` before persist | policy.manage | → ValidationResult{ok, errors[{path, code, message_key}]} | – | key | – | sync | VALIDATION_FAILED with typed paths; never silently rewrite invalid threshold | UI-059 Policies |
+| OP-POLICY-VERSION-VALIDATE | `POST /alert-policies/{policyId}/versions/{versionNo}:validate` | policy.manage | → ValidationResult{ok, errors[{path, code, message_key}]} for an **already persisted immutable version** | **ONLY** standalone validation operation — do **not** expose a second public "validate arbitrary body" route; OP-POLICY-CREATE / OP-POLICY-VERSION-CREATE invoke the same server-side validator before persistence | key | – | sync | VALIDATION_FAILED with typed paths; never silently rewrite invalid threshold | UI-059 Policies |
 | OP-POLICY-LIFECYCLE | `POST /alert-policies/{policyId}:advance` (DRAFT→BACKTEST→SHADOW→ACTIVE) | policy.manage | **must identify** `{version_no, to_state, evidence_ref?, approval_ref?}` → policy | advances the named immutable version only | key | If-Match | backtest/shadow may 202 (`ACCEPTED_FOR_ASYNC_EXECUTION` → AsyncOperation `QUEUED`) | EVIDENCE_REQUIRED, INVALID_TRANSITION, VERSION_NOT_FOUND | UI-059/091 |
 | OP-AUDIT-EXPORT | `POST /audit/exports` | audit.export | {filters, window, format CSV} → export job | bounded window/rows | key | – | 202 | QUERY_LIMITED | UI-083 |
 | OP-SENSOR-REBALANCE-PREVIEW | `POST /sensors/rebalance:preview` | sensor.assign | RebalancePreviewRequest → RebalancePreview | candidate bound (BUILD-130) | key | – | sync | NO_CAPACITY, STALE_ASSIGNMENT | UI-074; DF-009 |
@@ -1552,7 +1816,7 @@ Preserves all **98** accepted UI manifests in `Platform_09` (UI-001..). This sec
 | OP-DAF-HLT-GRID | `GET /query/health:grid` | DAF-HLT; health.read | same scope; `domain?` (network/infra/…); cursor | `HealthGridPage{items[{id, name, semantic_state, open_alerts, open_incidents, collector_health}]}` | per-cell freshness + collector_health separate from target state | cursor; default 50/max 200; order name\|state\|alerts | QUERY_LIMITED |
 | OP-DAF-TOP-GRAPH | `GET /query/topology:graph` | DAF-TOP; topology.read | `site_id`\|`entity_id` seed; `depth` bound; `as_of` TIMESTAMPTZ; relationship filter | `TopologyGraphDto{nodes[], edges[{edge_id, src, dst, relationship, provenance, confidence, state}]}` | confidence UInt; provenance enum; edge freshness `observed_at`/`as_of` | node/edge caps BUILD-130; no O(N²) expansion; order stable by edge_id | QUERY_LIMITED, AS_OF_TOO_OLD |
 | OP-DAF-TOP-NEIGHBORS | `GET /query/topology/entities/{entityId}/neighbors` | DAF-TOP; topology.read | `as_of?`; relationship types | `NeighborListDto` | same quality fields | cursor; max neighbors | RESOURCE_NOT_FOUND |
-| OP-DAF-FLW-TOPN | `GET /query/flow:topn` | DAF-FLW; flow.read | exporter_id\|interface_id\|site_id; window `[from,to]`; dimension=talker\|app\|conversation\|site_pair; direction? | `FlowTopNDto{rows[{key, observed_bytes, observed_packets, estimated_bytes?, estimated_packets?, flows, estimate_method?, sampling_metadata, quality}], window, truncated}` | **observed and estimated returned separately** — never one unlabeled total; sampling_state/metadata exposed; quality + exporter_health; **cardinality-bounded top-N** | `n` ≤ policy max; scan/timeout class; order by observed_bytes DESC (estimates never silently substitute) | QUERY_LIMITED, EXPORTER_UNAVAILABLE, CARDINALITY_TRUNCATED |
-| OP-DAF-FLW-TIMESERIES | `GET /query/flow:timeseries` | DAF-FLW; flow.read | same scope; window; step (1m/5m/1h from rollup) | `FlowTimeseriesDto{series[{t, observed_*, estimated_*?}], step, unit, sampling_metadata, quality}` | unit series declare observed vs estimated explicitly; freshness of rollup bucket; from FINAL/deduped raw→rollup only; rollups keep observed aggregates separate from estimates | max series/points BUILD-130; order time ASC | QUERY_LIMITED, UNSUPPORTED_STEP |
+| OP-DAF-FLW-TOPN | `GET /query/flow:topn` | DAF-FLW; flow.read | exporter_id\|interface_id\|site_id; window `[from,to]`; dimension=talker\|app\|conversation\|site_pair; direction? | `FlowTopNDto{rows[{key, observed_bytes, observed_packets, estimated_bytes\|null, estimated_packets\|null, estimate_coverage:FULL\|PARTIAL\|NONE, sampling_breakdown[{sampling_cohort_id, sampling_state, algorithm/model, selector, rate/probability?, validity_interval, observed_bytes, observed_packets, estimated_bytes\|null, estimated_packets\|null, estimate_method\|null, quality}], flows, quality}], window, truncated}` | **observed and estimated returned separately** — never one unlabeled total; top-level estimated_* populated ONLY when `estimate_coverage=FULL`; for `PARTIAL` top-level estimated_*=null and estimable portions appear only in `sampling_breakdown`; never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`; never silently average rates/models; quality + exporter_health; **cardinality-bounded top-N** | `n` ≤ policy max; scan/timeout class; order by observed_bytes DESC (estimates never silently substitute) | QUERY_LIMITED, EXPORTER_UNAVAILABLE, CARDINALITY_TRUNCATED |
+| OP-DAF-FLW-TIMESERIES | `GET /query/flow:timeseries` | DAF-FLW; flow.read | same scope; window; step (1m/5m/1h from rollup) | `FlowTimeseriesDto{series[{t, observed_*, estimated_*\|null, estimate_coverage, sampling_breakdown[]}], step, unit, quality}` | unit series declare observed vs estimated explicitly; same FULL/PARTIAL/NONE coverage rules as TOPN; freshness of rollup bucket; from FINAL/deduped raw→rollup only; rollups retain `sampling_cohort_id` (or equivalent) so incompatible cohorts are not irreversibly merged | max series/points BUILD-130; order time ASC | QUERY_LIMITED, UNSUPPORTED_STEP |
 
 **Binding rule:** Phase-1 manifests that list DAF-HLT / DAF-TOP / DAF-FLW (e.g. UI-001..006, UI-009..012, UI-017/018) MUST resolve to the shared ops above (or existing owned list/get ops already in §15.4 such as OP-ALERT-LIST, OP-INC-LIST, OP-LIVE-EVIDENCE-GET). Additional Phase-1 DAF families already bound by §15.4 resource APIs (DAF-ALR, DAF-INC, DAF-INV, DAF-DIAG, DAF-NCM, DAF-QLT, DAF-SEN, …) do not receive per-screen endpoints here. New DAF query ops require contract change control; they must remain family-scoped, not UI-id-scoped.

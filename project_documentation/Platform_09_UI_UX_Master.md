@@ -1795,7 +1795,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - View topology
 - View alerts/incidents
 
-**Domain contract:** Flow filters and grouping must not silently mix incompatible sampling, direction, observation windows or exporter domains. Unknown application/ASN/interface identity remains unknown. Derived rates use the actual qualified interval. Displayed totals SHALL clearly identify **observed** versus **estimated** traffic (bind DAF-FLW `observed_*` / `estimated_*` / `estimate_method` / `sampling_metadata` from `Platform_17` §13.9/§15.7); never present one unlabeled mixed total. This contract does not imply packet/DPI payload access.
+**Domain contract:** Flow filters and grouping must not silently mix incompatible sampling, direction, observation windows or exporter domains. Unknown application/ASN/interface identity remains unknown. Derived rates use the actual qualified interval. Displayed totals SHALL clearly identify **observed** versus **estimated** traffic (bind DAF-FLW `observed_*` / `estimated_*` / `estimate_coverage` / `sampling_breakdown` / `sampling_cohort_id` from `Platform_17` §13.9/§15.7); never present one unlabeled mixed total. Top-level estimated totals appear only when `estimate_coverage=FULL`; for `PARTIAL`, show cohort breakdown without pretending estimable portions are whole-traffic totals. This contract does not imply packet/DPI payload access.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -1811,7 +1811,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 **Domain:** Network
 **Primary roles:** Network/capacity
-**Purpose:** Inter-site traffic volumes, protocol mix, trends and capacity context. Volume totals SHALL label **observed** versus **estimated** traffic per DAF-FLW (`Platform_17` §13.9/§15.7); never mix into one unlabeled total.
+**Purpose:** Inter-site traffic volumes, protocol mix, trends and capacity context. Volume totals SHALL label **observed** versus **estimated** traffic per DAF-FLW (`Platform_17` §13.9/§15.7) including `estimate_coverage` and `sampling_breakdown`; never mix into one unlabeled total; never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`.
 
 **Entry/navigation:** Accessible from the relevant domain dashboard/navigation and from contextual entity/alert/incident drill-downs. Role/tenant/resource scope is enforced server-side.
 
@@ -4807,7 +4807,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Create/attach incident
 - Create maintenance/suppression (RBAC)
 - Open ITSM ticket/context
-- **Policies tab / Alert Policy authoring (RBAC `policy.manage`):** create policy, create immutable version, validate definition, advance lifecycle — bind shared ops `OP-POLICY-CREATE`, `OP-POLICY-LIST/GET`, `OP-POLICY-VERSION-*`, `OP-POLICY-VERSION-VALIDATE`, `OP-POLICY-LIFECYCLE` (`Platform_17` §15.4). Do **not** invent one backend endpoint per UI panel. Validation surfaces typed field/path errors; never silent-normalize invalid thresholds. Lifecycle advance MUST name `version_no` + destination state + evidence/approval ref as applicable.
+- **Policies tab / Alert Policy authoring (RBAC `policy.manage`):** create policy, create immutable version, validate a persisted version, advance lifecycle — bind shared ops `OP-POLICY-CREATE`, `OP-POLICY-LIST/GET`, `OP-POLICY-VERSION-*`, `OP-POLICY-VERSION-VALIDATE` (`POST …/versions/{versionNo}:validate` only), `OP-POLICY-LIFECYCLE` (`Platform_17` §15.4). Do **not** invent one backend endpoint per UI panel or a second public "validate arbitrary body" route; create/version requests are the pre-persist validation boundary. Validation surfaces typed field/path errors; never silent-normalize invalid thresholds. Lifecycle advance MUST name `version_no` + destination state + evidence/approval ref as applicable.
 
 **Drill-down contract:** Entity/metric/alert/incident clicks retain tenant, site, time range and relevant filters; drill-down can open entity detail, topology, timeline, RCA, NCM/CLI, IPAM, Flow, ITSM or audit context where the relationship exists.
 
@@ -7733,8 +7733,8 @@ Each row inherits §16.1 and its class from §16.2. **Panels** are the required 
 | UI-014 | Availability | ANALYTICAL_DASHBOARD | 1 | availability by scope; qualified downtime; UNKNOWN/STALE share; evidence quality | DAF-HLT, DAF-SLA, DAF-QLT | OP-RPT-RUN | scope, service time profile | UI-071, UI-076 |
 | UI-015 | Network Performance | ANALYTICAL_DASHBOARD | 1 | latency/loss/jitter; CPU/mem; interface trend; heatmap | DAF-OBS, DAF-PTH, DAF-NET | OP-RPT-RUN | site, role | UI-010, UI-016 |
 | UI-016 | Network Capacity | ANALYTICAL_DASHBOARD | 1 | utilization forecast; saturation list; growth trend | DAF-CAP, DAF-OBS | OP-RPT-RUN | site, link, horizon | UI-070, UI-012 |
-| UI-017 | Network Flow / Traffic Analytics | ANALYTICAL_DASHBOARD | 1 | top talkers/apps/conversations; interface traffic; baseline; exporter health; **observed vs estimated totals labelled** | DAF-FLW, DAF-QLT | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | exporter, interface, app, direction; cardinality-bounded top-N; sampling_metadata | UI-018, UI-011 |
-| UI-018 | Site-to-Site Traffic | ANALYTICAL_DASHBOARD | 1 | site-pair matrix; volume/trend; top apps; **observed vs estimated labelled** | DAF-FLW, DAF-INV | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | site pair, app | UI-017 |
+| UI-017 | Network Flow / Traffic Analytics | ANALYTICAL_DASHBOARD | 1 | top talkers/apps/conversations; interface traffic; baseline; exporter health; **observed vs estimated totals labelled** with `estimate_coverage` / `sampling_breakdown` | DAF-FLW, DAF-QLT | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | exporter, interface, app, direction; cardinality-bounded top-N; sampling_cohort_id / sampling_breakdown | UI-018, UI-011 |
+| UI-018 | Site-to-Site Traffic | ANALYTICAL_DASHBOARD | 1 | site-pair matrix; volume/trend; top apps; **observed vs estimated labelled** with estimate_coverage | DAF-FLW, DAF-INV | OP-DAF-FLW-TOPN, OP-DAF-FLW-TIMESERIES, OP-RPT-RUN | site pair, app; sampling_breakdown | UI-017 |
 | UI-019 | Routing Health | NOC_DASHBOARD | 1 | adjacency states; route churn; protocol health; alerts | DAF-NET, DAF-ALR, DAF-TOP | — | protocol, site | UI-020, UI-010 |
 | UI-020 | BGP | ANALYTICAL_DASHBOARD | 1 | peer states; prefix counts; flap trend; session table | DAF-NET, DAF-ALR | — | peer, ASN, VRF | UI-019, UI-010 |
 | UI-021 | MPLS / VRF | ANALYTICAL_DASHBOARD | 1.5† | VRF health; LSP/LDP state; per-VRF utilization | DAF-NET, DAF-FLW | — | VRF, PE | UI-010 |

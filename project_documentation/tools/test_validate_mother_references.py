@@ -2998,7 +2998,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "ThresholdExprV1",
             "STATIC | DURATION | CONSECUTIVE | RATE | BASELINE | MISSING",
             "COMPOSITE | GROUP | DEPENDENCY | BUSINESS_TIME",
-            "opaque expression strings are **forbidden**",
+            "SubjectSelectorV1",
+            "SeverityMappingV1",
+            "EvaluationCadenceV1",
+            "CalendarRefV1",
+            "expr_id",
             "OP-POLICY-CREATE",
             "POST /alert-policies",
             "POST /alert-policies/{policyId}/versions",
@@ -3007,6 +3011,74 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "typed field/path",
         ):
             self.assertIn(needle, p17, needle)
+
+    def test_93b_alert_policy_nested_schemas_and_single_validate_route(self) -> None:
+        """Nested AlertPolicy types are fully defined; one canonical validate route."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # Nested type field freezes
+        for needle in (
+            "scope_kind: TENANT | REGION | SITE | GROUP | SERVICE | ENTITY",
+            "scope_id: UUID | null",
+            "metric_ref: string | null",
+            "monitor_ref: string | null",
+            "include_descendants: boolean",
+            "on_true: INFO | WARNING | MINOR | MAJOR | CRITICAL",
+            "on_false: NO_FIRE | CLEAR",
+            "on_unknown: NO_FIRE | PRESERVE_ACTIVE",
+            "mode: ON_EVIDENCE | FIXED_INTERVAL",
+            "interval_seconds: uint32 | null",
+            "max_staleness_seconds: uint32",
+            "calendar_id: UUID",
+            "version_no: uint32",
+            "kind: STATIC",
+            "threshold_high",
+            "kind: DURATION",
+            "duration_seconds",
+            "kind: CONSECUTIVE",
+            "required_true_count",
+            "kind: RATE",
+            "unit_per_second",
+            "minimum_interval_seconds",
+            "kind: BASELINE",
+            "baseline_ref",
+            "comparison: ABOVE | BELOW | OUTSIDE_BAND",
+            "kind: MISSING",
+            "expected_cadence_seconds",
+            "freshness_deadline_seconds",
+            "kind: COMPOSITE",
+            "operator: AND | OR | NOT",
+            "kind: GROUP",
+            "member_selector: SubjectSelectorV1",
+            "aggregation: ANY | ALL | COUNT | PERCENT",
+            "min_qualified_members",
+            "count_threshold",
+            "percent_threshold",
+            "evaluation_window_seconds",
+            "alignment_tolerance_seconds",
+            "kind: DEPENDENCY",
+            "dependency_ref",
+            "kind: BUSINESS_TIME",
+            "applicability: IN_WINDOW | OUTSIDE_WINDOW",
+            "Float64 before delta",
+            "**never** silently normalizes",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Single canonical validate route — no alternate public body-validate API
+        self.assertIn(
+            "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
+            p17,
+        )
+        self.assertIn("ONLY** standalone validation operation", p17)
+        self.assertNotIn("validate body `{definition}` before persist", p17)
+        self.assertNotIn(
+            "**or** validate body",
+            p17,
+        )
+        self.assertIn("ValidationResult{ok, errors[{path, code, message_key}]}", p17)
+        self.assertIn("pre-persist validation boundary", p17)
 
     def test_94_async_state_mapping_g05_cc_async(self) -> None:
         """G-05 / CC-ASYNC freeze admission vs persisted async lifecycle."""
@@ -3059,6 +3131,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "CURSOR_STALE",
             "CURSOR_SCOPE_CHANGED",
             "never grants authorization",
+            "LIVE_KEYSET",
+            "SNAPSHOT",
+            "consistency_mode",
         ):
             self.assertIn(needle, p17, needle)
         for needle in (
@@ -3066,6 +3141,49 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "duplicate sort values",
             "CURSOR_INVALID",
             "CURSOR_SCOPE_CHANGED",
+            "LIVE_KEYSET",
+            "SNAPSHOT",
+        ):
+            self.assertIn(needle, register, needle)
+
+    def test_95b_cc_cursor_live_keyset_and_snapshot_semantics(self) -> None:
+        """LIVE_KEYSET mutation semantics vs SNAPSHOT guarantees are distinct."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "consistency_mode` | literal `LIVE_KEYSET`",
+            "MAY be omitted or reappear",
+            "LIVE/evolving-list behavior",
+            "not** snapshot consistency",
+            "MUST NOT be used as an implicit closed",
+            "Do **not** add a growing `seen_ids`",
+            "consistency_mode` | literal `SNAPSHOT`",
+            "snapshot_ref",
+            "Stable membership",
+            "MUST NOT advertise SNAPSHOT",
+            "mutation-proof no-duplicate",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Impossible mutation-proof guarantee removed from LIVE_KEYSET
+        self.assertNotIn(
+            "already-returned rows are never duplicated solely because of mutation",
+            p17,
+        )
+        for needle in (
+            "FX-LIVE_KEYSET",
+            "FX-SNAPSHOT",
+            "POS-LIVE_KEYSET",
+            "POS-SNAPSHOT",
+            "concurrent sort-key mutation follows documented LIVE semantics",
+            "insert/update/delete after snapshot does not alter the paged snapshot",
+            "no growing `seen_ids`",
+            "Not every query must support SNAPSHOT",
         ):
             self.assertIn(needle, register, needle)
 
@@ -3085,7 +3203,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "estimated_bytes",
             "estimated_packets",
             "estimate_method",
-            "sampling_metadata",
+            "sampling_breakdown",
+            "sampling_cohort_id",
+            "estimate_coverage",
             "UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN",
             "INGRESS | EGRESS | UNKNOWN",
             "never one unlabeled total",
@@ -3093,6 +3213,47 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertIn(needle, p17, needle)
         self.assertIn("observed vs estimated", register.lower())
         self.assertIn("SAMPLED_UNKNOWN", register)
+
+    def test_96b_flow_mixed_sampling_cohort_and_partial_coverage(self) -> None:
+        """Mixed sampling cohorts + PARTIAL estimate coverage are frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p09 = (docs / "Platform_09_UI_UX_Master.md").read_text(encoding="utf-8")
+        for needle in (
+            "sampling_cohort_id",
+            "FULL | PARTIAL | NONE",
+            "sampling_breakdown[]",
+            "populated ONLY for `FULL`",
+            "For `PARTIAL`, top-level estimate is null",
+            "Never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`",
+            "never silently average different sampling rates/models",
+            "flow_rollup_1m/1h",
+            "Estimated values may be computed only per certified `SAMPLED_KNOWN`",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "UNSAMPLED + SAMPLED_KNOWN",
+            "two SAMPLED_KNOWN cohorts with different rates",
+            "SAMPLED_UNKNOWN mixed with known",
+            "validity-window transition",
+            "replay of one cohort",
+            "estimate_coverage=FULL",
+            "misleading unlabeled whole-traffic total",
+        ):
+            self.assertIn(needle, register, needle)
+        self.assertIn("estimate_coverage", p09)
+        self.assertIn("sampling_breakdown", p09)
+        # Ambiguous singular sampling_metadata must not remain as the DAF-FLW projection
+        self.assertNotIn(
+            "estimate_method?, sampling_metadata, quality",
+            p17,
+        )
 
     def test_97_profile_freeze_gates_block_dispatch(self) -> None:
         """BUILD-031/032/045 remain NOT DISPATCHABLE until named gates PASS."""
