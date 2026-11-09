@@ -993,6 +993,180 @@ func TestAuthorityPoisonQuarantineAdvancesPastHead(t *testing.T) {
 	}
 }
 
+func TestIdentityConflictQuarantineIsolatesBatchAndSurvivesRestart(t *testing.T) {
+	s, dir := openSpool(t)
+	conflict := appendDurable(t, s, 1)
+	appendDurable(t, s, 2)
+	var calls []int
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		calls = append(calls, batch.RecordCount)
+		for _, record := range batch.Records {
+			if record.SensorIngressSequence == conflict.Sequence {
+				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409, Message: "untrusted core text"}
+			}
+		}
+		return coreclient.AgentTelemetryAck{
+			Status: "ACCEPTED", SensorID: batch.SensorID, BatchID: batch.BatchID,
+			AcceptedThroughIngressSequence: batch.LastIngressSequence, CorrelationID: batch.CorrelationID,
+		}, nil
+	})
+	cfg := Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond}
+	d, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("batch rejection must isolate without ACK: ok=%v err=%v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 2 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("batch isolation changed custody: stats=%+v err=%v", st, err)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("singleton conflict must quarantine: ok=%v err=%v", ok, err)
+	}
+	st, err = s.Stats()
+	if err != nil || st.RecordCount != 1 || d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("quarantine/ACK accounting: stats=%+v err=%v", st, err)
+	}
+	path := filepath.Join(dir, poisonDirName, fmt.Sprintf("%020d-%s.json", conflict.Sequence, identityConflictCode))
+	parked, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parts := strings.SplitN(string(parked), "\n", 2)
+	if len(parts) != 2 || parts[1] != string(conflict.Payload) {
+		t.Fatal("quarantine did not preserve the exact rejected payload")
+	}
+	var meta map[string]any
+	if err := json.Unmarshal([]byte(parts[0]), &meta); err != nil {
+		t.Fatal(err)
+	}
+	if meta["tenantId"] != "018f0e0a-0000-7000-8000-000000000001" || meta["agentId"] != "agent-1" ||
+		meta["correlationId"] != "corr-1" || meta["batchChecksum"] != "chk" ||
+		meta["payloadSHA256"] == "" || meta["cause"] != identityConflictCode ||
+		strings.Contains(parts[0], "untrusted core text") {
+		t.Fatalf("invalid security custody metadata: %v", meta)
+	}
+	if snap := d.Snapshot(); !snap.Quarantined || snap.State != DeliveryStateDegraded || snap.Blocked || snap.ReasonCode != identityConflictCode {
+		t.Fatalf("identity quarantine not operator-visible: %+v", snap)
+	}
+	// A new Drain represents process restart: the durable security marker remains.
+	d2, err := New(cfg, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap := d2.Snapshot(); !snap.Quarantined || snap.State != DeliveryStateDegraded || snap.ReasonCode != identityConflictCode {
+		t.Fatalf("restart lost security hold: %+v", snap)
+	}
+	if ok, err := d2.RunOnce(context.Background()); !ok || err != nil {
+		t.Fatalf("later valid record blocked: ok=%v err=%v", ok, err)
+	}
+	st, err = s.Stats()
+	if err != nil || st.RecordCount != 0 || d2.Metrics().DurableAcks.Load() != 1 || len(calls) != 3 || calls[0] != 2 || calls[1] != 1 || calls[2] != 1 {
+		t.Fatalf("valid tail delivery failed: stats=%+v err=%v calls=%v", st, err, calls)
+	}
+	if snap := d2.Snapshot(); !snap.Quarantined || snap.State != DeliveryStateDegraded {
+		t.Fatalf("valid delivery erased security hold: %+v", snap)
+	}
+}
+
+func TestIdentityConflictIsolationKeepsValidPrefixSingleton(t *testing.T) {
+	s, dir := openSpool(t)
+	appendDurable(t, s, 1)
+	conflict := appendDurable(t, s, 2)
+	appendDurable(t, s, 3)
+	var counts []int
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		counts = append(counts, batch.RecordCount)
+		for _, rec := range batch.Records {
+			if rec.SensorIngressSequence == conflict.Sequence {
+				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409}
+			}
+		}
+		return coreclient.AgentTelemetryAck{Status: "ACCEPTED", SensorID: batch.SensorID, BatchID: batch.BatchID,
+			AcceptedThroughIngressSequence: batch.LastIngressSequence, CorrelationID: batch.CorrelationID}, nil
+	})
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024}, s, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, wantOK := range []bool{false, true, false, true} {
+		ok, runErr := d.RunOnce(context.Background())
+		if ok != wantOK || (wantOK && runErr != nil) || (!wantOK && runErr == nil) {
+			t.Fatalf("step %d: ok=%v err=%v", i, ok, runErr)
+		}
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 0 || d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 2 {
+		t.Fatalf("valid prefix/tail or conflict custody lost: stats=%+v err=%v", st, err)
+	}
+	if !reflect.DeepEqual(counts, []int{3, 1, 1, 1}) {
+		t.Fatalf("rejected range was repeatedly rebatched: %v", counts)
+	}
+}
+
+func TestIdentityConflictCodeWithWrongHTTPStatusCannotQuarantine(t *testing.T) {
+	for _, status := range []int{400, 500} {
+		t.Run(fmt.Sprint(status), func(t *testing.T) {
+			s, dir := openSpool(t)
+			appendDurable(t, s, 1)
+			tr := &fakeTransport{err: coreclient.ClassifyAgentTelemetryFailure(status,
+				[]byte(`{"status":"REJECTED","code":"ERR_AGENT_IDENTITY_CONFLICT","message":"ambiguous"}`))}
+			d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+				MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+				InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond}, s, tr)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+				t.Fatalf("wrong HTTP status cannot authorize poison ACK: ok=%v err=%v", ok, err)
+			}
+			st, err := s.Stats()
+			if err != nil || st.RecordCount != 1 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("ambiguous error changed custody: stats=%+v err=%v", st, err)
+			}
+		})
+	}
+}
+
+func TestIdentityConflictQuarantineSyncFailureRetainsSpool(t *testing.T) {
+	s, dir := openSpool(t)
+	appendDurable(t, s, 1)
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024},
+		s, &fakeTransport{err: &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	call := 0
+	d.syncDir = func(path string) error {
+		call++
+		if call == 2 {
+			return errors.New("injected marker fsync failure")
+		}
+		return defaultSyncDir(path)
+	}
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("expected fail-closed marker sync error: ok=%v err=%v", ok, err)
+	}
+	st, err := s.Stats()
+	if err != nil || st.RecordCount != 1 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("record disappeared before durable quarantine: stats=%+v err=%v", st, err)
+	}
+	d.syncDir = defaultSyncDir
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("expected retry to quarantine after fsync repair: ok=%v err=%v", ok, err)
+	}
+	st, err = s.Stats()
+	if err != nil || st.RecordCount != 0 || d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
+		t.Fatalf("retry quarantine failed: stats=%+v err=%v", st, err)
+	}
+}
+
 func TestAuthorityPoisonDirSyncFailureDoesNotIncrementAuthorityPoisonCount(t *testing.T) {
 	s, dir := openSpool(t)
 	_ = appendDurable(t, s, 1)
@@ -2520,8 +2694,8 @@ func (n *noWatermarkProofSpool) Stats() (spool.Stats, error) {
 
 func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
 	cases := []struct {
-		name  string
-		arm   func(*Drain)
+		name   string
+		arm    func(*Drain)
 		disarm func(*Drain)
 	}{
 		{

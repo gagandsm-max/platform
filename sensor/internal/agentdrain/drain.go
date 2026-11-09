@@ -31,6 +31,8 @@ const (
 	// reconcile intent exists and watermark commitment has not yet been proved
 	// or disproved. Distinct from proven cleanup failure and from Core 413 blocks.
 	reasonSpoolAckUncertain = "ERR_SPOOL_ACK_UNCERTAIN"
+	identityConflictCode    = "ERR_AGENT_IDENTITY_CONFLICT"
+	identityConflictMarker  = "identity-conflict.quarantined"
 )
 
 type ErrorCode string
@@ -143,6 +145,7 @@ type DeliveryStatus struct {
 	State           string
 	ReasonCode      string
 	Blocked         bool
+	Quarantined     bool
 	PendingRecords  int64
 	PendingBytes    int64
 	OldestAgeSecs   int64
@@ -191,22 +194,27 @@ type Drain struct {
 	poisonSync   func(f *os.File) error
 	poisonRename func(oldpath, newpath string) error
 
-	runMu     sync.Mutex // Serializes selection, upload and ACK within this drain.
-	mu        sync.Mutex
-	cancel    context.CancelFunc
-	started   bool
-	done      chan struct{}
-	startOnce sync.Once
-	stopOnce  sync.Once
-	wait      func(context.Context, time.Duration) error
-	jitter    func(time.Duration, float64) time.Duration
+	runMu sync.Mutex // Serializes selection, upload and ACK within this drain.
+	// A Core identity conflict rejects the whole request before replay reservation.
+	// Select singleton Sensor records through the rejected range. A valid
+	// prefix must not cause the remaining range to be batched/rejected again.
+	identityIsolationUntil uint64 // guarded by runMu; zero means inactive
+	mu                     sync.Mutex
+	cancel                 context.CancelFunc
+	started                bool
+	done                   chan struct{}
+	startOnce              sync.Once
+	stopOnce               sync.Once
+	wait                   func(context.Context, time.Duration) error
+	jitter                 func(time.Duration, float64) time.Duration
 
-	deliveryMu      sync.RWMutex
-	deliveryBlocked bool
-	deliveryReason  string
-	blockedSince    time.Time
-	blockedFirstSeq uint64
-	blockedLastSeq  uint64
+	deliveryMu          sync.RWMutex
+	deliveryBlocked     bool
+	identityQuarantined bool
+	deliveryReason      string
+	blockedSince        time.Time
+	blockedFirstSeq     uint64
+	blockedLastSeq      uint64
 	// deliveryGen advances on every durable-ACK clear so a Snapshot that
 	// observed a pre-ACK legacy sizeRejected sidecar cannot reassert DEGRADED
 	// after recovery. Observations sample gen before spool I/O and re-check
@@ -302,21 +310,29 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 	if err := os.MkdirAll(poisonDir, 0750); err != nil {
 		return nil, codeErr(CodeInvalidConfig, "failed to create agent-poison directory", err, false)
 	}
+	markerInfo, markerErr := os.Lstat(filepath.Join(poisonDir, identityConflictMarker))
+	if markerErr != nil && !os.IsNotExist(markerErr) {
+		return nil, codeErr(CodeInvalidConfig, "failed inspecting identity quarantine marker", markerErr, false)
+	}
+	if markerErr == nil && !markerInfo.Mode().IsRegular() {
+		return nil, codeErr(CodeInvalidConfig, "identity quarantine marker is not a regular file", nil, false)
+	}
 	logger := cfg.Logger
 	if logger == nil {
 		logger = slog.Default()
 	}
 	d := &Drain{
-		cfg:       cfg,
-		spool:     sp,
-		transport: tr,
-		metrics:   &Metrics{},
-		logger:    logger,
-		poisonDir: poisonDir,
-		syncDir:   defaultSyncDir,
-		done:      make(chan struct{}),
-		wait:      waitContext,
-		jitter:    jitterDuration,
+		cfg:                 cfg,
+		spool:               sp,
+		transport:           tr,
+		metrics:             &Metrics{},
+		logger:              logger,
+		poisonDir:           poisonDir,
+		syncDir:             defaultSyncDir,
+		identityQuarantined: markerErr == nil,
+		done:                make(chan struct{}),
+		wait:                waitContext,
+		jitter:              jitterDuration,
 	}
 	return d, nil
 }
@@ -342,6 +358,7 @@ func (d *Drain) Snapshot() DeliveryStatus {
 		OldestAgeSecs:  d.metrics.OldestAgeSeconds.Load(),
 		FailuresPerm:   d.metrics.FailuresPermanent.Load(),
 		DurableAcks:    d.metrics.DurableAcks.Load(),
+		Quarantined:    d.identityQuarantined,
 	}
 	if sec := d.metrics.LastSuccessUnix.Load(); sec > 0 {
 		st.LastSuccessTime = time.Unix(sec, 0).UTC()
@@ -374,6 +391,10 @@ func (d *Drain) Snapshot() DeliveryStatus {
 		st.BlockedSince = d.cleanupFaultSince
 		st.FirstSequence = d.cleanupFaultSeq
 		st.LastSequence = d.cleanupFaultSeq
+	}
+	if d.identityQuarantined && st.State == DeliveryStateUp {
+		st.State = DeliveryStateDegraded
+		st.ReasonCode = identityConflictCode
 	}
 	return st
 }
@@ -683,7 +704,11 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	if d.hasUnresolvedPendingPartialAck() {
 		return false, nil
 	}
-	batch, err := d.spool.ReadOrReserveOutboundBatch(d.cfg.MaxBatchRecords, d.cfg.MaxBatchPayloadBytes)
+	maxRecords := d.cfg.MaxBatchRecords
+	if d.identityIsolationUntil != 0 {
+		maxRecords = 1
+	}
+	batch, err := d.spool.ReadOrReserveOutboundBatch(maxRecords, d.cfg.MaxBatchPayloadBytes)
 	if err != nil {
 		return false, codeErr(CodeSpool, "failed reading agent spool batch", err, false)
 	}
@@ -743,7 +768,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 				d.logger.Warn("Core agent ACK durable in spool but cleanup failed",
 					"event_code", reasonSpoolCleanupFailed,
 					"safe_context", map[string]any{
-						"accepted_through": accepted,
+						"accepted_through":  accepted,
 						"partial_spool_ack": true,
 					})
 				return false, codeErr(CodeSpool, "durable agent ACK applied but spool cleanup failed", aerr, false)
@@ -756,6 +781,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		d.metrics.Successes.Add(1)
 		d.metrics.DurableAcks.Add(1)
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
+		if accepted >= d.identityIsolationUntil {
+			d.identityIsolationUntil = 0
+		}
 		d.clearDeliveryBlocked()
 		d.refreshStats()
 		return true, nil
@@ -764,6 +792,33 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	// A current 413 cannot disprove earlier acceptance with a lost ACK. Keep
 	// the exact frozen request eligible for replay, including legacy singleton
 	// SizeRejected windows. Request-size errors use the paced retainBlocked path.
+	if isIdentityConflictRejection(err) {
+		// Core validates identity before watermark reservation and publication.
+		// Its batch-level rejection does not identify which Sensor record failed.
+		if len(batch.Records) != 1 {
+			if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+				return false, codeErr(CodeSpool, "failed isolating identity-conflict window", aerr, false)
+			}
+			d.identityIsolationUntil = batch.LastSequence
+			return false, codeErr(CodeTransport, "identity-conflict batch narrowed without ACK", err, false)
+		}
+		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
+			return false, codeErr(CodeSpool, "failed abandoning identity-conflict window", aerr, false)
+		}
+		if d.identityIsolationUntil == 0 {
+			d.identityIsolationUntil = batch.LastSequence
+		}
+		if parkErr := d.parkHead(batch, identityConflictCode, err); parkErr != nil {
+			return false, parkErr
+		}
+		if batch.LastSequence >= d.identityIsolationUntil {
+			d.identityIsolationUntil = 0
+		}
+		d.metrics.FailuresPermanent.Add(1)
+		d.clearDeliveryBlocked()
+		d.refreshStats()
+		return false, codeErr(CodePoison, "quarantined identity-conflict agent record", err, false)
+	}
 
 	if isRecordAttributableCoreError(err) {
 		code := terminalCode(err)
@@ -932,6 +987,41 @@ func defaultSyncDir(dirPath string) error {
 	return closeErr
 }
 
+// persistIdentityConflictMarker keeps the security hold visible across Sensor
+// restarts and later successful deliveries. The marker is never cleared by a
+// telemetry ACK; an authorized reconciliation workflow must clear it.
+func (d *Drain) persistIdentityConflictMarker() error {
+	path := filepath.Join(d.poisonDir, identityConflictMarker)
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+	if err == nil {
+		if syncErr := f.Sync(); syncErr != nil {
+			_ = f.Close()
+			return syncErr
+		}
+		if closeErr := f.Close(); closeErr != nil {
+			return closeErr
+		}
+	} else {
+		info, statErr := os.Lstat(path)
+		if statErr != nil {
+			return statErr
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("identity quarantine marker is not a regular file")
+		}
+	}
+	if err := d.syncDir(d.poisonDir); err != nil {
+		return err
+	}
+	d.deliveryMu.Lock()
+	d.identityQuarantined = true
+	d.deliveryMu.Unlock()
+	return nil
+}
+
 func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	if len(batch.Records) == 0 {
 		return nil
@@ -946,6 +1036,20 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		"parkedAt":     time.Now().UTC().Format(time.RFC3339Nano),
 		"cause":        fmt.Sprintf("%v", cause),
 		"payloadBytes": len(head.Payload),
+	}
+	if reason == identityConflictCode {
+		var payload durableBatchPayload
+		if err := json.Unmarshal(head.Payload, &payload); err != nil {
+			return codeErr(CodePoison, "failed decoding identity-conflict custody metadata", err, false)
+		}
+		digest := sha256.Sum256(head.Payload)
+		meta["cause"] = identityConflictCode // never persist an untrusted Core message
+		meta["tenantId"] = payload.TenantID
+		meta["agentId"] = payload.AgentID
+		meta["batchChecksum"] = payload.BatchChecksum
+		meta["correlationId"] = payload.CorrelationID
+		meta["payloadSHA256"] = hex.EncodeToString(digest[:])
+		meta["replayPolicy"] = "AUTHORITATIVE_RECONCILIATION_REQUIRED"
 	}
 	metaBytes, _ := json.Marshal(meta)
 	tmp, err := os.CreateTemp(d.poisonDir, ".poison-*.tmp")
@@ -1003,6 +1107,11 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 	if err := syncFn(d.poisonDir); err != nil {
 		d.metrics.Backpressure.Add(1)
 		return codeErr(CodePoison, "failed syncing poison directory", err, true)
+	}
+	if reason == identityConflictCode {
+		if err := d.persistIdentityConflictMarker(); err != nil {
+			return codeErr(CodePoison, "failed publishing identity-conflict health marker", err, true)
+		}
 	}
 	if err := d.spool.AcknowledgeThrough(head.Sequence); err != nil {
 		// DiskSpool may return after durably advancing AckedThrough when later
@@ -1331,6 +1440,12 @@ func isRecordAttributableCoreError(err error) bool {
 		coreclient.IsCoreAPICode(err, "ERR_AGENT_HOST_ID_REQUIRED") ||
 		coreclient.IsCoreAPICode(err, "ERR_RECORD_TOO_LARGE") ||
 		isAuthorityPoisonError(err)
+}
+
+func isIdentityConflictRejection(err error) bool {
+	var api *coreclient.CoreAPIError
+	return errors.As(err, &api) && api.Code == identityConflictCode &&
+		(api.HTTPStatus == 403 || api.HTTPStatus == 409) && !api.Transient()
 }
 
 func isAuthorityPoisonError(err error) bool {

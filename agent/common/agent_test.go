@@ -62,11 +62,20 @@ func TestAgentServiceLifecycle(t *testing.T) {
 		t.Fatalf("failed to start AgentService: %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	qStats := svc.QueueStats()
-	if qStats.ActiveCount < 1 {
-		t.Fatalf("expected at least 1 record buffered in queue, got %d", qStats.ActiveCount)
+	deadline := time.NewTimer(2 * time.Second)
+	defer deadline.Stop()
+	poll := time.NewTicker(5 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		qStats := svc.QueueStats()
+		if qStats.ActiveCount >= 1 {
+			break
+		}
+		select {
+		case <-poll.C:
+		case <-deadline.C:
+			t.Fatalf("timed out waiting for a buffered queue record; active=%d", qStats.ActiveCount)
+		}
 	}
 
 	dStats := svc.DeliveryStats()
