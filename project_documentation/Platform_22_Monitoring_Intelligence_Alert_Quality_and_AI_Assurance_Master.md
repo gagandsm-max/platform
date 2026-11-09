@@ -240,7 +240,7 @@ A static threshold compares one qualified numeric (or ordered enum) observation 
 A duration threshold requires a child condition (typically static or composite) to remain `TRUE` **continuously** for a configured duration `D`.
 
 - The duration clock starts when the child first becomes qualified `TRUE` and advances only while consecutive qualified evaluations remain `TRUE`.
-- **Interruption / reset:** any qualified `FALSE` resets the duration clock. `UNKNOWN` or stale/unqualified samples **do not** advance the clock; policy SHALL declare whether they **pause** (preserve elapsed) or **reset** (default = pause for transient quality gaps shorter than a configured grace, else reset). Unconfigured pause/reset MUST fail closed as `UNKNOWN` rather than fire.
+- **Interruption / reset:** any qualified `FALSE` resets the duration clock. `UNKNOWN` or stale/unqualified samples **do not** advance the clock; policy SHALL declare whether they **pause** (preserve elapsed) or **reset**, with the exact choice and grace persisted on `Platform_17` `DurationThresholdV1.unknown_behavior` / `unknown_grace_seconds` (PAUSE preserves elapsed only while UNKNOWN/stale ≤ grace; else reset). Unconfigured pause/reset MUST fail closed as `UNKNOWN` rather than fire.
 - Fire occurs only when continuous qualified `TRUE` time ≥ `D`. Clear/hysteresis follow the common envelope.
 
 #### 6.1.4 Consecutive threshold
@@ -249,7 +249,7 @@ A consecutive threshold requires `N` **qualified consecutive** evaluations of a 
 
 - Only samples that pass evidence-quality prerequisites count toward `N`.
 - A qualified `FALSE` resets the consecutive counter to 0.
-- `UNKNOWN`, stale, or otherwise unqualified samples **do not** increment `N` and **do not** count as `TRUE`; policy SHALL declare whether they reset the counter (default) or skip without reset. Default = reset on UNKNOWN/stale to prevent silent accumulation across evidence gaps.
+- `UNKNOWN`, stale, or otherwise unqualified samples **do not** increment `N` and **do not** count as `TRUE`; policy SHALL declare whether they reset the counter or skip without reset, persisted as `Platform_17` `ConsecutiveThresholdV1.unknown_behavior` (`RESET` | `SKIP`). Unconfigured UNKNOWN behavior MUST fail closed rather than silently accumulate across evidence gaps.
 - Fire when the counter reaches `N`; clear/reset/hysteresis follow the common envelope.
 
 #### 6.1.5 Rate threshold
@@ -267,11 +267,11 @@ A rate threshold evaluates change over elapsed time: `rate = Δvalue / Δt` (or 
 
 A baseline threshold compares a qualified observation (or short window aggregate) to a versioned baseline.
 
-- **Baseline identity / version:** every evaluation binds `baseline_id` + `baseline_version` (immutable reference once published for that version).
-- **Training / reference window:** parameters declare the reference window, aggregation and any seasonality key; training artifacts are versioned.
-- **Sample sufficiency:** if the baseline lacks the configured minimum qualified samples, result is `UNKNOWN` (insufficient baseline), not an invented deviation.
-- **Deviation operator:** absolute or relative deviation (`GT`/`LT` band, σ-multiple, or percent) with explicit units; operator parameters are part of the versioned policy, not runtime-mutable weights.
-- **Stale baseline behavior:** if the baseline version is expired, superseded without replacement, or older than the configured freshness/validity, evaluation yields `UNKNOWN` or the declared fallback (static threshold only when an explicit fallback policy version is bound).
+- **Baseline identity / version:** every evaluation binds `baseline_id` + `baseline_version` via persisted `Platform_17` `BaselineRefV1` (immutable reference once published for that version).
+- **Training / reference window:** parameters declare the reference window, aggregation and any seasonality key (`BaselineThresholdV1.reference_window_seconds` / `aggregation` / `seasonality_key`); training artifacts are versioned.
+- **Sample sufficiency:** if the baseline lacks the configured `minimum_qualified_samples`, result is `UNKNOWN` (insufficient baseline), not an invented deviation.
+- **Deviation operator:** absolute, relative-percent or σ-multiple deviation with `ABOVE`/`BELOW`/`OUTSIDE_BAND` and explicit units as persisted on `BaselineThresholdV1`; operator parameters are part of the versioned policy, not runtime-mutable weights.
+- **Stale baseline behavior:** if the baseline version is expired, superseded without replacement, or older than `max_baseline_age_seconds`, evaluation yields `UNKNOWN` or `USE_FALLBACK_POLICY` with an explicit immutable `PolicyVersionRefV1` fallback (no invented fallback).
 - **No silent self-learning policy mutation:** operator feedback or online learning MUST NOT silently mutate ACTIVE baseline parameters or promote a new baseline version without the governed policy lifecycle.
 
 #### 6.1.7 Missing threshold
@@ -307,7 +307,7 @@ A business-time threshold restricts when another threshold family is eligible to
 
 - **Timezone:** IANA timezone identifiers only (e.g. `Asia/Kolkata`); offsets-without-zone are rejected.
 - **Calendar / freeze policy:** evaluation binds a versioned business calendar and optional freeze/blackout policy identity.
-- **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit policy rule (default: treat gap as outside business time / fold as earlier offset) and MUST be fixture-tested.
+- **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit persisted policy rule on `Platform_17` `BusinessTimeThresholdV1` (`gap_behavior=OUTSIDE_WINDOW`; `fold_behavior=EARLIER_OFFSET|LATER_OFFSET`) and MUST be fixture-tested. Immutable evaluation MUST NOT depend on an unwritten implementation default.
 - **Missing / invalid calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden unless an explicit alternate calendar version is bound in policy.
 
 #### 6.1.11 GROUP / cross-entity threshold (`ThresholdExprV1.kind=GROUP`)
@@ -319,7 +319,7 @@ Frozen contract:
 1. **Selector** — canonical inventory/group/service selector only (tenant-scoped group, dynamic group, service membership, or explicit entity-set reference owned by Inventory). Opaque ad-hoc device lists outside inventory authority are rejected.
 2. **Membership resolution** — membership is resolved from authoritative inventory at the evaluation `as_of` instant for that tick.
 3. **Membership evidence** — evaluation evidence SHALL record membership snapshot/revision (selector identity, `as_of`, membership revision/hash, member entity IDs counted).
-4. **Child expression** — exactly one typed child `ThresholdExprV1` (any non-GROUP family, or COMPOSITE of non-GROUP families). Nested GROUP is forbidden unless a later schema major explicitly authorizes it.
+4. **Child expression** — exactly one typed child `ThresholdExprV1` (any non-GROUP family, or COMPOSITE of non-GROUP families). Nested GROUP is forbidden at any depth in the child expression tree unless a later schema major explicitly authorizes it; `Platform_17` rejects nested GROUP recursively with `NESTED_GROUP_NOT_SUPPORTED_V1`.
 5. **Aggregation operator** — exactly one of `ANY | ALL | COUNT | PERCENT`.
 6. **Minimum qualified member count** — mandatory; if the count of members that produced a qualified child result (`TRUE` or `FALSE`) is below this minimum, the GROUP result is `UNKNOWN`.
 7. **Count / percentage threshold** — required when operator is `COUNT` or `PERCENT` (absolute count or percentage of qualified members whose child result is `TRUE`).

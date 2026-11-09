@@ -1266,8 +1266,65 @@ Rules:
 
 - `version_no >= 1`.
 - Calendar is same-tenant and immutable/version-addressed.
-- IANA timezone/DST/gap/fold behavior remains owned by the business-calendar contract (`Platform_22` §6.1.10).
+- IANA timezone identity and calendar contents remain owned by the business-calendar contract (`Platform_22` §6.1.10).
+- Configurable DST gap/fold policy choices for a threshold are persisted on `BusinessTimeThresholdV1` (not left as unwritten implementation defaults).
 - Evaluation evidence records the exact calendar version used.
+
+###### `ComparisonV1` (reusable persisted comparison)
+
+```text
+ComparisonV1 {
+  operator: GT | GE | LT | LE | EQ | NE | INSIDE | OUTSIDE
+  threshold: number
+  threshold_high: number | null
+  lower_inclusive: boolean | null
+  upper_inclusive: boolean | null
+  unit: string
+}
+```
+
+Validation:
+
+- `INSIDE` / `OUTSIDE` require non-null `threshold_high`, non-null `lower_inclusive` and non-null `upper_inclusive`, and `threshold < threshold_high`.
+- Non-range operators require `threshold_high = null`, `lower_inclusive = null` and `upper_inclusive = null`.
+- `unit` MUST match the governed input metric unit unless an explicit versioned unit-conversion contract is referenced by the policy binding.
+- Inclusive/exclusive bound flags close `Platform_22` §6.1.2 range semantics; writers MUST NOT invent bound openness.
+
+###### `BaselineRefV1` / `PolicyVersionRefV1`
+
+```text
+BaselineRefV1 {
+  baseline_id: string
+  version_no: uint32
+}
+
+PolicyVersionRefV1 {
+  policy_id: UUID
+  version_no: uint32
+}
+```
+
+Rules:
+
+- `baseline_id` + `version_no` address an immutable published baseline artifact (`version_no >= 1`).
+- `PolicyVersionRefV1` addresses an immutable same-tenant alert-policy version (`version_no >= 1`).
+- Baseline promotion/update MUST create a new baseline version; it MUST NOT silently mutate an existing policy version or an already-referenced baseline version.
+
+###### `DependencyRefV1`
+
+```text
+DependencyRefV1 {
+  relationship_id: UUID
+  min_confidence: LOW | MEDIUM | HIGH
+  max_age_seconds: uint32
+}
+```
+
+Rules:
+
+- `relationship_id` is the canonical temporal-operational-graph / topology relationship identity for the policy tenant. Writers MUST NOT invent alternate free-form lookup keys, SQL selectors or opaque strings.
+- Resolution uses Platform topology/dependency authority at the evaluation `as_of` instant.
+- `max_age_seconds > 0`. Stale, low-confidence or otherwise unqualified dependency evidence remains `UNKNOWN` / suppression-withheld per `Platform_22` §6.1.9 — never proof of child failure.
 
 ###### `ThresholdExprV1` (discriminated union)
 
@@ -1278,86 +1335,132 @@ ThresholdExprV1 = discriminated union on kind ∈ {
 }
 ```
 
-Every variant carries a stable `expr_id` (string) unique within the policy version for evidence/audit references. Each `kind` contains **only** its frozen fields below.
+Every variant carries a stable `expr_id` (string) unique within the policy version for evidence/audit references. Each `kind` contains **only** its frozen fields below. For every configurable behavior required by `Platform_22` §6.1, either (1) the exact choice is persisted in `AlertPolicyDefinitionV1` / `ThresholdExprV1`, or (2) it is represented by an exact immutable versioned reference whose contract owns that choice. There MUST be no implementation-significant default that an engineer invents at runtime. `Platform_22` §6.1 remains evaluation authority; this schema owns the persisted shape only.
 
-**STATIC**
+**STATIC — `StaticThresholdV1`**
 
 ```text
-{
+StaticThresholdV1 {
   expr_id: string
   kind: STATIC
   input_ref: string
-  operator: GT | GE | LT | LE | EQ | NE | INSIDE | OUTSIDE
-  threshold: number
-  threshold_high: number | null
-  unit: string
-  hysteresis: number | null
+  fire: ComparisonV1
+  clear: ComparisonV1 | null
 }
 ```
 
-`threshold_high` is required (non-null) only for range operators `INSIDE` / `OUTSIDE`; otherwise it MUST be null.
+Rules:
 
-**DURATION**
+- `clear = null` means ordinary FALSE evaluation of `fire` clears the condition (no hidden hysteresis number).
+- Non-null `clear` is the explicit hysteresis/clear comparison (`Platform_22` §6.1.2).
+- `fire.unit` and `clear.unit` (when present) MUST be compatible with each other and with the governed `input_ref` metric.
+- No unpersisted default clear band, percentage or absolute delta is permitted.
+
+**DURATION — `DurationThresholdV1`**
 
 ```text
-{
+DurationThresholdV1 {
   expr_id: string
   kind: DURATION
   child: ThresholdExprV1
   duration_seconds: uint32
+  unknown_behavior: PAUSE | RESET
+  unknown_grace_seconds: uint32
 }
 ```
 
-`duration_seconds > 0`. UNKNOWN-child pause/reset behavior remains `Platform_22` §6.1 evaluation authority (not a free-form DSL).
+Validation / semantics (persisted representation of `Platform_22` §6.1.3):
 
-**CONSECUTIVE**
+- `duration_seconds > 0`.
+- `unknown_grace_seconds >= 0`.
+- `RESET` requires `unknown_grace_seconds = 0`.
+- `PAUSE` preserves elapsed TRUE duration only while the UNKNOWN/stale interval is `<= unknown_grace_seconds`; if grace is exceeded, duration resets.
+- Qualified FALSE always resets. No unpersisted default UNKNOWN behavior.
+
+**CONSECUTIVE — `ConsecutiveThresholdV1`**
 
 ```text
-{
+ConsecutiveThresholdV1 {
   expr_id: string
   kind: CONSECUTIVE
   child: ThresholdExprV1
   required_true_count: uint32
+  unknown_behavior: RESET | SKIP
 }
 ```
 
-`required_true_count >= 1`.
+Rules:
 
-**RATE**
+- `required_true_count >= 1`.
+- `RESET` — UNKNOWN/stale resets the consecutive count to zero.
+- `SKIP` — UNKNOWN/stale does not increment and preserves the current count.
+- Qualified FALSE always resets.
+- No implicit default is left to implementation (`Platform_22` §6.1.4).
+
+**RATE — `RateThresholdV1`**
 
 ```text
-{
+RateThresholdV1 {
   expr_id: string
   kind: RATE
   input_ref: string
-  operator: GT | GE | LT | LE | EQ | NE
-  threshold: number
-  unit_per_second: string
+  comparison: ComparisonV1
   minimum_interval_seconds: uint32
 }
 ```
 
-`minimum_interval_seconds > 0`. Counter reset/wrap/discontinuity semantics remain `Platform_22` §6.1 authority. Authoritative Counter64 input MUST never be converted through Float64 before delta calculation.
+Rules:
 
-**BASELINE**
+- `minimum_interval_seconds > 0`.
+- Exact Counter64 delta/reset/wrap/discontinuity processing occurs before floating-point rate derivation (`Platform_22` §6.1.5). Authoritative Counter64 input MUST never be converted through Float64 before delta calculation.
+- `comparison.unit` is the rate unit. Do **not** add a separate ambiguous `unit_per_second` plus standalone threshold-operator fields; `ComparisonV1` is authoritative.
+- Rate `ComparisonV1` uses non-range operators only in V1 (`GT`/`GE`/`LT`/`LE`/`EQ`/`NE`); `INSIDE`/`OUTSIDE` on RATE are rejected.
+
+**BASELINE — `BaselineThresholdV1`**
 
 ```text
-{
+BaselineThresholdV1 {
   expr_id: string
   kind: BASELINE
   input_ref: string
-  baseline_ref: string
+
+  baseline_ref: BaselineRefV1
+
+  reference_window_seconds: uint32
+  aggregation: MEAN | MEDIAN | MIN | MAX | P50 | P95 | P99
+  seasonality_key: string | null
+  minimum_qualified_samples: uint32
+
+  deviation_mode: ABSOLUTE | RELATIVE_PERCENT | SIGMA_MULTIPLE
   comparison: ABOVE | BELOW | OUTSIDE_BAND
-  sensitivity: number
+  deviation_threshold: number
+  deviation_threshold_high: number | null
+  deviation_unit: string | null
+
+  max_baseline_age_seconds: uint32
+  stale_behavior: UNKNOWN | USE_FALLBACK_POLICY
+  fallback_policy_ref: PolicyVersionRefV1 | null
 }
 ```
 
-Baseline version/provenance is immutable in evaluation evidence; silent self-learning mutation of the referenced baseline is forbidden.
+Validation (aligns exactly with `Platform_22` §6.1.6):
 
-**MISSING**
+- `baseline_ref.version_no >= 1`.
+- `reference_window_seconds > 0`.
+- `minimum_qualified_samples >= 1`.
+- `max_baseline_age_seconds > 0`.
+- `OUTSIDE_BAND` requires non-null `deviation_threshold_high` with `deviation_threshold < deviation_threshold_high`; other comparisons require `deviation_threshold_high = null`.
+- `ABSOLUTE` requires non-null `deviation_unit` compatible with `input_ref`.
+- `RELATIVE_PERCENT` uses percentage semantics and requires `deviation_unit = null`.
+- `SIGMA_MULTIPLE` uses dimensionless σ multiples and requires `deviation_unit = null`.
+- `USE_FALLBACK_POLICY` requires non-null immutable `fallback_policy_ref`; `UNKNOWN` requires `fallback_policy_ref = null`.
+- Fallback policy MUST resolve same-tenant to an immutable compatible policy version and MUST NOT recursively create a cycle (direct or transitive baseline-fallback cycles are rejected).
+- Baseline update/promotion never silently mutates an existing policy version.
+
+**MISSING — `MissingThresholdV1`**
 
 ```text
-{
+MissingThresholdV1 {
   expr_id: string
   kind: MISSING
   input_ref: string
@@ -1366,12 +1469,12 @@ Baseline version/provenance is immutable in evaluation evidence; silent self-lea
 }
 ```
 
-Both `expected_cadence_seconds` and `freshness_deadline_seconds` MUST be `> 0`. Missing evidence never means Device Down by itself.
+Both `expected_cadence_seconds` and `freshness_deadline_seconds` MUST be `> 0`. Per `Platform_22` §6.1.7, missing/no-data is evidence-quality / semantic-state information and MUST NOT imply Device Down.
 
-**COMPOSITE**
+**COMPOSITE — `CompositeThresholdV1`**
 
 ```text
-{
+CompositeThresholdV1 {
   expr_id: string
   kind: COMPOSITE
   operator: AND | OR | NOT
@@ -1379,12 +1482,16 @@ Both `expected_cadence_seconds` and `freshness_deadline_seconds` MUST be `> 0`. 
 }
 ```
 
-`NOT` requires exactly one child. `AND` / `OR` require at least two children and use the frozen tri-state semantics in `Platform_22` §6.1. UNKNOWN MUST NOT be coerced to FALSE by default.
+Validation:
 
-**GROUP**
+- `NOT` requires exactly one child; `AND` / `OR` require `>= 2` children.
+- Recursive validation applies to the complete expression tree.
+- No UNKNOWN-coercion field is permitted in V1; `Platform_22` §6.1.8 fixes the tri-state truth table. UNKNOWN MUST NOT be coerced to FALSE/TRUE by default.
+
+**GROUP — `GroupThresholdV1`**
 
 ```text
-{
+GroupThresholdV1 {
   expr_id: string
   kind: GROUP
   member_selector: SubjectSelectorV1
@@ -1400,39 +1507,81 @@ Both `expected_cadence_seconds` and `freshness_deadline_seconds` MUST be `> 0`. 
 
 Rules:
 
-- Nested GROUP remains prohibited in V1 (`child` MUST NOT itself be GROUP).
+- Canonical membership selector, membership snapshot/revision/hash evidence, minimum qualified member behavior, COUNT/PERCENT thresholds, evaluation window/alignment and UNKNOWN semantics remain as `Platform_22` §6.1.11.
 - `COUNT` requires non-null `count_threshold`; `PERCENT` requires non-null `percent_threshold`; other aggregations require both thresholds null.
 - `min_qualified_members >= 1`; `evaluation_window_seconds > 0`; `alignment_tolerance_seconds` is non-negative.
-- Insufficient qualified membership ⇒ UNKNOWN (`Platform_22` §6.1.11).
-- Evaluation evidence records membership snapshot/revision/hash and member IDs.
-- Ad-hoc non-inventory member lists and rewriting historical membership evidence are forbidden.
+- Insufficient qualified membership ⇒ UNKNOWN. Ad-hoc non-inventory member lists and rewriting historical membership evidence are forbidden.
+- **Recursive nested-GROUP prohibition (V1):** validation MUST recursively walk the complete `child` expression tree. **No descendant at any depth may have `kind=GROUP`.** Direct-child-only checks are insufficient. Invalid forms include `GROUP → GROUP`, `GROUP → COMPOSITE → GROUP`, `GROUP → DURATION → COMPOSITE → GROUP`, and any other nested form. The deterministic validator error is `NESTED_GROUP_NOT_SUPPORTED_V1` and MUST include the exact offending JSON path.
 
-**DEPENDENCY**
+**DEPENDENCY — `DependencyThresholdV1`**
 
 ```text
-{
+DependencyThresholdV1 {
   expr_id: string
   kind: DEPENDENCY
-  dependency_ref: string
+  dependency_ref: DependencyRefV1
   child: ThresholdExprV1
 }
 ```
 
-`dependency_ref` MUST resolve through canonical topology/dependency authority. Stale/unqualified dependency evidence ⇒ UNKNOWN; stale topology is never treated as proof.
+`dependency_ref` is the typed canonical versioned/topology authority reference above. Stale/unqualified dependency evidence ⇒ UNKNOWN / suppression-withheld per `Platform_22` §6.1.9; stale topology is never treated as proof.
 
-**BUSINESS_TIME**
+**BUSINESS_TIME — `BusinessTimeThresholdV1`**
 
 ```text
-{
+BusinessTimeThresholdV1 {
   expr_id: string
   kind: BUSINESS_TIME
   calendar_ref: CalendarRefV1
   applicability: IN_WINDOW | OUTSIDE_WINDOW
+  gap_behavior: OUTSIDE_WINDOW
+  fold_behavior: EARLIER_OFFSET | LATER_OFFSET
   child: ThresholdExprV1
 }
 ```
 
-Calendar unavailable/invalid ⇒ UNKNOWN. IANA timezone/DST/gap/fold rules remain owned by the business-calendar contract (not duplicated as free-form offset-without-zone fields here).
+Rules (persists configurable DST choices required by `Platform_22` §6.1.10):
+
+- `gap_behavior` has the only valid V1 value `OUTSIDE_WINDOW` (required; stored explicitly).
+- `fold_behavior` is required and MUST be persisted as `EARLIER_OFFSET` or `LATER_OFFSET` on the immutable version. Evaluation of an immutable policy MUST NEVER depend on an unwritten implementation default.
+- Calendar unavailable/invalid ⇒ UNKNOWN. IANA timezone identity remains on the bound calendar; free-form offset-without-zone fields are forbidden.
+
+###### `ThresholdExprV1` ↔ `Platform_22` §6.1.1 common-envelope persistence coverage matrix
+
+| §6.1.1 configurable requirement | Persisted field / immutable reference | Notes |
+|---|---|---|
+| Input identity | `SubjectSelectorV1.metric_ref` / `monitor_ref`; per-node `input_ref` | Canonical catalogue refs only |
+| Evaluation type | `ThresholdExprV1.kind` (+ COMPOSITE/GROUP composition) | Discriminated union above |
+| Evaluation window | `EvaluationCadenceV1`; `GroupThresholdV1.evaluation_window_seconds` / `alignment_tolerance_seconds`; `DurationThresholdV1.duration_seconds`; `BaselineThresholdV1.reference_window_seconds`; `MissingThresholdV1.expected_cadence_seconds` / `freshness_deadline_seconds`; `RateThresholdV1.minimum_interval_seconds` | Family-specific windows; not a second DSL |
+| Qualified-sample requirement | `BaselineThresholdV1.minimum_qualified_samples`; `GroupThresholdV1.min_qualified_members` | Quality-state membership itself is **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** (`Platform_22` §5 / §6.1) |
+| Evidence-quality prerequisite | `evidence_contract_ref` + `AlertPolicyDefinitionV1.evidence_class` | Contract owns class-specific gates; not per-tick free-form predicates |
+| Threshold parameters | `ComparisonV1` / family-specific fields (`fire`/`clear`, counts, deviations, calendars, children, group aggregation) | See variants above |
+| Clear / reset / hysteresis | `StaticThresholdV1.clear`; `DurationThresholdV1.unknown_behavior` + `unknown_grace_seconds`; `ConsecutiveThresholdV1.unknown_behavior`; optional root `recovery_condition` | No hidden numeric hysteresis default |
+| Missing / stale behavior | `MissingThresholdV1.*`; `BaselineThresholdV1.stale_behavior` + `fallback_policy_ref`; RATE/STATIC UNKNOWN on unqualified input | Device Down coercion **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** |
+| Business-time applicability | `business_calendar_ref`; `BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` | Gap/fold choices stored explicitly |
+| Version authority | enclosing `alert_policy_version (policy_id, version_no)`; `BaselineRefV1`; `PolicyVersionRefV1`; `CalendarRefV1`; `DependencyRefV1.relationship_id` | Immutable references only |
+| Tri-state result `TRUE\|FALSE\|UNKNOWN` | **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** | No UNKNOWN-coercion knob on COMPOSITE |
+| Deterministic evaluation / no silent self-learning | **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** | Baseline/policy versions immutable once published |
+| Counter64-before-float rate authority | **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** | Retained on RATE path |
+| Nested GROUP | **FORBIDDEN IN V1** — recursive `NESTED_GROUP_NOT_SUPPORTED_V1` | Not a configurable knob |
+
+This matrix exists to prevent persistence-versus-evaluation divergence. Do not invent knobs merely to fill cells.
+
+###### `AlertPolicyDefinitionV1` recursive validation contract
+
+The same server-side validator used by **OP-POLICY-CREATE**, **OP-POLICY-VERSION-CREATE** and **OP-POLICY-VERSION-VALIDATE** MUST perform recursive schema and semantic validation of the complete `ThresholdExprV1` tree, including:
+
+- unique `expr_id` across the full tree;
+- maximum expression depth / item count owned by existing security/capacity bounds — if an exact numeric bound is not yet frozen here, reference **BUILD-130** rather than inventing one;
+- illegal field-for-kind rejection (only the frozen fields for that `kind` are legal);
+- required-nullability enforcement (`ComparisonV1` range vs non-range; baseline deviation/fallback nullability; GROUP aggregation thresholds; DURATION RESET grace = 0; etc.);
+- recursive nested-GROUP rejection with error code `NESTED_GROUP_NOT_SUPPORTED_V1` and the exact offending JSON path;
+- baseline fallback-cycle rejection (direct and transitive);
+- same-tenant reference checks for calendars, baselines, fallback policies, dependency relationships, subject scope and metric/monitor refs;
+- unit compatibility (`ComparisonV1.unit`, STATIC fire/clear, ABSOLUTE baseline `deviation_unit`);
+- calendar/version existence and immutable reference validity (`CalendarRefV1`, `BaselineRefV1`, `PolicyVersionRefV1`, `DependencyRefV1`);
+- unknown fields in schema V1 MUST fail validation unless a documented compatibility policy explicitly allows additive fields — never silently ignore an unknown policy field that could change intended behavior;
+- typed field/path errors; **never** silently normalize or rewrite an invalid definition.
 
 | Table | Columns | PK / FK / Unique / Check | Idx | Ver/Idem/Conc | Ret / Aud | Mig |
 |---|---|---|---|---|---|---|

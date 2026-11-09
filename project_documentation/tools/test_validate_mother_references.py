@@ -3034,16 +3034,25 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "calendar_id: UUID",
             "version_no: uint32",
             "kind: STATIC",
+            "ComparisonV1",
             "threshold_high",
+            "lower_inclusive",
+            "upper_inclusive",
+            "fire: ComparisonV1",
+            "clear: ComparisonV1 | null",
             "kind: DURATION",
             "duration_seconds",
+            "unknown_behavior: PAUSE | RESET",
+            "unknown_grace_seconds",
             "kind: CONSECUTIVE",
             "required_true_count",
+            "unknown_behavior: RESET | SKIP",
             "kind: RATE",
-            "unit_per_second",
+            "comparison: ComparisonV1",
             "minimum_interval_seconds",
             "kind: BASELINE",
-            "baseline_ref",
+            "BaselineRefV1",
+            "baseline_ref: BaselineRefV1",
             "comparison: ABOVE | BELOW | OUTSIDE_BAND",
             "kind: MISSING",
             "expected_cadence_seconds",
@@ -3058,14 +3067,22 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "percent_threshold",
             "evaluation_window_seconds",
             "alignment_tolerance_seconds",
+            "NESTED_GROUP_NOT_SUPPORTED_V1",
             "kind: DEPENDENCY",
-            "dependency_ref",
+            "DependencyRefV1",
+            "dependency_ref: DependencyRefV1",
             "kind: BUSINESS_TIME",
             "applicability: IN_WINDOW | OUTSIDE_WINDOW",
+            "gap_behavior: OUTSIDE_WINDOW",
+            "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
             "Float64 before delta",
             "**never** silently normalizes",
         ):
             self.assertIn(needle, p17, needle)
+        # Retired ambiguous RATE/STATIC fields must not remain as the V1 contract
+        self.assertNotIn("unit_per_second: string", p17)
+        self.assertNotIn("hysteresis: number | null", p17)
+        self.assertNotIn("sensitivity: number", p17)
         # Single canonical validate route — no alternate public body-validate API
         self.assertIn(
             "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
@@ -3079,6 +3096,106 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         self.assertIn("ValidationResult{ok, errors[{path, code, message_key}]}", p17)
         self.assertIn("pre-persist validation boundary", p17)
+
+    def test_93c_alert_policy_threshold_persistence_closes_p22_61(self) -> None:
+        """Platform_17 persists every configurable Platform_22 §6.1 choice (docs only)."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # 1. STATIC inclusive/exclusive bounds
+        for needle in (
+            "lower_inclusive: boolean | null",
+            "upper_inclusive: boolean | null",
+            "INSIDE` / `OUTSIDE` require non-null `threshold_high`",
+            "§6.1.2 range semantics",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 2. explicit clear/hysteresis representation
+        for needle in (
+            "StaticThresholdV1",
+            "clear: ComparisonV1 | null",
+            "clear = null` means ordinary FALSE evaluation of `fire`",
+            "no hidden hysteresis number",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 3. DURATION PAUSE/RESET + grace
+        for needle in (
+            "DurationThresholdV1",
+            "unknown_behavior: PAUSE | RESET",
+            "unknown_grace_seconds: uint32",
+            "RESET` requires `unknown_grace_seconds = 0`",
+            "PAUSE` preserves elapsed TRUE duration",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 4. CONSECUTIVE RESET/SKIP
+        for needle in (
+            "ConsecutiveThresholdV1",
+            "unknown_behavior: RESET | SKIP",
+            "SKIP` — UNKNOWN/stale does not increment",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 5–9. BASELINE ID+version, reference window, sample sufficiency,
+        # deviation mode/units, stale behavior/fallback immutable policy version
+        for needle in (
+            "BaselineThresholdV1",
+            "BaselineRefV1",
+            "baseline_id: string",
+            "version_no: uint32",
+            "reference_window_seconds: uint32",
+            "minimum_qualified_samples: uint32",
+            "deviation_mode: ABSOLUTE | RELATIVE_PERCENT | SIGMA_MULTIPLE",
+            "deviation_unit: string | null",
+            "stale_behavior: UNKNOWN | USE_FALLBACK_POLICY",
+            "fallback_policy_ref: PolicyVersionRefV1 | null",
+            "PolicyVersionRefV1",
+            "baseline fallback-cycle rejection",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 10. recursive nested GROUP rejection
+        for needle in (
+            "NESTED_GROUP_NOT_SUPPORTED_V1",
+            "recursively walk the complete `child` expression tree",
+            "No descendant at any depth may have `kind=GROUP`",
+            "GROUP → COMPOSITE → GROUP",
+            "exact offending JSON path",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 11. BUSINESS_TIME fold/gap behavior
+        for needle in (
+            "BusinessTimeThresholdV1",
+            "gap_behavior: OUTSIDE_WINDOW",
+            "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
+            "MUST NEVER depend on an unwritten implementation default",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 12. common-envelope persistence coverage matrix
+        for needle in (
+            "common-envelope persistence coverage matrix",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "Clear / reset / hysteresis",
+            "Missing / stale behavior",
+            "Business-time applicability",
+            "Version authority",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 13. single canonical validation route remains unchanged
+        self.assertIn(
+            "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
+            p17,
+        )
+        self.assertIn("ONLY** standalone validation operation", p17)
+        self.assertIn(
+            "OP-POLICY-CREATE**, **OP-POLICY-VERSION-CREATE** and **OP-POLICY-VERSION-VALIDATE**",
+            p17,
+        )
+        self.assertIn("recursive schema and semantic validation", p17)
+        self.assertIn("unknown fields in schema V1 MUST fail validation", p17)
+        # Documentation proof only — not a runtime implementation claim
+        self.assertIn(
+            "this schema owns the persisted shape only",
+            p17,
+        )
 
     def test_94_async_state_mapping_g05_cc_async(self) -> None:
         """G-05 / CC-ASYNC freeze admission vs persisted async lifecycle."""
