@@ -2993,7 +2993,6 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "recovery_condition",
             "severity_mapping",
             "evaluation_cadence",
-            "business_calendar_ref",
             "evidence_contract_ref",
             "ThresholdExprV1",
             "STATIC | DURATION | CONSECUTIVE | RATE | BASELINE | MISSING",
@@ -3011,6 +3010,18 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "typed field/path",
         ):
             self.assertIn(needle, p17, needle)
+        # Root business_calendar_ref is forbidden in schema V1 (single BUSINESS_TIME path).
+        root_block = p17[
+            p17.find("AlertPolicyDefinitionV1 {") : p17.find(
+                "AlertPolicyDefinitionV1 {"
+            )
+            + 700
+        ]
+        self.assertNotIn("business_calendar_ref", root_block)
+        self.assertIn(
+            "forbids `business_calendar_ref` on `AlertPolicyDefinitionV1`",
+            p17,
+        )
 
     def test_93b_alert_policy_nested_schemas_and_single_validate_route(self) -> None:
         """Nested AlertPolicy types are fully defined; one canonical validate route."""
@@ -3071,7 +3082,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "kind: DEPENDENCY",
             "DependencyRefV1",
             "dependency_ref: DependencyRefV1",
+            "DependencyActivationV1",
+            "activation: DependencyActivationV1",
+            "action: SUPPRESS | DEFER | ANNOTATE",
             "kind: BUSINESS_TIME",
+            "blackout_calendar_ref: CalendarRefV1 | null",
             "applicability: IN_WINDOW | OUTSIDE_WINDOW",
             "gap_behavior: OUTSIDE_WINDOW",
             "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
@@ -3161,12 +3176,14 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "exact offending JSON path",
         ):
             self.assertIn(needle, p17, needle)
-        # 11. BUSINESS_TIME fold/gap behavior
+        # 11. BUSINESS_TIME fold/gap behavior + blackout identity
         for needle in (
             "BusinessTimeThresholdV1",
             "gap_behavior: OUTSIDE_WINDOW",
             "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
             "MUST NEVER depend on an unwritten implementation default",
+            "blackout_calendar_ref: CalendarRefV1 | null",
+            "HOLD_STATE",
         ):
             self.assertIn(needle, p17, needle)
         # 12. common-envelope persistence coverage matrix
@@ -3175,10 +3192,22 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
             "Clear / reset / hysteresis",
             "Missing / stale behavior",
+            "Dependency behavior",
+            "DependencyThresholdV1.action` + `DependencyThresholdV1.activation",
             "Business-time applicability",
+            "BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY",
+            "Blackout / freeze identity",
+            "BusinessTimeThresholdV1.blackout_calendar_ref",
             "Version authority",
         ):
             self.assertIn(needle, p17, needle)
+        # Root dual-representation must not remain in the coverage matrix row.
+        matrix = p17[
+            p17.find("common-envelope persistence coverage matrix") : p17.find(
+                "This matrix exists to prevent persistence-versus-evaluation divergence."
+            )
+        ]
+        self.assertNotIn("`business_calendar_ref`; `BusinessTimeThresholdV1", matrix)
         # 13. single canonical validation route remains unchanged
         self.assertIn(
             "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
@@ -3191,11 +3220,154 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         self.assertIn("recursive schema and semantic validation", p17)
         self.assertIn("unknown fields in schema V1 MUST fail validation", p17)
+        self.assertIn(
+            "root `business_calendar_ref` is not a valid V1 field",
+            p17,
+        )
+        self.assertIn(
+            "`DEPENDENCY` requires `dependency_ref`, `activation`",
+            p17,
+        )
         # Documentation proof only — not a runtime implementation claim
         self.assertIn(
             "this schema owns the persisted shape only",
             p17,
         )
+
+    def test_93d_dependency_action_and_business_time_single_path(self) -> None:
+        """Docs prove dependency action persistence + single business-time path."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p22 = (
+            docs
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        ).read_text(encoding="utf-8")
+
+        # --- DependencyThresholdV1 action + activation persistence ---
+        dep17 = p17[
+            p17.find("**DEPENDENCY — `DependencyThresholdV1`**") : p17.find(
+                "**BUSINESS_TIME — `BusinessTimeThresholdV1`**"
+            )
+        ]
+        for needle in (
+            "activation: DependencyActivationV1",
+            "action: SUPPRESS | DEFER | ANNOTATE",
+            "immutable within a policy version",
+            "no dependency action",
+            "Dependency disappearance/revocation removes the dependency effect reversibly",
+        ):
+            self.assertIn(needle, dep17, needle)
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for needle in (
+            "semantic_states: SemanticStateV1[]",
+            "maintenance_active: boolean",
+            "At least one activation criterion MUST be present",
+        ):
+            self.assertIn(needle, act, needle)
+        self.assertIn("SemanticStateV1", p17)
+        self.assertIn(
+            "MUST NOT invent a second state model",
+            p17,
+        )
+
+        # Platform_22 owns exact SUPPRESS / DEFER / ANNOTATE semantics
+        body_dep = p22[p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")]
+        for needle in (
+            "##### SUPPRESS",
+            "child expression is still evaluated and evidence retained",
+            "MUST NOT rewrite child semantic state to `UP`",
+            "MUST NOT clear an already-active alert solely because the dependency became active",
+            "suppression is removed and current child evidence is immediately re-evaluated",
+            "no historical child evidence is deleted",
+            "##### DEFER",
+            "does not emit a new firing transition yet",
+            "evidence is retained as dependency-deferred",
+            "no false healthy state is emitted",
+            "no delayed alert is emitted",
+            "re-evaluate CURRENT qualified child evidence",
+            "do not backdate a new alert to the original deferred time",
+            "An already-active alert is not silently cleared by `DEFER`",
+            "##### ANNOTATE",
+            "does not alter child fire/clear evaluation",
+            "cannot independently suppress or clear the child alert",
+            "No Data / stale graph evidence cannot activate `SUPPRESS`/`DEFER`",
+            "current `as_of` graph authority",
+        ):
+            self.assertIn(needle, body_dep, needle)
+
+        # --- Business-time single representation + blackout identity ---
+        root_block = p17[
+            p17.find("AlertPolicyDefinitionV1 {") : p17.find(
+                "###### `SubjectSelectorV1`"
+            )
+        ]
+        self.assertNotIn("business_calendar_ref:", root_block)
+        self.assertIn(
+            "forbids `business_calendar_ref` on `AlertPolicyDefinitionV1`",
+            root_block,
+        )
+        bt17 = p17[
+            p17.find("**BUSINESS_TIME — `BusinessTimeThresholdV1`**") : p17.find(
+                "###### `ThresholdExprV1` ↔ `Platform_22` §6.1.1 common-envelope persistence coverage matrix"
+            )
+        ]
+        for needle in (
+            "calendar_ref: CalendarRefV1",
+            "blackout_calendar_ref: CalendarRefV1 | null",
+            "exactly one** business-time representation",
+            "HOLD_STATE",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "Missing/invalid configured `blackout_calendar_ref` ⇒ `UNKNOWN`",
+            "not silently “no blackout”",
+            "never fall back to always-on evaluation",
+        ):
+            self.assertIn(needle, bt17, needle)
+        body_bt = p22[p22.find("#### 6.1.10 Business-time threshold") : p22.find("#### 6.1.11")]
+        for needle in (
+            "exactly one** representation",
+            "Root `AlertPolicyDefinitionV1.business_calendar_ref` is forbidden",
+            "blackout_calendar_ref",
+            "HOLD_STATE",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "do not clear an already-active alert solely because blackout started",
+            "BLACKOUT_HOLD",
+            "do not backdate a new firing transition",
+            "not silently “no blackout”",
+            "Do not fall back to always-on evaluation",
+        ):
+            self.assertIn(needle, body_bt, needle)
+
+        # Coverage matrix mapping + recursive validator proofs
+        matrix = p17[
+            p17.find("common-envelope persistence coverage matrix") : p17.find(
+                "This matrix exists to prevent persistence-versus-evaluation divergence."
+            )
+        ]
+        self.assertIn(
+            "DependencyThresholdV1.action` + `DependencyThresholdV1.activation",
+            matrix,
+        )
+        self.assertIn(
+            "BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY",
+            matrix,
+        )
+        self.assertIn("BusinessTimeThresholdV1.blackout_calendar_ref", matrix)
+        self.assertNotIn("`business_calendar_ref`; `BusinessTimeThresholdV1", matrix)
+        for needle in (
+            "root `business_calendar_ref` is not a valid V1 field",
+            "no alternate calendar representation may exist elsewhere on `AlertPolicyDefinitionV1` outside `BusinessTimeThresholdV1`",
+            "`BUSINESS_TIME` requires `calendar_ref`",
+            "when `blackout_calendar_ref` is present it MUST resolve same-tenant",
+            "`DEPENDENCY` requires `dependency_ref`, `activation`",
+            "action ∈ {SUPPRESS, DEFER, ANNOTATE}",
+        ):
+            self.assertIn(needle, p17, needle)
 
     def test_94_async_state_mapping_g05_cc_async(self) -> None:
         """G-05 / CC-ASYNC freeze admission vs persisted async lifecycle."""

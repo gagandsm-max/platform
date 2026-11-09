@@ -1197,11 +1197,12 @@ AlertPolicyDefinitionV1 {
   recovery_condition: ThresholdExprV1 | null     # nullable clear/recovery expression
   severity_mapping: SeverityMappingV1            # maps evaluation outcomes → severity
   evaluation_cadence: EvaluationCadenceV1        # tick/schedule parameters
-  business_calendar_ref: CalendarRefV1 | null    # nullable; binds §6.1.10 when present
   evidence_contract_ref: string                  # required; versioned evidence-contract identity
   metadata: object                               # bounded, non-authoritative labels/notes only
 }
 ```
+
+Business-time gating MUST NOT be represented by a root calendar field. Schema V1 forbids `business_calendar_ref` on `AlertPolicyDefinitionV1`; all business-time / blackout gating uses an explicit `BUSINESS_TIME` `ThresholdExprV1` node (`BusinessTimeThresholdV1`).
 
 ###### `SubjectSelectorV1`
 
@@ -1251,7 +1252,7 @@ Rules:
 - `ON_EVIDENCE` requires `interval_seconds = null`.
 - `max_staleness_seconds > 0`.
 - Exact capacity/estate scheduling ceilings remain owned by `Platform_11` / BUILD-130 — do not invent a commercial/performance number here.
-- Cadence is not a wall-clock business calendar; business-time policy uses `CalendarRefV1`.
+- Cadence is not a wall-clock business calendar. All business-time gating in schema V1 MUST use an explicit `BUSINESS_TIME` `ThresholdExprV1` node (`BusinessTimeThresholdV1`). Root-level calendar fields are forbidden.
 
 ###### `CalendarRefV1`
 
@@ -1310,6 +1311,16 @@ Rules:
 - `PolicyVersionRefV1` addresses an immutable same-tenant alert-policy version (`version_no >= 1`).
 - Baseline promotion/update MUST create a new baseline version; it MUST NOT silently mutate an existing policy version or an already-referenced baseline version.
 
+###### `SemanticStateV1`
+
+```text
+SemanticStateV1 =
+  UP | DOWN | DEGRADED | UNKNOWN | NO_DATA | STALE |
+  MONITORING_DEGRADED | REDUNDANCY_LOST | SLA_DEGRADED | EXPECTED_STATE
+```
+
+`SemanticStateV1` reuses the existing canonical Platform semantic-state vocabulary already persisted on `alert_current.semantic_state` / governed by `Platform_22` §5. It MUST NOT invent a second state model.
+
 ###### `DependencyRefV1`
 
 ```text
@@ -1323,8 +1334,24 @@ DependencyRefV1 {
 Rules:
 
 - `relationship_id` is the canonical temporal-operational-graph / topology relationship identity for the policy tenant. Writers MUST NOT invent alternate free-form lookup keys, SQL selectors or opaque strings.
+- Qualified dependency evidence MUST satisfy all of: canonical relationship identity; confidence ≥ `min_confidence`; freshness within `max_age_seconds`; and current `as_of` graph authority.
 - Resolution uses Platform topology/dependency authority at the evaluation `as_of` instant.
-- `max_age_seconds > 0`. Stale, low-confidence or otherwise unqualified dependency evidence remains `UNKNOWN` / suppression-withheld per `Platform_22` §6.1.9 — never proof of child failure.
+- `max_age_seconds > 0`. Stale, low-confidence, No Data, or otherwise unqualified dependency evidence remains `UNKNOWN` / no dependency action per `Platform_22` §6.1.9 — never proof of child technical health/failure and never activation of `SUPPRESS`/`DEFER`.
+
+###### `DependencyActivationV1`
+
+```text
+DependencyActivationV1 {
+  semantic_states: SemanticStateV1[]
+  maintenance_active: boolean
+}
+```
+
+Rules:
+
+- At least one activation criterion MUST be present: either `semantic_states` is non-empty, or `maintenance_active = true` (or both). An empty `semantic_states` array with `maintenance_active = false` is invalid.
+- `semantic_states` values MUST be members of `SemanticStateV1` (canonical vocabulary only).
+- Activation is TRUE only when qualified dependency evidence is present AND the declared criterion matches the current dependency semantic/maintenance evidence.
 
 ###### `ThresholdExprV1` (discriminated union)
 
@@ -1520,11 +1547,20 @@ DependencyThresholdV1 {
   expr_id: string
   kind: DEPENDENCY
   dependency_ref: DependencyRefV1
+  activation: DependencyActivationV1
+  action: SUPPRESS | DEFER | ANNOTATE
   child: ThresholdExprV1
 }
 ```
 
-`dependency_ref` is the typed canonical versioned/topology authority reference above. Stale/unqualified dependency evidence ⇒ UNKNOWN / suppression-withheld per `Platform_22` §6.1.9; stale topology is never treated as proof.
+Rules (persists the dependency action required by `Platform_22` §6.1.9):
+
+- `dependency_ref` is the typed canonical versioned/topology authority reference above.
+- `activation` is required and MUST satisfy `DependencyActivationV1` (at least one activation criterion).
+- `action` is required and immutable within a policy version; changing `action` or `activation` requires a new policy version.
+- Exact SUPPRESS / DEFER / ANNOTATE evaluation semantics are owned by `Platform_22` §6.1.9 and MUST NOT be reimplemented as writer-invented defaults.
+- Stale/unqualified/No-Data dependency evidence ⇒ `UNKNOWN` / no dependency action; stale topology is never treated as proof of child health/failure and cannot activate `SUPPRESS`/`DEFER`.
+- Dependency disappearance/revocation removes the dependency effect reversibly; historical child evidence is never deleted by dependency action alone.
 
 **BUSINESS_TIME — `BusinessTimeThresholdV1`**
 
@@ -1532,19 +1568,30 @@ DependencyThresholdV1 {
 BusinessTimeThresholdV1 {
   expr_id: string
   kind: BUSINESS_TIME
+
   calendar_ref: CalendarRefV1
+  blackout_calendar_ref: CalendarRefV1 | null
+
   applicability: IN_WINDOW | OUTSIDE_WINDOW
+
   gap_behavior: OUTSIDE_WINDOW
   fold_behavior: EARLIER_OFFSET | LATER_OFFSET
+
   child: ThresholdExprV1
 }
 ```
 
-Rules (persists configurable DST choices required by `Platform_22` §6.1.10):
+Rules (single business-time representation + configurable DST choices required by `Platform_22` §6.1.10):
 
+- Schema V1 has **exactly one** business-time representation: an explicit `BUSINESS_TIME` node. Root `AlertPolicyDefinitionV1.business_calendar_ref` is **not** a valid V1 field and MUST fail validation (`unknown fields in schema V1 MUST fail validation`).
+- `calendar_ref` is required: exact immutable same-tenant calendar ID + `version_no`; IANA timezone is owned by that calendar version.
+- `blackout_calendar_ref` is nullable. When present it MUST resolve to an exact immutable same-tenant calendar ID + `version_no` and is the optional freeze/blackout policy identity required by `Platform_22` §6.1.10.
+- V1 blackout behavior is **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1**: `HOLD_STATE` (do not newly fire; do not clear an already-active alert solely because blackout started; preserve prior alert state; retain auditable `BLACKOUT_HOLD`; re-evaluate current qualified child evidence after blackout ends without backdating).
 - `gap_behavior` has the only valid V1 value `OUTSIDE_WINDOW` (required; stored explicitly).
 - `fold_behavior` is required and MUST be persisted as `EARLIER_OFFSET` or `LATER_OFFSET` on the immutable version. Evaluation of an immutable policy MUST NEVER depend on an unwritten implementation default.
-- Calendar unavailable/invalid ⇒ UNKNOWN. IANA timezone identity remains on the bound calendar; free-form offset-without-zone fields are forbidden.
+- Missing/invalid primary `calendar_ref` ⇒ `UNKNOWN` (never fall back to always-on evaluation).
+- Missing/invalid configured `blackout_calendar_ref` ⇒ `UNKNOWN`, not silently “no blackout”.
+- Free-form offset-without-zone fields are forbidden.
 
 ###### `ThresholdExprV1` ↔ `Platform_22` §6.1.1 common-envelope persistence coverage matrix
 
@@ -1558,7 +1605,9 @@ Rules (persists configurable DST choices required by `Platform_22` §6.1.10):
 | Threshold parameters | `ComparisonV1` / family-specific fields (`fire`/`clear`, counts, deviations, calendars, children, group aggregation) | See variants above |
 | Clear / reset / hysteresis | `StaticThresholdV1.clear`; `DurationThresholdV1.unknown_behavior` + `unknown_grace_seconds`; `ConsecutiveThresholdV1.unknown_behavior`; optional root `recovery_condition` | No hidden numeric hysteresis default |
 | Missing / stale behavior | `MissingThresholdV1.*`; `BaselineThresholdV1.stale_behavior` + `fallback_policy_ref`; RATE/STATIC UNKNOWN on unqualified input | Device Down coercion **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** |
-| Business-time applicability | `business_calendar_ref`; `BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` | Gap/fold choices stored explicitly |
+| Dependency behavior | `DependencyThresholdV1.action` + `DependencyThresholdV1.activation` (+ `dependency_ref`) | `SUPPRESS`/`DEFER`/`ANNOTATE` immutable per policy version; stale/UNKNOWN ⇒ no action |
+| Business-time applicability | `BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY | No root `business_calendar_ref`; gap/fold stored explicitly |
+| Blackout / freeze identity | `BusinessTimeThresholdV1.blackout_calendar_ref` | Optional exact same-tenant calendar version; V1 behavior `HOLD_STATE` **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** |
 | Version authority | enclosing `alert_policy_version (policy_id, version_no)`; `BaselineRefV1`; `PolicyVersionRefV1`; `CalendarRefV1`; `DependencyRefV1.relationship_id` | Immutable references only |
 | Tri-state result `TRUE\|FALSE\|UNKNOWN` | **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** | No UNKNOWN-coercion knob on COMPOSITE |
 | Deterministic evaluation / no silent self-learning | **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** | Baseline/policy versions immutable once published |
@@ -1580,6 +1629,9 @@ The same server-side validator used by **OP-POLICY-CREATE**, **OP-POLICY-VERSION
 - same-tenant reference checks for calendars, baselines, fallback policies, dependency relationships, subject scope and metric/monitor refs;
 - unit compatibility (`ComparisonV1.unit`, STATIC fire/clear, ABSOLUTE baseline `deviation_unit`);
 - calendar/version existence and immutable reference validity (`CalendarRefV1`, `BaselineRefV1`, `PolicyVersionRefV1`, `DependencyRefV1`);
+- **root `business_calendar_ref` is not a valid V1 field** and MUST fail as an unknown/forbidden field; no alternate calendar representation may exist elsewhere on `AlertPolicyDefinitionV1` outside `BusinessTimeThresholdV1`;
+- `BUSINESS_TIME` requires `calendar_ref`, required `gap_behavior`/`fold_behavior`, and nullable `blackout_calendar_ref`; when `blackout_calendar_ref` is present it MUST resolve same-tenant to an exact immutable calendar version; unknown/missing calendar references fail validation (`UNKNOWN` at evaluation — never silent always-on / silent “no blackout”);
+- `DEPENDENCY` requires `dependency_ref`, `activation` (`DependencyActivationV1` with ≥1 activation criterion) and immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}`;
 - unknown fields in schema V1 MUST fail validation unless a documented compatibility policy explicitly allows additive fields — never silently ignore an unknown policy field that could change intended behavior;
 - typed field/path errors; **never** silently normalize or rewrite an invalid definition.
 

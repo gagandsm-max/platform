@@ -295,20 +295,73 @@ A composite threshold combines child conditions with deterministic Boolean opera
 
 #### 6.1.9 Dependency threshold
 
-A dependency threshold binds evaluation to qualified dependency/topology authority (canonical entity graph relationship with provenance/confidence/freshness).
+A dependency threshold binds evaluation to qualified dependency/topology authority (canonical entity graph relationship with provenance/confidence/freshness). Persisted representation is `Platform_17` `DependencyThresholdV1` with required `dependency_ref`, `activation` (`DependencyActivationV1`) and immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}`.
 
-- Suppression or dependency-conditioned fire/clear rules MUST be reversible when the dependency evidence clears or is revoked.
-- A dependency assertion (parent down, path loss, maintenance on upstream) does **not** automatically prove child failure. It may suppress, defer, or annotate child alerting per policy; child technical evidence remains independently qualified.
-- Stale/low-confidence topology MUST NOT be treated as authoritative dependency proof; result is `UNKNOWN` or suppression withheld per policy.
+**Qualified dependency evidence** MUST satisfy all of:
+
+- canonical relationship identity;
+- confidence threshold (`DependencyRefV1.min_confidence`);
+- max-age / freshness (`DependencyRefV1.max_age_seconds`);
+- current `as_of` graph authority.
+
+Stale, No Data, low-confidence or otherwise unqualified dependency evidence remains `UNKNOWN` / **no dependency action**. Dependency evidence never proves child technical health/failure by itself. Child technical evidence remains independently qualified.
+
+**Activation** (`DependencyActivationV1`) freezes when the dependency action applies: `semantic_states: SemanticStateV1[]` and/or `maintenance_active: boolean`. `SemanticStateV1` MUST reuse the existing canonical Platform semantic-state vocabulary (`Platform_22` §5 / `alert_current.semantic_state`); do not create another state model. At least one activation criterion MUST be present. The dependency `action` is immutable within a policy version; action/activation changes require a new policy version. Dependency disappearance/revocation removes the effect reversibly.
+
+##### SUPPRESS
+
+When activation is TRUE:
+
+- the child expression is still evaluated and evidence retained;
+- dependency suppression overlays the child alert;
+- suppression MUST NOT rewrite child semantic state to `UP`;
+- suppression MUST NOT clear an already-active alert solely because the dependency became active;
+- notifications/incident effects follow the separately governed suppression contract (`REQ-ALT-009` / §4.1);
+- when dependency activation clears, suppression is removed and current child evidence is immediately re-evaluated;
+- no historical child evidence is deleted.
+
+If the child clears independently, normal clear behavior still applies.
+
+##### DEFER
+
+When dependency activation is TRUE:
+
+- a newly TRUE child condition does not emit a new firing transition yet;
+- evidence is retained as dependency-deferred;
+- no false healthy state is emitted;
+- if the child becomes FALSE while deferred, no delayed alert is emitted;
+- when dependency activation clears, re-evaluate CURRENT qualified child evidence;
+- fire only if the child is still TRUE;
+- do not backdate a new alert to the original deferred time.
+
+An already-active alert is not silently cleared by `DEFER`.
+
+##### ANNOTATE
+
+Dependency activation:
+
+- does not alter child fire/clear evaluation;
+- attaches dependency relationship/provenance/confidence evidence;
+- may influence RCA/correlation downstream;
+- cannot independently suppress or clear the child alert.
+
+##### Common dependency rules
+
+- No Data / stale graph evidence cannot activate `SUPPRESS`/`DEFER`.
+- Suppression or dependency-conditioned fire/clear overlays MUST be reversible when the dependency evidence clears or is revoked.
+- A dependency assertion (parent down, path loss, maintenance on upstream) does **not** automatically prove child failure.
 
 #### 6.1.10 Business-time threshold
 
-A business-time threshold restricts when another threshold family is eligible to fire/clear.
+A business-time threshold restricts when another threshold family is eligible to fire/clear. Schema V1 has **exactly one** representation: an explicit `Platform_17` `BusinessTimeThresholdV1` (`ThresholdExprV1.kind=BUSINESS_TIME`). Root `AlertPolicyDefinitionV1.business_calendar_ref` is forbidden; there is no second calendar path.
 
-- **Timezone:** IANA timezone identifiers only (e.g. `Asia/Kolkata`); offsets-without-zone are rejected.
-- **Calendar / freeze policy:** evaluation binds a versioned business calendar and optional freeze/blackout policy identity.
+- **Timezone:** IANA timezone identifiers only (e.g. `Asia/Kolkata`); offsets-without-zone are rejected. The IANA zone is owned by the bound primary calendar version.
+- **Primary calendar:** `calendar_ref` binds an exact immutable same-tenant calendar ID + version.
+- **Optional blackout / freeze calendar:** `blackout_calendar_ref` binds optional freeze/blackout policy identity as an exact immutable same-tenant calendar ID + version when present.
+- **Blackout behavior (V1):** **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1**: `HOLD_STATE`. When the current instant is inside the blackout calendar: do not newly fire the wrapped child; do not clear an already-active alert solely because blackout started; preserve prior alert state; retain an auditable `BLACKOUT_HOLD` evaluation result/overlay; child evidence may continue to be collected/evaluated for visibility; after blackout ends, re-evaluate current qualified child evidence; do not backdate a new firing transition.
 - **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit persisted policy rule on `Platform_17` `BusinessTimeThresholdV1` (`gap_behavior=OUTSIDE_WINDOW`; `fold_behavior=EARLIER_OFFSET|LATER_OFFSET`) and MUST be fixture-tested. Immutable evaluation MUST NOT depend on an unwritten implementation default.
-- **Missing / invalid calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden unless an explicit alternate calendar version is bound in policy.
+- **Missing / invalid primary calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden.
+- **Missing / invalid configured blackout calendar:** evaluation result is `UNKNOWN`, not silently “no blackout”. Do not fall back to always-on evaluation.
 
 #### 6.1.11 GROUP / cross-entity threshold (`ThresholdExprV1.kind=GROUP`)
 
