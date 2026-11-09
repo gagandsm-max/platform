@@ -9,5 +9,19 @@ public record AgentTelemetryAckResponse(
         @JsonProperty("sensorId") String sensorId,
         @JsonProperty("batchId") String batchId,
         @JsonProperty("acceptedThroughIngressSequence") Long acceptedThroughIngressSequence,
-        @JsonProperty("correlationId") String correlationId
-) {}
+        @JsonProperty("acceptedLastIngressSequence") Long acceptedLastIngressSequence,
+        @JsonProperty("correlationId") String correlationId,
+        @JsonProperty("firstIngressSequence") Long firstIngressSequence,
+        @JsonProperty("lastIngressSequence") Long lastIngressSequence,
+        @JsonProperty("checksum") String checksum,
+        @JsonProperty("settledThroughIngressSequence") Long settledThroughIngressSequence,
+        @JsonProperty("dispositionId") java.util.UUID dispositionId,
+        @JsonProperty("reasonCode") String reasonCode
+) {
+    public AgentTelemetryAckResponse(String status, String sensorId, String batchId,
+            Long acceptedThroughIngressSequence, String correlationId) {
+        this(status, sensorId, batchId, acceptedThroughIngressSequence,
+                acceptedThroughIngressSequence, correlationId,
+                null, null, null, null, null, null);
+    }
+}

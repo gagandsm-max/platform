@@ -12,6 +12,7 @@ import com.platform.core.ingestion.IngestionException;
 import com.platform.core.ingestion.IngestionMetrics;
 import com.platform.core.ingestion.KafkaTelemetryProducer;
 import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
+import com.platform.core.ingestion.agentingress.dto.AgentTelemetryAckResponse;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.authority.SensorAuthorityResolver;
@@ -238,14 +239,30 @@ class AgentIngestionValidatorTest {
         AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);
         byte[] rawBody = objectMapper.writeValueAsBytes(batch);
 
-        // Real extraction must throw before reservation, publication, finalization or an ACCEPTED ACK.
-        IngestionException ex = assertThrows(IngestionException.class, () ->
-                service.ingestAgentTelemetry(rawBody, batch, batch.batchId(), cert));
-        assertEquals(code, ex.getCode());
-        assertEquals(status, ex.getStatus());
+        when(watermarks.reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
+        if ("ERR_AGENT_IDENTITY_CONFLICT".equals(code)) {
+            UUID dispositionId = UUID.randomUUID();
+            when(watermarks.terminallyRejectIdentityConflict(any(), anyString(), anyString(), anyLong(),
+                    anyString(), anyString(), anyString(), any(), any(), any()))
+                    .thenReturn(ReplayReservation.terminallyRejected(0, 1,
+                            dispositionId, code));
+            AgentTelemetryAckResponse result = service.ingestAgentTelemetry(
+                    rawBody, batch, batch.batchId(), cert);
+            assertEquals("TERMINALLY_REJECTED", result.status());
+            assertEquals(dispositionId, result.dispositionId());
+        } else {
+            IngestionException ex = assertThrows(IngestionException.class, () ->
+                    service.ingestAgentTelemetry(rawBody, batch, batch.batchId(), cert));
+            assertEquals(code, ex.getCode());
+            assertEquals(status, ex.getStatus());
+        }
+
         verify(authority).resolve(cert);
         verify(agentRepo, atLeastOnce()).findAssignmentByGeneration(tenantId, "agent-1", 1);
-        verifyNoInteractions(watermarks, kafka);
+        verify(watermarks).reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString());
+        verifyNoInteractions(kafka);
     }
 
     @Test
@@ -335,8 +352,8 @@ class AgentIngestionValidatorTest {
         AgentIngressWatermarkStore watermarks = mock(AgentIngressWatermarkStore.class);
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         UUID owner = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
-        when(watermarks.reserveBatch(any(), anyString(), anyString(), anyLong(), anyLong(),
-                anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
+        when(watermarks.reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
         when(watermarks.claimPublisherLease(any(), anyString(), anyString(), anyLong(), anyLong(),
                 anyString(), anyString(), anyString())).thenReturn(PublisherClaimResult.claimed(owner, 1L));
         AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);

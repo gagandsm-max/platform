@@ -26,6 +26,18 @@ type fakeTransport struct {
 	last coreclient.AgentTelemetryBatch
 }
 
+func typedIdentityConflictDisposition(batch coreclient.AgentTelemetryBatch) coreclient.AgentTelemetryAck {
+	return coreclient.AgentTelemetryAck{
+		Status: "TERMINALLY_REJECTED", SensorID: batch.SensorID, BatchID: batch.BatchID,
+		CorrelationID: batch.CorrelationID, FirstIngressSequence: batch.FirstIngressSequence,
+		LastIngressSequence: batch.LastIngressSequence, Checksum: batch.Checksum,
+		AcceptedThroughIngressSequence: batch.FirstIngressSequence - 1,
+		SettledThroughIngressSequence:  batch.LastIngressSequence,
+		DispositionID:                  "018f0e0a-0000-7000-8000-00000000beef",
+		ReasonCode:                     identityConflictCode,
+	}
+}
+
 func (f *fakeTransport) UploadAgentTelemetry(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
 	f.last = batch
 	return f.ack, f.err
@@ -158,9 +170,9 @@ type transientErr struct{}
 func (transientErr) Error() string   { return "temporary core outage" }
 func (transientErr) Transient() bool { return true }
 
-func TestDrainParksMalformedPayload(t *testing.T) {
+func TestDrainRetainsMalformedCoreErrorAsContinuityBlocker(t *testing.T) {
 	s, dir := openSpool(t)
-	rec := appendDurable(t, s, 1)
+	appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
 		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
 	}}
@@ -178,25 +190,27 @@ func TestDrainParksMalformedPayload(t *testing.T) {
 		t.Fatal("expected poison error")
 	}
 	st, _ := s.Stats()
-	if st.RecordCount != 0 {
-		t.Fatalf("poisoned record must leave hot spool, got %d", st.RecordCount)
+	if st.RecordCount != 1 || st.AckedThrough != 0 {
+		t.Fatalf("unsettled record must remain active, stats=%+v", st)
 	}
-	if d.Metrics().PoisonCount.Load() != 1 {
+	if d.Metrics().PoisonCount.Load() != 0 {
 		t.Fatalf("poison count=%d", d.Metrics().PoisonCount.Load())
 	}
 	entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
-	if len(entries) == 0 {
-		t.Fatal("expected poison file")
+	if len(entries) != 0 {
+		t.Fatal("generic Core error must not create terminal quarantine")
 	}
-	_ = rec
+	if snapshot := d.Snapshot(); !snapshot.Blocked || snapshot.ReasonCode != "ERR_MALFORMED_RECORD" {
+		t.Fatalf("continuity blocker not visible: %+v", snapshot)
+	}
 }
 
 func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
-	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
-	}}
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return typedIdentityConflictDisposition(batch), nil
+	})
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
@@ -314,9 +328,9 @@ func TestPoisonParkingDirectorySyncFailurePreventsAckAndAllowsRetry(t *testing.T
 func TestPoisonParkingDirectorySyncSuccessPermitsSourceAck(t *testing.T) {
 	s, dir := openSpool(t)
 	_ = appendDurable(t, s, 1)
-	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400,
-	}}
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return typedIdentityConflictDisposition(batch), nil
+	})
 	syncCalled := false
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
@@ -378,7 +392,7 @@ func TestShutdownIdempotent(t *testing.T) {
 	}
 }
 
-func TestDrainParksRecordTooLarge(t *testing.T) {
+func TestDrainRetainsGenericRecordTooLargeAsContinuityBlocker(t *testing.T) {
 	s, dir := openSpool(t)
 	_ = appendDurable(t, s, 1)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
@@ -398,15 +412,18 @@ func TestDrainParksRecordTooLarge(t *testing.T) {
 		t.Fatal("expected poison error")
 	}
 	st, _ := s.Stats()
-	if st.RecordCount != 0 {
-		t.Fatalf("oversized Core rejection must leave hot spool, got %d", st.RecordCount)
+	if st.RecordCount != 1 || st.AckedThrough != 0 {
+		t.Fatalf("generic size rejection must retain unsettled sequence, stats=%+v", st)
 	}
-	if d.Metrics().PoisonCount.Load() != 1 {
+	if d.Metrics().PoisonCount.Load() != 0 {
 		t.Fatalf("poison count=%d", d.Metrics().PoisonCount.Load())
 	}
 	entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
-	if len(entries) == 0 {
-		t.Fatal("expected poison file for ERR_RECORD_TOO_LARGE")
+	if len(entries) != 0 {
+		t.Fatal("generic ERR_RECORD_TOO_LARGE must not create terminal quarantine")
+	}
+	if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != "ERR_RECORD_TOO_LARGE" {
+		t.Fatalf("size rejection must remain a visible continuity blocker: %+v", snap)
 	}
 }
 
@@ -496,12 +513,11 @@ func TestDrainTypedCompatibilityRejectionDoesNotInventCoreAck(t *testing.T) {
 		name     string
 		code     string
 		payloads []string
-		poison   bool
 	}{
-		{"typed_without_host", "ERR_AGENT_HOST_ID_REQUIRED", []string{`{"evidenceType":"ProcessNetworkEvidence","bytesTx":1024}`}, true},
-		{"typed_with_host", "ERR_NON_NUMERIC_RECORD", []string{typed}, false},
-		{"scalar_then_typed", "ERR_NON_NUMERIC_RECORD", []string{scalar, typed}, false},
-		{"typed_then_scalar", "ERR_NON_NUMERIC_RECORD", []string{typed, scalar}, false},
+		{"typed_without_host", "ERR_AGENT_HOST_ID_REQUIRED", []string{`{"evidenceType":"ProcessNetworkEvidence","bytesTx":1024}`}},
+		{"typed_with_host", "ERR_NON_NUMERIC_RECORD", []string{typed}},
+		{"scalar_then_typed", "ERR_NON_NUMERIC_RECORD", []string{scalar, typed}},
+		{"typed_then_scalar", "ERR_NON_NUMERIC_RECORD", []string{typed, scalar}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -550,43 +566,30 @@ func TestDrainTypedCompatibilityRejectionDoesNotInventCoreAck(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if tc.poison {
-				if drainErr.Code != CodePoison || st.RecordCount != 0 || len(entries) != 1 || d.Metrics().PoisonCount.Load() != 1 {
-					t.Fatalf("host-id failure must park the head, stats=%+v entries=%v err=%v", st, entries, drainErr)
+			if drainErr.Code != CodeTransport || st.RecordCount != len(source) || st.AckedThrough != 0 ||
+				len(entries) != 0 || d.Metrics().PoisonCount.Load() != 0 {
+				t.Fatalf("generic rejection must retain hot spool without poison, stats=%+v entries=%v", st, entries)
+			}
+			frozen := tr.last
+			// A later scalar record cannot bypass the rejected frozen outbound window.
+			appendCompatibilityPayload(t, s, scalar)
+			ok, err = d.RunOnce(context.Background())
+			if ok || !coreclient.IsCoreAPICode(err, tc.code) || tr.last.BatchID != frozen.BatchID ||
+				tr.last.Checksum != frozen.Checksum || tr.last.LastIngressSequence != frozen.LastIngressSequence {
+				t.Fatalf("retry must retain identical rejected batch, ok=%v err=%v", ok, err)
+			}
+			retained, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
+			if err != nil || len(retained.Records) != len(source) {
+				t.Fatalf("frozen records not retained: %+v err=%v", retained, err)
+			}
+			for i, rec := range retained.Records {
+				if rec.Sequence != source[i].Sequence || string(rec.Payload) != string(source[i].Payload) {
+					t.Fatal("retained payload/sequence changed")
 				}
-				artifact, err := os.ReadFile(filepath.Join(dir, poisonDirName, entries[0].Name()))
-				if err != nil {
-					t.Fatal(err)
-				}
-				parts := strings.SplitN(string(artifact), "\n", 2)
-				if len(parts) != 2 || !strings.Contains(parts[0], tc.code) || parts[1] != string(source[0].Payload) {
-					t.Fatalf("poison artifact must preserve reason and exact source payload: %s", artifact)
-				}
-			} else {
-				if drainErr.Code != CodeTransport || st.RecordCount != len(source) || len(entries) != 0 || d.Metrics().PoisonCount.Load() != 0 {
-					t.Fatalf("non-numeric rejection must retain hot spool without poison, stats=%+v entries=%v", st, entries)
-				}
-				frozen := tr.last
-				// A later scalar record cannot bypass the rejected frozen outbound window.
-				appendCompatibilityPayload(t, s, scalar)
-				ok, err = d.RunOnce(context.Background())
-				if ok || !coreclient.IsCoreAPICode(err, tc.code) || tr.last.BatchID != frozen.BatchID ||
-					tr.last.Checksum != frozen.Checksum || tr.last.LastIngressSequence != frozen.LastIngressSequence {
-					t.Fatalf("retry must retain identical rejected batch, ok=%v err=%v", ok, err)
-				}
-				retained, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
-				if err != nil || len(retained.Records) != len(source) {
-					t.Fatalf("frozen records not retained: %+v err=%v", retained, err)
-				}
-				for i, rec := range retained.Records {
-					if rec.Sequence != source[i].Sequence || string(rec.Payload) != string(source[i].Payload) {
-						t.Fatal("retained payload/sequence changed")
-					}
-				}
-				st, err = s.Stats()
-				if err != nil || st.RecordCount != len(source)+1 || d.Metrics().FailuresPermanent.Load() != 2 {
-					t.Fatalf("scalar backlog must remain visible after repeated rejection: %+v err=%v", st, err)
-				}
+			}
+			st, err = s.Stats()
+			if err != nil || st.RecordCount != len(source)+1 || d.Metrics().FailuresPermanent.Load() != 2 {
+				t.Fatalf("scalar backlog must remain visible after repeated rejection: %+v err=%v", st, err)
 			}
 			if d.Metrics().Successes.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().LastSuccessUnix.Load() != 0 {
 				t.Fatal("unsupported typed rejection must never report successful Core ingestion")
@@ -861,8 +864,8 @@ func TestDrainFrozenWindowSurvivesGrowthRestartAndExactIdentity(t *testing.T) {
 	}
 }
 
-func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
-	// Poison attribution requires a singleton outbound window, even with backlog.
+func TestDrainGenericPoisonRetainsFrozenHeadBeforeTail(t *testing.T) {
+	// A singleton generic rejection is still not a Core durable disposition.
 	s, dir := openSpool(t)
 	appendNDurable(t, s, 3)
 	tr := &fakeTransport{err: &coreclient.CoreAPIError{
@@ -885,15 +888,18 @@ func TestDrainPoisonAbandonsWindowBeforeHeadAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.RecordCount != 2 {
-		t.Fatalf("poison head ACK must leave remaining records, got %d", st.RecordCount)
+	if st.RecordCount != 3 || st.AckedThrough != 0 {
+		t.Fatalf("unsettled head and tail must remain, stats=%+v", st)
 	}
 	next, err := s.ReadOrReserveOutboundBatch(10, 1024*1024)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if next.FirstSequence != 2 || next.LastSequence != 3 {
-		t.Fatalf("after poison abandon, new window over remaining records: %#v", next)
+	if next.FirstSequence != 1 || next.LastSequence != 1 {
+		t.Fatalf("generic rejection must keep exact frozen head: %#v", next)
+	}
+	if d.Metrics().PoisonCount.Load() != 0 {
+		t.Fatalf("generic rejection must not count quarantine: %d", d.Metrics().PoisonCount.Load())
 	}
 }
 
@@ -923,7 +929,7 @@ func (e *echoCaptureTransport) UploadAgentTelemetry(_ context.Context, batch cor
 	}, nil
 }
 
-func TestAuthorityPoisonQuarantineAdvancesPastHead(t *testing.T) {
+func TestAuthorityErrorsRetainUnsettledHeadBeforeTail(t *testing.T) {
 	codes := []string{
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED",
 		"ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID",
@@ -933,61 +939,37 @@ func TestAuthorityPoisonQuarantineAdvancesPastHead(t *testing.T) {
 	for _, code := range codes {
 		t.Run(code, func(t *testing.T) {
 			s, dir := openSpool(t)
-			_ = appendDurable(t, s, 1)
-			_ = appendDurable(t, s, 2)
-			calls := 0
-			tr := &fakeTransport{}
-			tr.err = &coreclient.CoreAPIError{Code: code, Message: "revoked temporal", HTTPStatus: 422}
+			appendNDurable(t, s, 2)
+			tr := &fakeTransport{err: &coreclient.CoreAPIError{Code: code, Message: "revoked temporal", HTTPStatus: 422}}
 			d, err := New(Config{
-				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
+				SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
 				MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
-				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
-				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
+				InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond, JitterFraction: 0,
 			}, s, tr)
 			if err != nil {
 				t.Fatal(err)
 			}
-			ok, err := d.RunOnce(context.Background())
-			if ok || err == nil {
-				t.Fatalf("expected poison path, ok=%v err=%v", ok, err)
+			d.wait = func(context.Context, time.Duration) error { return nil }
+			if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, code) {
+				t.Fatalf("authority error must block: ok=%v err=%v", ok, err)
 			}
-			st, _ := s.Stats()
-			if st.RecordCount != 1 {
-				t.Fatalf("poison must remove head only, remaining=%d", st.RecordCount)
+			frozen := tr.last
+			if ok, err := d.RunOnce(context.Background()); ok || !coreclient.IsCoreAPICode(err, code) {
+				t.Fatalf("authority retry must block: ok=%v err=%v", ok, err)
 			}
-			if d.Metrics().PoisonCount.Load() != 1 {
-				t.Fatalf("PoisonCount=%d", d.Metrics().PoisonCount.Load())
+			if tr.last.BatchID != frozen.BatchID || tr.last.Checksum != frozen.Checksum || tr.last.FirstIngressSequence != 1 {
+				t.Fatalf("unsettled head was skipped or changed: first=%+v retry=%+v", frozen, tr.last)
 			}
-			if d.Metrics().AuthorityPoisonCount.Load() != 1 {
-				t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
+			st, err := s.Stats()
+			if err != nil || st.RecordCount != 2 || st.AckedThrough != 0 {
+				t.Fatalf("authority rejection changed custody: stats=%+v err=%v", st, err)
 			}
-			entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
-			if len(entries) == 0 {
-				t.Fatal("expected poison file")
+			entries, err := os.ReadDir(filepath.Join(dir, poisonDirName))
+			if err != nil || len(entries) != 0 || d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
+				t.Fatalf("authority rejection created false terminal quarantine: entries=%v err=%v", entries, err)
 			}
-			// Subsequent valid record can drain.
-			tr.err = nil
-			tr.ack = coreclient.AgentTelemetryAck{}
-			cap := &echoCaptureTransport{onCall: func(coreclient.AgentTelemetryBatch) { calls++ }}
-			d2, err := New(Config{
-				SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
-				MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
-				RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
-				IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
-			}, s, cap)
-			if err != nil {
-				t.Fatal(err)
-			}
-			ok, err = d2.RunOnce(context.Background())
-			if !ok || err != nil {
-				t.Fatalf("next valid record must drain, ok=%v err=%v", ok, err)
-			}
-			if calls != 1 {
-				t.Fatalf("expected one upload of remaining record, calls=%d", calls)
-			}
-			st, _ = s.Stats()
-			if st.RecordCount != 0 {
-				t.Fatalf("spool must be empty after next drain, got %d", st.RecordCount)
+			if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != code {
+				t.Fatalf("continuity blocker not visible: %+v", snap)
 			}
 		})
 	}
@@ -1002,6 +984,9 @@ func TestIdentityConflictQuarantineIsolatesBatchAndSurvivesRestart(t *testing.T)
 		calls = append(calls, batch.RecordCount)
 		for _, record := range batch.Records {
 			if record.SensorIngressSequence == conflict.Sequence {
+				if batch.RecordCount == 1 {
+					return typedIdentityConflictDisposition(batch), nil
+				}
 				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409, Message: "untrusted core text"}
 			}
 		}
@@ -1047,6 +1032,7 @@ func TestIdentityConflictQuarantineIsolatesBatchAndSurvivesRestart(t *testing.T)
 	if meta["tenantId"] != "018f0e0a-0000-7000-8000-000000000001" || meta["agentId"] != "agent-1" ||
 		meta["correlationId"] != "corr-1" || meta["batchChecksum"] != "chk" ||
 		meta["payloadSHA256"] == "" || meta["cause"] != identityConflictCode ||
+		meta["coreDispositionId"] != "018f0e0a-0000-7000-8000-00000000beef" ||
 		strings.Contains(parts[0], "untrusted core text") {
 		t.Fatalf("invalid security custody metadata: %v", meta)
 	}
@@ -1083,6 +1069,9 @@ func TestIdentityConflictIsolationKeepsValidPrefixSingleton(t *testing.T) {
 		counts = append(counts, batch.RecordCount)
 		for _, rec := range batch.Records {
 			if rec.SensorIngressSequence == conflict.Sequence {
+				if batch.RecordCount == 1 {
+					return typedIdentityConflictDisposition(batch), nil
+				}
 				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409}
 			}
 		}
@@ -1138,7 +1127,9 @@ func TestIdentityConflictQuarantineSyncFailureRetainsSpool(t *testing.T) {
 	appendDurable(t, s, 1)
 	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
 		MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024},
-		s, &fakeTransport{err: &coreclient.CoreAPIError{Code: identityConflictCode, HTTPStatus: 409}})
+		s, p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+			return typedIdentityConflictDisposition(batch), nil
+		}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1216,22 +1207,25 @@ func TestMalformedPoisonDoesNotIncrementAuthorityPoisonCount(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected poison")
 	}
-	if d.Metrics().PoisonCount.Load() != 1 {
+	if d.Metrics().PoisonCount.Load() != 0 {
 		t.Fatalf("PoisonCount=%d", d.Metrics().PoisonCount.Load())
 	}
 	if d.Metrics().AuthorityPoisonCount.Load() != 0 {
 		t.Fatalf("AuthorityPoisonCount must stay 0 for malformed poison, got %d", d.Metrics().AuthorityPoisonCount.Load())
 	}
+	if st, err := s.Stats(); err != nil || st.RecordCount != 1 || st.AckedThrough != 0 {
+		t.Fatalf("generic malformed error must retain continuity: stats=%+v err=%v", st, err)
+	}
 }
 
-func newAuthorityPoisonDrain(t *testing.T, s *spool.DiskSpool, dir string, logger *slog.Logger) (*Drain, *fakeTransport) {
+func newTerminalIdentityDrain(t *testing.T, s *spool.DiskSpool, dir string, logger *slog.Logger) *Drain {
 	t.Helper()
-	tr := &fakeTransport{err: &coreclient.CoreAPIError{
-		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
-	}}
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return typedIdentityConflictDisposition(batch), nil
+	})
 	cfg := Config{
-		SensorID: "sensor-infra-01", StreamID: "stream-00112233445566778899aabbccddeeff", AgentSpoolDir: dir,
-		MaxBatchRecords: 10, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
+		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024,
 		RequestTimeout: time.Second, InitialBackoff: time.Millisecond, MaxBackoff: 2 * time.Millisecond,
 		IdleInterval: time.Millisecond, ShutdownGrace: time.Second, JitterFraction: 0,
 		Logger: logger,
@@ -1240,7 +1234,7 @@ func newAuthorityPoisonDrain(t *testing.T, s *spool.DiskSpool, dir string, logge
 	if err != nil {
 		t.Fatal(err)
 	}
-	return d, tr
+	return d
 }
 
 func assertPoisonFailureRetainsHead(t *testing.T, d *Drain, s *spool.DiskSpool, dir string, logBuf *strings.Builder, payload []byte) {
@@ -1279,12 +1273,12 @@ func assertPoisonFailureRetainsHead(t *testing.T, d *Drain, s *spool.DiskSpool, 
 	}
 }
 
-func TestAuthorityPoisonWriteFailureRetainsHead(t *testing.T) {
+func TestTerminalIdentityPoisonWriteFailureRetainsHead(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+	d := newTerminalIdentityDrain(t, s, dir, logger)
 
 	d.poisonWrite = func(*os.File, []byte) (int, error) {
 		return 0, errors.New("injected poison file write failure")
@@ -1293,9 +1287,6 @@ func TestAuthorityPoisonWriteFailureRetainsHead(t *testing.T) {
 
 	// Retry succeeds after seam removed.
 	d.poisonWrite = nil
-	tr.err = &coreclient.CoreAPIError{
-		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
-	}
 	_, err := d.RunOnce(context.Background())
 	if err == nil {
 		t.Fatal("expected poison completion error after successful park")
@@ -1304,17 +1295,17 @@ func TestAuthorityPoisonWriteFailureRetainsHead(t *testing.T) {
 	if st.RecordCount != 0 {
 		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
 	}
-	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
 		t.Fatalf("retry counts poison=%d authority=%d", d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
 	}
 }
 
-func TestAuthorityPoisonFileSyncFailureRetainsHead(t *testing.T) {
+func TestTerminalIdentityPoisonFileSyncFailureRetainsHead(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+	d := newTerminalIdentityDrain(t, s, dir, logger)
 
 	d.poisonSync = func(*os.File) error {
 		return errors.New("injected poison file fsync failure")
@@ -1322,9 +1313,6 @@ func TestAuthorityPoisonFileSyncFailureRetainsHead(t *testing.T) {
 	assertPoisonFailureRetainsHead(t, d, s, dir, &logBuf, rec.Payload)
 
 	d.poisonSync = nil
-	tr.err = &coreclient.CoreAPIError{
-		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
-	}
 	_, err := d.RunOnce(context.Background())
 	if err == nil {
 		t.Fatal("expected poison completion error after successful park")
@@ -1333,17 +1321,17 @@ func TestAuthorityPoisonFileSyncFailureRetainsHead(t *testing.T) {
 	if st.RecordCount != 0 {
 		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
 	}
-	if d.Metrics().AuthorityPoisonCount.Load() != 1 {
+	if d.Metrics().AuthorityPoisonCount.Load() != 0 {
 		t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
 	}
 }
 
-func TestAuthorityPoisonRenameFailureRetainsHead(t *testing.T) {
+func TestTerminalIdentityPoisonRenameFailureRetainsHead(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	var logBuf strings.Builder
 	logger := slog.New(slog.NewTextHandler(&logBuf, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	d, tr := newAuthorityPoisonDrain(t, s, dir, logger)
+	d := newTerminalIdentityDrain(t, s, dir, logger)
 
 	d.poisonRename = func(string, string) error {
 		return errors.New("injected poison rename failure")
@@ -1351,9 +1339,6 @@ func TestAuthorityPoisonRenameFailureRetainsHead(t *testing.T) {
 	assertPoisonFailureRetainsHead(t, d, s, dir, &logBuf, rec.Payload)
 
 	d.poisonRename = nil
-	tr.err = &coreclient.CoreAPIError{
-		Code: "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", Message: "revoked", HTTPStatus: 422,
-	}
 	_, err := d.RunOnce(context.Background())
 	if err == nil {
 		t.Fatal("expected poison completion error after successful park")
@@ -1362,24 +1347,24 @@ func TestAuthorityPoisonRenameFailureRetainsHead(t *testing.T) {
 	if st.RecordCount != 0 {
 		t.Fatalf("retry must advance past head, count=%d", st.RecordCount)
 	}
-	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
+	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
 		t.Fatalf("retry counts poison=%d authority=%d", d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
 	}
 }
 
-func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
+func TestTerminalIdentityPoisonLogOmitsPathAndPayload(t *testing.T) {
 	s, dir := openSpool(t)
 	rec := appendDurable(t, s, 1)
 	var logBuf strings.Builder
 	logger := supportability.NewJSONLogger(&logBuf, slog.LevelDebug, "0.1.0-test", "sensor-instance-test").
 		With("sensor_id", "sensor-infra-01")
-	d, _ := newAuthorityPoisonDrain(t, s, dir, logger)
+	d := newTerminalIdentityDrain(t, s, dir, logger)
 
 	_, err := d.RunOnce(context.Background())
 	if err == nil {
 		t.Fatal("expected poison completion error")
 	}
-	if d.Metrics().AuthorityPoisonCount.Load() != 1 {
+	if d.Metrics().AuthorityPoisonCount.Load() != 0 {
 		t.Fatalf("AuthorityPoisonCount=%d", d.Metrics().AuthorityPoisonCount.Load())
 	}
 	logOutput := logBuf.String()
@@ -1390,7 +1375,7 @@ func TestAuthorityPoisonSuccessfulLogOmitsPathAndPayload(t *testing.T) {
 	if entry["message"] != "Parked terminal agent-ingress record" {
 		t.Fatalf("unexpected parking log: %v", entry)
 	}
-	if entry["event_code"] != "ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION" {
+	if entry["event_code"] != identityConflictCode {
 		t.Fatalf("event_code=%v log=%v", entry["event_code"], entry)
 	}
 	safe, ok := entry["safe_context"].(map[string]any)
@@ -1555,7 +1540,7 @@ func TestIssue216AmbiguousPoisonRetainsFrozenBatch(t *testing.T) {
 	}
 }
 
-func TestIssue216SingletonMalformedDurableArchive(t *testing.T) {
+func TestIssue216SingletonMalformedRetainsContinuityAcrossRestart(t *testing.T) {
 	s, dir := openSpool(t)
 	payload := []byte(`{"tenantId":"incomplete"}`)
 	rec, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: payload})
@@ -1563,52 +1548,46 @@ func TestIssue216SingletonMalformedDurableArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	appendDurable(t, s, 2)
-	tr := &fakeTransport{}
-	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir, MaxBatchRecords: 1}, s, tr)
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, s, &fakeTransport{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	ok, err := d.RunOnce(context.Background())
-	var de *Error
-	if ok || !errors.As(err, &de) || de.Code != CodePoison {
-		t.Fatalf("singleton malformed payload not parked: %v %v", ok, err)
+	d.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("local malformed record must block continuity: ok=%v err=%v", ok, err)
 	}
-	if d.metrics.Attempts.Load() != 0 || d.metrics.Successes.Load() != 0 || d.metrics.DurableAcks.Load() != 0 || d.metrics.PoisonCount.Load() != 1 {
-		t.Fatal("quarantine must not claim ingestion")
+	if d.metrics.Attempts.Load() != 0 || d.metrics.Successes.Load() != 0 ||
+		d.metrics.DurableAcks.Load() != 0 || d.metrics.PoisonCount.Load() != 0 {
+		t.Fatal("local malformed payload must not claim Core settlement")
 	}
-	files, err := os.ReadDir(d.poisonDir)
-	if err != nil || len(files) != 1 {
-		t.Fatalf("archive missing: %v", err)
+	if files, err := os.ReadDir(d.poisonDir); err != nil || len(files) != 0 {
+		t.Fatalf("no terminal quarantine may be created locally: files=%v err=%v", files, err)
 	}
-	raw, err := os.ReadFile(filepath.Join(d.poisonDir, files[0].Name()))
+	first, err := s.ReadOrReserveOutboundBatch(1, 1024*1024)
+	if err != nil || first.FirstSequence != rec.Sequence || first.LastSequence != rec.Sequence ||
+		len(first.Records) != 1 || string(first.Records[0].Payload) != string(payload) {
+		t.Fatalf("malformed head and payload must stay frozen: batch=%+v err=%v", first, err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024 * 1024})
 	if err != nil {
 		t.Fatal(err)
 	}
-	parts := strings.SplitN(string(raw), "\n", 2)
-	var meta struct {
-		Reason   string `json:"reason"`
-		Sequence uint64 `json:"sequence"`
-	}
-	if len(parts) != 2 {
-		t.Fatal("archive incomplete")
-	}
-	if err := json.Unmarshal([]byte(parts[0]), &meta); err != nil {
+	defer restarted.Close()
+	d2, err := New(Config{SensorID: "sensor-infra-01", StreamID: restarted.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, InitialBackoff: time.Millisecond, MaxBackoff: time.Millisecond}, restarted, &fakeTransport{})
+	if err != nil {
 		t.Fatal(err)
 	}
-	if meta.Reason != "ERR_MALFORMED_DURABLE_PAYLOAD" || meta.Sequence != rec.Sequence || parts[1] != string(payload) {
-		t.Fatal("archive lost reason/sequence/exact durable payload")
+	d2.wait = func(context.Context, time.Duration) error { return nil }
+	if ok, err := d2.RunOnce(context.Background()); ok || err == nil {
+		t.Fatalf("restart must not bypass malformed head: ok=%v err=%v", ok, err)
 	}
-	next, err := s.ReadOrReserveOutboundBatch(1, 1024*1024)
-	if err != nil || next.FirstSequence != 2 || next.LastSequence != 2 {
-		t.Fatalf("singleton quarantine broke continuity: %+v %v", next, err)
-	}
-	d.transport = &echoTransport{inner: tr}
-	if ok, err := d.RunOnce(context.Background()); !ok || err != nil {
-		t.Fatalf("next valid ACK failed: %v %v", ok, err)
-	}
-	st, err := s.Stats()
-	if err != nil || st.RecordCount != 0 || d.metrics.DurableAcks.Load() != 1 {
-		t.Fatalf("ACK deletion failed: %+v %v", st, err)
+	if st, err := restarted.Stats(); err != nil || st.RecordCount != 2 || st.AckedThrough != 0 {
+		t.Fatalf("restart lost head or exposed tail: stats=%+v err=%v", st, err)
 	}
 }
 
@@ -2521,7 +2500,7 @@ func TestIssue230QuarantineClearsStaleDeliveryDegraded(t *testing.T) {
 		if b.BatchID != firstBatchID || len(b.Records) != 1 {
 			t.Errorf("exact frozen replay broken: call=%d batchID=%q first=%q records=%d", n, b.BatchID, firstBatchID, len(b.Records))
 		}
-		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad record", HTTPStatus: 400}
+		return typedIdentityConflictDisposition(b), nil
 	})
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -2563,9 +2542,7 @@ func TestIssue230QuarantineClearsStaleDeliveryDegraded(t *testing.T) {
 	}
 
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
-		t.Fatalf("Issue #230: delivery must recover after durable quarantine: %+v", snap)
-	}
+	assertTerminalQuarantineHealth(t, snap, 0)
 	if snap.DurableAcks != 0 {
 		t.Fatalf("snapshot DurableAcks=%d", snap.DurableAcks)
 	}
@@ -2576,21 +2553,68 @@ func TestIssue230QuarantineClearsStaleDeliveryDegraded(t *testing.T) {
 	}
 }
 
-// ackFailSpool fails AcknowledgeThrough when armed so poison publish can succeed
+// ackFailSpool fails CompleteOutboundBatch when armed so poison publish can succeed
 // while spool removal fails closed (pre-commit: durable AckedThrough does not advance).
 type ackFailSpool struct {
 	Spool
 	failAck bool
 }
 
-func (a *ackFailSpool) AcknowledgeThrough(seq uint64) error {
-	if a.failAck {
-		return errors.New("injected AcknowledgeThrough failure")
-	}
-	return a.Spool.AcknowledgeThrough(seq)
+type completeFailSpool struct {
+	Spool
+	failComplete bool
 }
 
-// partialAckSpool distinguishes pre-commit vs post-commit AcknowledgeThrough failures.
+func (s *completeFailSpool) CompleteOutboundBatch(seq uint64) error {
+	if s.failComplete {
+		return errors.New("injected terminal completion failure before durable spool ACK")
+	}
+	return s.Spool.CompleteOutboundBatch(seq)
+}
+
+func TestTerminalReceiptPrecommitSpoolFailureRetainsFrozenRequestIdentity(t *testing.T) {
+	sp, dir := openSpool(t)
+	appendDurable(t, sp, 1)
+	wrapped := &completeFailSpool{Spool: sp, failComplete: true}
+	var batchIDs []string
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		batchIDs = append(batchIDs, batch.BatchID)
+		return typedIdentityConflictDisposition(batch), nil
+	})
+	d, err := New(Config{SensorID: "sensor-infra-01", StreamID: sp.StreamID(), AgentSpoolDir: dir,
+		MaxBatchRecords: 1, MaxBatchPayloadBytes: 1024 * 1024, MaxRequestBytes: 2 * 1024 * 1024}, wrapped, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ok, runErr := d.RunOnce(context.Background()); ok || runErr == nil {
+		t.Fatalf("precommit terminal cleanup failure must retain head: ok=%v err=%v", ok, runErr)
+	}
+	if st, err := sp.Stats(); err != nil || st.RecordCount != 1 || st.AckedThrough != 0 {
+		t.Fatalf("precommit failure changed durable spool custody: stats=%+v err=%v", st, err)
+	}
+	wrapped.failComplete = false
+	if ok, runErr := d.RunOnce(context.Background()); ok || runErr == nil {
+		t.Fatalf("typed terminal retry must quarantine, not count accepted success: ok=%v err=%v", ok, runErr)
+	}
+	if st, err := sp.Stats(); err != nil || st.RecordCount != 0 || st.AckedThrough != 1 {
+		t.Fatalf("durable terminal completion missing: stats=%+v err=%v", st, err)
+	}
+	if len(batchIDs) != 2 || batchIDs[0] != batchIDs[1] {
+		t.Fatalf("Core terminal replay lost frozen identity: %v", batchIDs)
+	}
+	if d.Metrics().DurableAcks.Load() != 0 || d.Metrics().PoisonCount.Load() != 1 {
+		t.Fatalf("terminal accounting incorrect: %+v", d.Metrics())
+	}
+}
+
+func (a *ackFailSpool) CompleteOutboundBatch(seq uint64) error {
+	if a.failAck {
+		return errors.New("injected CompleteOutboundBatch failure")
+	}
+	return a.Spool.CompleteOutboundBatch(seq)
+}
+
+// partialAckSpool distinguishes pre-commit vs post-commit terminal completion failures.
 // Post-commit modes call the real spool first (watermark durable) then surface cleanup
 // errors matching DiskSpool's post-persist failure classes — without changing spool.go.
 type partialAckSpool struct {
@@ -2599,15 +2623,15 @@ type partialAckSpool struct {
 	mode           string // pre_commit | post_commit_remove | post_commit_fsync | post_commit_stats_uncertain
 	ackedAttempted bool
 	// failStats is atomic so concurrent Snapshot refreshStats cannot race the
-	// post_commit_stats_uncertain AcknowledgeThrough arming path.
+	// post_commit_stats_uncertain CompleteOutboundBatch arming path.
 	failStats atomic.Bool
 }
 
-func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
+func (p *partialAckSpool) CompleteOutboundBatch(seq uint64) error {
 	p.ackedAttempted = true
 	switch p.mode {
 	case "pre_commit":
-		return errors.New("injected AcknowledgeThrough failure before durable state")
+		return errors.New("injected CompleteOutboundBatch failure before durable state")
 	case "post_commit_remove", "post_commit_fsync", "post_commit_stats_uncertain":
 		var orphan []byte
 		recordPath := filepath.Join(p.dir, fmt.Sprintf("record-%020d.json", seq))
@@ -2618,7 +2642,7 @@ func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
 			}
 			orphan = raw
 		}
-		if err := p.Spool.AcknowledgeThrough(seq); err != nil {
+		if err := p.Spool.CompleteOutboundBatch(seq); err != nil {
 			return err
 		}
 		if p.mode == "post_commit_remove" {
@@ -2633,7 +2657,7 @@ func (p *partialAckSpool) AcknowledgeThrough(seq uint64) error {
 		}
 		return errors.New("injected final spool directory fsync failure")
 	default:
-		return p.Spool.AcknowledgeThrough(seq)
+		return p.Spool.CompleteOutboundBatch(seq)
 	}
 }
 
@@ -2731,12 +2755,12 @@ func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
 			s, dir := openSpool(t)
 			appendNDurable(t, s, 1)
 			calls := 0
-			tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+			tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
 				calls++
 				if calls == 1 {
 					return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_BATCH_TOO_LARGE", HTTPStatus: 413}
 				}
-				return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+				return typedIdentityConflictDisposition(b), nil
 			})
 			d, err := New(Config{
 				SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -2777,9 +2801,8 @@ func TestIssue230PoisonFailuresNeverFalselyRecover(t *testing.T) {
 	}
 }
 
-func TestIssue230LocalMalformedQuarantineClearsPreexistingBlock(t *testing.T) {
-	// Atypical but reachable: delivery already DEGRADED from a prior retainBlocked,
-	// then a locally recognized malformed singleton is durably parked.
+func TestIssue230LocalMalformedRetainsPreexistingContinuityBlock(t *testing.T) {
+	// A local parse failure cannot replace Core-authoritative settlement.
 	s, dir := openSpool(t)
 	payload := []byte(`{"tenantId":"incomplete"}`)
 	rec, err := s.Append(spool.AppendRequest{Class: spool.ClassOperational, Type: agentBatchRecordType, Payload: payload})
@@ -2801,16 +2824,19 @@ func TestIssue230LocalMalformedQuarantineClearsPreexistingBlock(t *testing.T) {
 
 	ok, err := d.RunOnce(context.Background())
 	var de *Error
-	if ok || !errors.As(err, &de) || de.Code != CodePoison {
-		t.Fatalf("local malformed park: ok=%v err=%v", ok, err)
+	if ok || !errors.As(err, &de) || de.Code != CodeTransport {
+		t.Fatalf("local malformed blocker: ok=%v err=%v", ok, err)
 	}
-	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Attempts.Load() != 0 {
-		t.Fatalf("local quarantine counters: poison=%d acks=%d attempts=%d",
+	if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 || d.Metrics().Attempts.Load() != 0 {
+		t.Fatalf("local blocker counters: poison=%d acks=%d attempts=%d",
 			d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load(), d.Metrics().Attempts.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 0 {
-		t.Fatalf("local quarantine must clear obsolete block: %+v", snap)
+	if !snap.Blocked || snap.State != DeliveryStateDegraded || snap.ReasonCode != "ERR_MALFORMED_DURABLE_PAYLOAD" || snap.PendingRecords != 1 {
+		t.Fatalf("local malformed payload must remain a continuity blocker: %+v", snap)
+	}
+	if st, err := s.Stats(); err != nil || st.RecordCount != 1 || st.AckedThrough != 0 {
+		t.Fatalf("local malformed payload changed spool custody: stats=%+v err=%v", st, err)
 	}
 }
 
@@ -2829,7 +2855,7 @@ func TestIssue230HeadOnlyQuarantineRetainsReplayableTail(t *testing.T) {
 			if b.FirstIngressSequence != firstHeadSeq || len(b.Records) != 1 {
 				t.Errorf("quarantine attempt identity drift: %+v", b)
 			}
-			return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+			return typedIdentityConflictDisposition(b), nil
 		default:
 			return coreclient.AgentTelemetryAck{
 				Status: "ACCEPTED", AcceptedThroughIngressSequence: b.LastIngressSequence,
@@ -2857,9 +2883,7 @@ func TestIssue230HeadOnlyQuarantineRetainsReplayableTail(t *testing.T) {
 		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.ReasonCode != "" || snap.PendingRecords != 1 {
-		t.Fatalf("after head quarantine health=%+v", snap)
-	}
+	assertTerminalQuarantineHealth(t, snap, 1)
 	st, _ := s.Stats()
 	if st.RecordCount != 1 {
 		t.Fatalf("tail must remain, count=%d", st.RecordCount)
@@ -2868,8 +2892,9 @@ func TestIssue230HeadOnlyQuarantineRetainsReplayableTail(t *testing.T) {
 		t.Fatalf("tail replay ACK: ok=%v err=%v", ok, err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.PendingRecords != 0 || final.DurableAcks != 1 {
-		t.Fatalf("tail ACK health=%+v", final)
+	assertTerminalQuarantineHealth(t, final, 0)
+	if final.DurableAcks != 1 {
+		t.Fatalf("tail ACK count=%d", final.DurableAcks)
 	}
 }
 
@@ -2878,8 +2903,8 @@ func TestIssue230StaleLegacyObservationCannotReassertAfterQuarantine(t *testing.
 	appendNDurable(t, s, 2)
 	seedLegacySizeRejectedSidecar(t, s, dir)
 
-	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
-		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return typedIdentityConflictDisposition(b), nil
 	})
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -2920,16 +2945,12 @@ func TestIssue230StaleLegacyObservationCannotReassertAfterQuarantine(t *testing.
 	close(release)
 	wg.Wait()
 
-	if snap.Blocked || snap.State != DeliveryStateUp {
-		t.Fatalf("stale legacy observation reasserted after quarantine: %+v", snap)
-	}
+	assertTerminalQuarantineHealth(t, snap, 1)
 	if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
 		t.Fatalf("poison=%d acks=%d", d.Metrics().PoisonCount.Load(), d.Metrics().DurableAcks.Load())
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.PendingRecords != 1 {
-		t.Fatalf("post-quarantine health=%+v", final)
-	}
+	assertTerminalQuarantineHealth(t, final, 1)
 }
 
 func TestIssue230ConcurrentSnapshotAndQuarantineRace(t *testing.T) {
@@ -2938,9 +2959,9 @@ func TestIssue230ConcurrentSnapshotAndQuarantineRace(t *testing.T) {
 	seedLegacySizeRejectedSidecar(t, s, dir)
 
 	var calls atomic.Uint64
-	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+	tr := p2TransportFunc(func(_ context.Context, b coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
 		calls.Add(1)
-		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+		return typedIdentityConflictDisposition(b), nil
 	})
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -2977,16 +2998,14 @@ func TestIssue230ConcurrentSnapshotAndQuarantineRace(t *testing.T) {
 	wg.Wait()
 
 	snap := d.Snapshot()
-	if snap.Blocked || snap.State != DeliveryStateUp || snap.PendingRecords != 0 {
-		t.Fatalf("concurrent Snapshot/quarantine left stale degradation: %+v", snap)
-	}
+	assertTerminalQuarantineHealth(t, snap, 0)
 	if d.Metrics().PoisonCount.Load() != 1 || snap.DurableAcks != 0 || calls.Load() != 1 {
 		t.Fatalf("poison=%d acks=%d calls=%d", d.Metrics().PoisonCount.Load(), snap.DurableAcks, calls.Load())
 	}
 }
 
 // setupIssue230PartialAckDrain prepares DEGRADED-via-413 then arms a partialAckSpool
-// for the subsequent singleton poison park.
+// for the subsequent singleton Core-terminal quarantine.
 func setupIssue230PartialAckDrain(t *testing.T, records int, mode string) (*Drain, *spool.DiskSpool, string, *partialAckSpool) {
 	t.Helper()
 	s, dir := openSpool(t)
@@ -3003,7 +3022,7 @@ func setupIssue230PartialAckDrain(t *testing.T, records int, mode string) (*Drai
 			t.Errorf("exact frozen replay identity broken: call=%d batchID=%q first=%q records=%d",
 				calls, b.BatchID, firstBatchID, len(b.Records))
 		}
-		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+		return typedIdentityConflictDisposition(b), nil
 	})
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -3176,9 +3195,7 @@ func TestIssue230PartialAckStatsFailureRecoversOnSubsequentEmptyRunOnce(t *testi
 	// Disarm Stats only to read accurate pending metrics after recovery proof.
 	wrap.failStats.Store(false)
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
-		t.Fatalf("empty-backlog recovery must clear cleanup fault: %+v", final)
-	}
+	assertTerminalQuarantineHealth(t, final, 0)
 	if d.Metrics().DurableAcks.Load() != 0 || final.DurableAcks != 0 {
 		t.Fatalf("recovery must not invent Core ACK: metrics=%d snap=%+v", d.Metrics().DurableAcks.Load(), final)
 	}
@@ -3296,8 +3313,9 @@ func TestIssue230PartialAckPostCommitWithReplayableTail(t *testing.T) {
 	final := d.Snapshot()
 	// Recovery runs at RunOnce start (orphan cleanup + dir sync); tail ACK must not
 	// be the sole reason health recovered.
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 || final.DurableAcks != 1 {
-		t.Fatalf("tail ACK health=%+v", final)
+	assertTerminalQuarantineHealth(t, final, 0)
+	if final.DurableAcks != 1 {
+		t.Fatalf("tail ACK count=%d", final.DurableAcks)
 	}
 }
 
@@ -3341,9 +3359,7 @@ func TestIssue230PartialAckRestartAfterPostCommit(t *testing.T) {
 	}
 	// No orphaned record files after successful remove+injected fsync: cleanup fault
 	// is process-local and correctly absent after restart.
-	if snap.State != DeliveryStateUp || snap.ReasonCode != "" {
-		t.Fatalf("fsync-class restart without orphans must be UP: %+v", snap)
-	}
+	assertTerminalQuarantineHealth(t, snap, 0)
 	poisonEntries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
 	if len(poisonEntries) == 0 {
 		t.Fatal("poison files must survive restart")
@@ -3400,8 +3416,8 @@ func TestIssue230PartialAckLegacySizeRejectedObservation(t *testing.T) {
 	s, dir := openSpool(t)
 	appendNDurable(t, s, 1)
 	seedLegacySizeRejectedSidecar(t, s, dir)
-	tr := p2TransportFunc(func(_ context.Context, _ coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
-		return coreclient.AgentTelemetryAck{}, &coreclient.CoreAPIError{Code: "ERR_MALFORMED_RECORD", Message: "bad", HTTPStatus: 400}
+	tr := p2TransportFunc(func(_ context.Context, batch coreclient.AgentTelemetryBatch) (coreclient.AgentTelemetryAck, error) {
+		return typedIdentityConflictDisposition(batch), nil
 	})
 	d, err := New(Config{
 		SensorID: "sensor-infra-01", StreamID: s.StreamID(), AgentSpoolDir: dir,
@@ -3451,6 +3467,16 @@ func TestIssue230PartialAckEmptyLogicalBacklogNoFalseCoreAck(t *testing.T) {
 	assertCleanupFaultDegraded(t, snap, 0)
 	if snap.DurableAcks != 0 {
 		t.Fatalf("empty backlog must not invent Core ACK: %+v", snap)
+	}
+}
+
+// A durable identity-conflict disposition remains visible as a security and
+// pipeline quarantine marker even after the transient delivery/cleanup fault heals.
+func assertTerminalQuarantineHealth(t *testing.T, snap DeliveryStatus, pending int64) {
+	t.Helper()
+	if snap.State != DeliveryStateDegraded || snap.ReasonCode != identityConflictCode ||
+		!snap.Quarantined || snap.Blocked || snap.PendingRecords != pending {
+		t.Fatalf("terminal identity quarantine health mismatch: want pending=%d got %+v", pending, snap)
 	}
 }
 
@@ -3543,9 +3569,7 @@ func TestIssue230CleanupFaultSurvivesUnrelatedUpload(t *testing.T) {
 		t.Fatalf("recovery must leave no acked orphan, err=%v", err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 0 {
-		t.Fatalf("cleanup recovery must clear fault: %+v", final)
-	}
+	assertTerminalQuarantineHealth(t, final, 0)
 }
 
 func TestIssue230CleanupFaultRestartOpenRecoversOrphan(t *testing.T) {
@@ -3584,8 +3608,9 @@ func TestIssue230CleanupFaultRestartOpenRecoversOrphan(t *testing.T) {
 		t.Fatal(err)
 	}
 	healed := d2.Snapshot()
-	if healed.Blocked || healed.State != DeliveryStateUp || healed.ReasonCode != "" || healed.DurableAcks != 0 {
-		t.Fatalf("restart after successful spool orphan recover must be UP: %+v", healed)
+	assertTerminalQuarantineHealth(t, healed, 0)
+	if healed.DurableAcks != 0 {
+		t.Fatalf("restart invented Core ACK: %+v", healed)
 	}
 }
 
@@ -3705,8 +3730,9 @@ func TestIssue230CleanupReconcilePreservesPendingAndQuarantinesUnsafe(t *testing
 		t.Fatalf("expected quarantined unsafe artifacts, got %d err=%v", len(qEntries), err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.PendingRecords != 1 || final.DurableAcks != 0 {
-		t.Fatalf("after safe reconcile health=%+v", final)
+	assertTerminalQuarantineHealth(t, final, 1)
+	if final.DurableAcks != 0 {
+		t.Fatalf("reconcile invented Core ACK: %+v", final)
 	}
 }
 
@@ -3819,8 +3845,9 @@ func TestIssue230CleanupFaultConcurrentSnapshotAndSpoolOps(t *testing.T) {
 		t.Fatalf("recovery after concurrent ops: ok=%v err=%v", ok, err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" || final.DurableAcks != 0 {
-		t.Fatalf("concurrent cleanup recovery health=%+v", final)
+	assertTerminalQuarantineHealth(t, final, 0)
+	if final.DurableAcks != 0 {
+		t.Fatalf("cleanup invented Core ACK: %+v", final)
 	}
 }
 
@@ -3837,9 +3864,7 @@ func TestIssue230CleanupFaultClearsAfterFsyncRecovery(t *testing.T) {
 		t.Fatalf("recovery RunOnce: ok=%v err=%v", ok, err)
 	}
 	final := d.Snapshot()
-	if final.Blocked || final.State != DeliveryStateUp || final.ReasonCode != "" {
-		t.Fatalf("fsync recovery must clear cleanup fault: %+v", final)
-	}
+	assertTerminalQuarantineHealth(t, final, 0)
 	if d.Metrics().DurableAcks.Load() != 0 {
 		t.Fatalf("recovery must not invent Core ACK: %d", d.Metrics().DurableAcks.Load())
 	}
@@ -4513,9 +4538,7 @@ func TestIssue230PartialAckNoWatermarkProofRecoversWhenInspectorsReturn(t *testi
 	if final.Blocked || final.ReasonCode == "ERR_BATCH_TOO_LARGE" {
 		t.Fatalf("obsolete 413 must not remain after inspector recovery: %+v", final)
 	}
-	if final.State != DeliveryStateUp && final.ReasonCode != reasonSpoolCleanupFailed {
-		t.Fatalf("recovery health must be UP or cleanup DEGRADED: %+v", final)
-	}
+	assertTerminalQuarantineHealth(t, final, 0)
 	for _, forbidden := range []string{"DEVICE_DOWN"} {
 		if strings.Contains(fmt.Sprintf("%+v", final), forbidden) {
 			t.Fatalf("leaked %q in %+v", forbidden, final)
@@ -4766,66 +4789,34 @@ func setupIssue230AuthorityPoisonPartialPark(t *testing.T, poisonCode, mode stri
 	return d, s, dir, wrap
 }
 
-func TestIssue230PendingIntentAuthorityPoisonCodesConserveOnce(t *testing.T) {
+func TestIssue230UnsettledAuthorityErrorsCannotCreatePartialAckIntent(t *testing.T) {
 	for _, code := range issue230AuthorityPoisonCodes {
 		t.Run(code, func(t *testing.T) {
 			d, s, dir, _ := setupIssue230AuthorityPoisonPartialPark(t, code, "post_commit_stats_uncertain")
-			wrap := &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
+			// Retain the original failed watermark-inspection seam. No inspection
+			// may authorize a skip when Core returned only a generic error.
+			d.spool = &noWatermarkProofSpool{partialAckSpool: &partialAckSpool{
 				Spool: s, dir: dir, mode: "post_commit_stats_uncertain",
 			}}
-			d.spool = wrap
-			ok, err := d.RunOnce(context.Background())
-			if ok || err == nil {
-				t.Fatalf("no-proof authority poison park must surface: ok=%v err=%v", ok, err)
-			}
-			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
-				t.Fatalf("uncertain park must not count yet: poison=%d auth=%d acks=%d",
-					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
+			for attempt := 0; attempt < 2; attempt++ {
+				ok, err := d.RunOnce(context.Background())
+				if ok || !coreclient.IsCoreAPICode(err, code) {
+					t.Fatalf("unsettled authority error must block: attempt=%d ok=%v err=%v", attempt, ok, err)
+				}
+				if st, err := s.Stats(); err != nil || st.RecordCount != 1 || st.AckedThrough != 0 {
+					t.Fatalf("generic authority error changed spool continuity: stats=%+v err=%v", st, err)
+				}
+				if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != code {
+					t.Fatalf("authority continuity blocker missing: %+v", snap)
+				}
 			}
 			d.deliveryMu.RLock()
-			intent, coreACK, auth := d.pendingPartialAckSeq, d.pendingPartialAckCoreACK, d.pendingPartialAckAuthorityPoison
+			intent := d.pendingPartialAckSeq
 			d.deliveryMu.RUnlock()
-			if intent == 0 || coreACK || !auth {
-				t.Fatalf("intent must retain authority-poison class: seq=%d coreACK=%v auth=%v", intent, coreACK, auth)
-			}
-			assertPendingAckUncertain(t, d.Snapshot(), intent)
-
-			// Barrier: repeated RunOnce must not select/upload/park or double-count.
-			for i := 0; i < 5; i++ {
-				ok, err := d.RunOnce(context.Background())
-				if ok || err != nil {
-					t.Fatalf("barrier iteration %d: ok=%v err=%v", i, ok, err)
-				}
-			}
-			if d.Metrics().PoisonCount.Load() != 0 || d.Metrics().AuthorityPoisonCount.Load() != 0 {
-				t.Fatalf("barrier must not count while unproven: poison=%d auth=%d",
-					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
-			}
-
-			d.spool = s
-			d.deliveryMu.Lock()
-			d.cleanupRetryAfter = time.Time{}
-			d.deliveryMu.Unlock()
-			if ok, err := d.RunOnce(context.Background()); ok || err != nil {
-				t.Fatalf("deferred authority recovery: ok=%v err=%v", ok, err)
-			}
-			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 || d.Metrics().DurableAcks.Load() != 0 {
-				t.Fatalf("authority poison must count once: poison=%d auth=%d acks=%d",
-					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
-			}
-			// Repeat Snapshot/RunOnce must not duplicate counts.
-			for i := 0; i < 3; i++ {
-				_ = d.Snapshot()
-				d.deliveryMu.Lock()
-				d.cleanupRetryAfter = time.Time{}
-				d.deliveryMu.Unlock()
-				if ok, err := d.RunOnce(context.Background()); ok || err != nil {
-					t.Fatalf("post-recovery iteration %d: ok=%v err=%v", i, ok, err)
-				}
-			}
-			if d.Metrics().PoisonCount.Load() != 1 || d.Metrics().AuthorityPoisonCount.Load() != 1 {
-				t.Fatalf("no duplicate authority counts: poison=%d auth=%d",
-					d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load())
+			if intent != 0 || d.Metrics().PoisonCount.Load() != 0 ||
+				d.Metrics().AuthorityPoisonCount.Load() != 0 || d.Metrics().DurableAcks.Load() != 0 {
+				t.Fatalf("generic error fabricated settlement: intent=%d poison=%d auth=%d ack=%d",
+					intent, d.Metrics().PoisonCount.Load(), d.Metrics().AuthorityPoisonCount.Load(), d.Metrics().DurableAcks.Load())
 			}
 		})
 	}

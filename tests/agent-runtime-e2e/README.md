@@ -37,8 +37,9 @@ The overlay also sets that cap explicitly. Operator overrides above 384 KiB are
 rejected at Agent config load (`CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS`) so the
 process cannot start a deterministic HTTP 413 retry loop. Sensor Agent Receiver
 default max body is 512 KiB. Agent HTTP 413 `ERR_REQUEST_TOO_LARGE` is classified
-`OVERSIZED` (queue retained, no hot retry). Core 413 `ERR_RECORD_TOO_LARGE` is a
-terminal drain poison (not an infinite retry).
+`OVERSIZED` (queue retained, no hot retry). Core 413 `ERR_RECORD_TOO_LARGE`
+retains the frozen Sensor spool head and reports degraded delivery until an
+exact durable Core disposition permits removal.
 
 Post-drain duplicate replay uses the durable batch-index acceptance receipt. The
 pending Agent spool record may be gone after downstream drain; an identical
@@ -60,10 +61,10 @@ V019 fixtures explicitly bind A (`agent-e2e-01`, entity suffix `ae01`,
 `host-e2e-agent-01`) and B (`agent-e2e-probe-01`, entity suffix `ae02`,
 `host-e2e-probe-01`) to separate certificate fingerprints. Legitimate scalar
 readback verifies each canonical entity. `identity_probe.py` authenticates both
-spoof directions at the Sensor, then obtains an independent typed Core HTTP409
-response for each exact forged delivery record. It verifies no Core watermark
-reservation; the harness also checks Kafka and ClickHouse absence for both
-metrics. Sensor local-custody ACK remains distinct from Core acceptance.
+spoof directions at the Sensor, then verifies each forged delivery has an exact
+durable Core terminal disposition and advanced settled continuity. The harness
+also checks Kafka and ClickHouse absence for both metrics. Sensor local-custody
+ACK remains distinct from Core settlement.
 
 The Master ruling permits at most one ULP for ordinary finite Float64 operational
 values. `readback.py` uses an explicit IEEE-754 ordered-bit distance, never a loose

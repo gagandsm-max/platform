@@ -223,6 +223,11 @@ record "authority-sql-seed" "PASS"
 log "==> capturing Kafka end offsets before Agent start"
 kafka_end_offsets | tee "${EVIDENCE_DIR}/offsets-before-agent.txt"
 
+if [[ "${PLATFORM_E2E_SEQUENCE_DISPOSITION:-0}" == "1" ]]; then
+    python3 "${E2E_DIR}/sequence_disposition.py" "$PLATFORM_E2E_PREFIX" "$RECEIVER_PORT" "$EVIDENCE_DIR"
+    exit 0
+fi
+
 true # Agent image built by run-isolated.sh
 "${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init
 if ! docker wait ${PLATFORM_E2E_PREFIX}-agent-runtime-init >/dev/null; then
@@ -719,7 +724,7 @@ for file, key in (('forged-host-kafka.txt', 'metricId'), ('forged-host-clickhous
 assert len(evidence['results']) == 2
 PYPROBE
 then
-    record "agent-canonical-entity-binding" "PASS" "A claims HostB and B claims HostA: Core409 ERR_AGENT_IDENTITY_CONFLICT, no Core reservation/Kafka/ClickHouse metric for either entity; Sensor custody ACK preserved"
+    record "agent-canonical-entity-binding" "PASS" "A claims HostB and B claims HostA: durable Core terminal ERR_AGENT_IDENTITY_CONFLICT, no Kafka/ClickHouse metric for either entity; Sensor custody ACK preserved"
 else
     fail_closed "agent-canonical-entity-binding" "Forged metric reached downstream storage"
 fi

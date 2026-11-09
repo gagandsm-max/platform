@@ -110,6 +110,31 @@ public class AgentIngestionValidator {
         }
     }
 
+    /** Immutable structure and server-derived scope checks precede all disposition lookup. */
+    public void validateImmutableBatch(byte[] rawBody, AgentTelemetryBatchRequest batch, SensorScope scope) {
+        validateBatchBounds(batch, rawBody, scope);
+        for (AgentIngressRecord ingress : batch.records()) {
+            validateIngressRecordAuthority(ingress, scope.sensorId(), scope.tenantId());
+        }
+    }
+
+    /** A new terminal skip requires current, not merely historical, assignment authority. */
+    public EntityAgentBinding validateCurrentTerminalAuthority(AgentIngressRecord ingress, SensorScope scope) {
+        validateIngressRecordAuthority(ingress, scope.sensorId(), scope.tenantId());
+        AgentSensorAssignment assignment = agentControlRepository.findAssignmentByGeneration(
+                scope.tenantId(), ingress.agentId().trim(), ingress.assignmentGeneration())
+                .orElseThrow(() -> new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_ASSIGNMENT_UNKNOWN", "Current Agent assignment is required"));
+        if (assignment.status() != AgentAssignmentStatus.ACTIVE
+                || !scope.sensorId().equals(assignment.sensorId())) {
+            throw new IngestionException(HttpStatus.FORBIDDEN,
+                    "ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH", "Current Agent assignment does not authorize this Sensor");
+        }
+        return agentControlRepository.findActiveEntityBinding(scope.tenantId(), ingress.agentId().trim())
+                .orElseThrow(() -> new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_ENTITY_BINDING_INACTIVE", "Active Agent binding is required"));
+    }
+
     public void validateBatchBounds(AgentTelemetryBatchRequest batch, byte[] rawBody, SensorScope scope) {
         if (rawBody != null && rawBody.length > MAX_BATCH_BYTES) {
             throw new IngestionException(
@@ -201,6 +226,10 @@ public class AgentIngestionValidator {
 
         Set<Long> seen = new HashSet<>();
         for (AgentIngressRecord record : batch.records()) {
+            if (record == null) {
+                throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_MALFORMED_RECORD",
+                        "Null Agent ingress record is not allowed");
+            }
             long seq = record.sensorIngressSequence();
             if (seq < batch.firstIngressSequence() || seq > batch.lastIngressSequence()) {
                 throw new IngestionException(

@@ -38,6 +38,7 @@ class AgentIngestionServiceTest {
     private final SensorScope scope = new SensorScope("sensor-infra-01", tenantId, null, Set.of(entityId), true);
     private final UUID ownerToken = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
     private static final long PUBLISHER_EPOCH = 1L;
+    private static final String BODY_SHA = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
 
     @BeforeEach
     void setUp() {
@@ -46,8 +47,8 @@ class AgentIngestionServiceTest {
         kafkaProducer = mock(KafkaTelemetryProducer.class);
         metrics = new IngestionMetrics();
         service = new AgentIngestionService(validator, watermarkStore, kafkaProducer, metrics);
-        when(watermarkStore.reserveBatch(
-                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString()))
+        when(watermarkStore.reserveBatchWithBody(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0));
         when(watermarkStore.claimPublisherLease(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString()))
@@ -78,8 +79,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(10, 12, "chk-abc");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-abc", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-abc", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.alreadyAcked(12L));
 
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
@@ -105,8 +106,8 @@ class AgentIngestionServiceTest {
                 service.ingestAgentTelemetry("{}".getBytes(), request, "wrong-key", c));
         assertEquals("ERR_IDEMPOTENCY_KEY_MISMATCH", ex.getCode());
         assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
-        verify(watermarkStore, never()).reserveBatch(
-                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString());
+        verify(watermarkStore, never()).reserveBatchWithBody(
+                any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString());
     }
 
     @Test
@@ -115,8 +116,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(10, 12, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-new", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
                         12L, "ERR_IDEMPOTENCY_CONFLICT",
                         "sequence range was accepted/reserved with a different checksum"));
@@ -134,8 +135,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(5, 8, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 5L, 8L, "chk", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 5L, 8L, "chk", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
                         12L, "ERR_SEQUENCE_REGRESSION", "sequence already accepted"));
 
@@ -150,8 +151,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(20, 22, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 20L, 22L, "chk", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 20L, 22L, "chk", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
                         12L, "ERR_SEQUENCE_GAP", "unexpected sequence gap"));
 
@@ -167,8 +168,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.reserved(12L));
 
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
@@ -191,8 +192,8 @@ class AgentIngestionServiceTest {
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
         when(validator.validateAndExtract(any(), eq(request), eq(scope))).thenReturn(obs());
-        when(watermarkStore.reserveBatch(
-                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1"))
+        when(watermarkStore.reserveBatchWithBody(
+                tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.reserved(12L))
                 .thenReturn(ReplayReservation.retryPending(12L));
 

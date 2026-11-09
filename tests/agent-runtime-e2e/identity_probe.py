@@ -1,17 +1,10 @@
-"""Explicit A/B credentials → Sensor custody; typed rejection at Core acceptance.
-
-Uses real private fixture services, no mocks. Sensor custody ACK is not Core ACK.
-Direct Core challenges use independent test streams to inspect each HTTP rejection,
-while the production drain also receives both authenticated forged observations.
-"""
-import hashlib
+"""Both forged host claims receive Sensor custody and durable Core terminal settlement."""
 import json
 import os
 from pathlib import Path
 import subprocess
 import sys
-import uuid
-from datetime import datetime, timezone
+import time
 from build_envelope import build_envelope
 
 TENANT = "018f0e0a-0000-7000-8000-000000000001"
@@ -25,22 +18,6 @@ FIXTURES = {
 
 def command(args, body=None):
     return subprocess.check_output(args, input=body, text=True, timeout=30)
-
-
-def core_batch(envelope, sensor, generation):
-    record = dict(sensorIngressSequence=1, sensorIngressRecordId="identity-probe-1", tenantId=TENANT,
-                  agentId=envelope["agentId"], acceptingSensorId=sensor, assignmentGeneration=generation,
-                  agentFirstSequence=envelope["firstSequence"], agentLastSequence=envelope["lastSequence"],
-                  agentBatchId=envelope["batchId"], correlationId=envelope["correlationId"],
-                  acceptedAt=datetime.now(timezone.utc).isoformat(), records=envelope["records"])
-    fields = [1, record["agentBatchId"], record["agentFirstSequence"], record["agentLastSequence"],
-              generation, TENANT, record["agentId"], sensor]
-    for delivery in record["records"]:
-        fields.extend([delivery["sequence"], delivery["id"], delivery["checksum"]])
-    return dict(schemaVersion=2, sensorId=sensor, sensorAgentSpoolStreamId="stream-" + uuid.uuid4().hex,
-                batchId="identity-probe-" + uuid.uuid4().hex, firstIngressSequence=1, lastIngressSequence=1,
-                recordCount=1, checksum=hashlib.sha256("|".join(map(str, fields)).encode()).hexdigest(),
-                correlationId=envelope["correlationId"], records=[record])
 
 
 def main():
@@ -75,25 +52,30 @@ def main():
             "--data-binary", "@-", receiver], raw)
         (output / (label + "-sensor-ack.json")).write_text(sensor_raw)
         assert json.loads(sensor_raw).get("status") == "ACCEPTED", sensor_raw
-        generation = int(sql("SELECT generation FROM platform.agent_sensor_assignment WHERE tenant_id='" +
-                             TENANT + "' AND agent_id='" + identity["agent"] + "' AND status='ACTIVE'"))
-        batch = core_batch(envelope, sensor, generation)
-        (output / (label + "-core-request.json")).write_text(json.dumps(batch, indent=2))
-        response = command(["docker", "exec", "-i", prefix + "-sensor-infra", "curl", "-sS",
-            "--connect-timeout", "5", "--max-time", "20", "--cacert", "/certs/ca.crt",
-            "--cert", "/certs/sensor-infra.crt", "--key", "/certs/sensor-infra.key",
-            "-H", "Content-Type: application/json", "-H", "Idempotency-Key: " + batch["batchId"],
-            "-w", "\n%{http_code}", "--data-binary", "@-", "https://core:8443/api/v1/sensor/agent-telemetry"],
-            json.dumps(batch, separators=(",", ":")))
-        body, status = response.rsplit("\n", 1)
-        (output / (label + "-core-response.txt")).write_text(response)
-        assert status == "409" and json.loads(body).get("code") == "ERR_AGENT_IDENTITY_CONFLICT", response
-        watermark = sql("SELECT count(*) FROM platform.sensor_agent_ingress_watermark WHERE tenant_id='" +
-                        TENANT + "' AND stream_id='" + batch["sensorAgentSpoolStreamId"] + "'")
-        assert watermark == "0", watermark
+        query = ("SELECT row_to_json(t) FROM (SELECT disposition_id, stream_id, first_sequence, "
+                 "last_sequence, checksum, batch_id, agent_batch_id, agent_id, reason_code "
+                 "FROM platform.sensor_agent_ingress_terminal_disposition WHERE tenant_id='" + TENANT +
+                 "' AND sensor_id='" + sensor + "' AND agent_id='" + identity["agent"] +
+                 "' AND agent_batch_id='" + envelope["batchId"] + "') t")
+        terminal = None
+        deadline = time.monotonic() + 90
+        while time.monotonic() < deadline:
+            rows = sql(query).splitlines()
+            if len(rows) == 1:
+                terminal = json.loads(rows[0])
+                break
+            time.sleep(1)
+        assert terminal is not None, label + " did not receive Core terminal disposition"
+        assert terminal["reason_code"] == "ERR_AGENT_IDENTITY_CONFLICT", terminal
+        assert terminal["first_sequence"] == terminal["last_sequence"], terminal
+        (output / (label + "-terminal-disposition.json")).write_text(json.dumps(terminal, indent=2) + "\n")
+        watermark = sql("SELECT settled_through_sequence FROM platform.sensor_agent_ingress_watermark WHERE tenant_id='" +
+                        TENANT + "' AND stream_id='" + terminal["stream_id"] + "'")
+        assert int(watermark) >= terminal["last_sequence"], (watermark, terminal)
         results.append(dict(case=label, authenticated_agent=identity, claimed_host=other["host"],
-                            metric=metric, sensor_custody_ack="ACCEPTED", core_http=409,
-                            core_code="ERR_AGENT_IDENTITY_CONFLICT", core_watermarks=0))
+                            metric=metric, sensor_custody_ack="ACCEPTED",
+                            core_disposition="TERMINALLY_REJECTED", core_code="ERR_AGENT_IDENTITY_CONFLICT",
+                            disposition_id=terminal["disposition_id"], settled_through=int(watermark)))
     (output / "identity-fixtures.json").write_text(json.dumps(dict(tenant=TENANT, fixtures=FIXTURES,
                                                                  results=results), indent=2) + "\n")
 

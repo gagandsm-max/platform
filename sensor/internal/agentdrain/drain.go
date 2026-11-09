@@ -738,17 +738,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 			}
 			return false, d.retainBlocked(ctx, batch, reason, err)
 		}
-		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
-			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
-		}
-		if parkErr := d.parkHead(batch, "ERR_MALFORMED_DURABLE_PAYLOAD", err); parkErr != nil {
-			return false, parkErr
-		}
-		// Durable quarantine is not a Core ACK, but the obsolete delivery-block
-		// reason no longer applies once the poisoned head is parked and removed.
-		d.clearDeliveryBlocked()
-		d.refreshStats()
-		return false, codeErr(CodePoison, "parked malformed durable agent batch", err, false)
+		// No Core-authoritative disposition is possible for this malformed local
+		// payload. Keep the durable head and continuity blocked; never skip it.
+		return false, d.retainBlocked(ctx, batch, "ERR_MALFORMED_DURABLE_PAYLOAD", err)
 	}
 
 	uploadCtx, cancel := context.WithTimeout(ctx, d.cfg.RequestTimeout)
@@ -756,7 +748,27 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 	d.metrics.Attempts.Add(1)
 	ack, err := d.transport.UploadAgentTelemetry(uploadCtx, req)
 	if err == nil {
-		accepted := ack.AcceptedThroughIngressSequence
+		if ack.Status == "TERMINALLY_REJECTED" {
+			if verificationErr := coreclient.ValidateAgentTelemetryAck(req, ack); verificationErr != nil {
+				return false, d.retainBlocked(ctx, batch, "ERR_TERMINAL_DISPOSITION_MISMATCH", verificationErr)
+			}
+			if len(batch.Records) != 1 || len(req.Records) != 1 || !singleDelivery(req.Records[0].Records) {
+				return false, d.retainBlocked(ctx, batch, identityConflictCode,
+					errors.New("terminal disposition requires one Sensor record and one Agent delivery"))
+			}
+			if parkErr := d.parkHead(batch, identityConflictCode,
+				errors.New("durable Core terminal disposition"), ack.DispositionID); parkErr != nil {
+				return false, parkErr
+			}
+			d.metrics.FailuresPermanent.Add(1)
+			d.clearDeliveryBlocked()
+			d.refreshStats()
+			return false, codeErr(CodePoison, "quarantined Core-terminal identity-conflict record", nil, false)
+		}
+		accepted := ack.AcceptedLastIngressSequence
+		if accepted == 0 {
+			accepted = ack.AcceptedThroughIngressSequence
+		}
 		if aerr := d.spool.CompleteOutboundBatch(accepted); aerr != nil {
 			// CompleteOutboundBatch may fail after durably advancing AckedThrough
 			// (record cleanup or outbound-window sidecar unlink/fsync). Reconcile
@@ -802,22 +814,7 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 			d.identityIsolationUntil = batch.LastSequence
 			return false, codeErr(CodeTransport, "identity-conflict batch narrowed without ACK", err, false)
 		}
-		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
-			return false, codeErr(CodeSpool, "failed abandoning identity-conflict window", aerr, false)
-		}
-		if d.identityIsolationUntil == 0 {
-			d.identityIsolationUntil = batch.LastSequence
-		}
-		if parkErr := d.parkHead(batch, identityConflictCode, err); parkErr != nil {
-			return false, parkErr
-		}
-		if batch.LastSequence >= d.identityIsolationUntil {
-			d.identityIsolationUntil = 0
-		}
-		d.metrics.FailuresPermanent.Add(1)
-		d.clearDeliveryBlocked()
-		d.refreshStats()
-		return false, codeErr(CodePoison, "quarantined identity-conflict agent record", err, false)
+		return false, d.retainBlocked(ctx, batch, identityConflictCode, err)
 	}
 
 	if isRecordAttributableCoreError(err) {
@@ -827,19 +824,9 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		if len(req.Records) != 1 || !singleDelivery(req.Records[0].Records) {
 			return false, d.retainBlocked(ctx, batch, code, err)
 		}
-		// Only a record-attributable singleton rejection may abandon and durably park.
-		if aerr := d.spool.AbandonOutboundBatch(); aerr != nil {
-			return false, codeErr(CodeSpool, "failed abandoning outbound window before poison park", aerr, false)
-		}
-		if parkErr := d.parkHead(batch, code, err); parkErr != nil {
-			return false, parkErr
-		}
-		d.metrics.FailuresPermanent.Add(1)
-		// Clear only after durable poison publish + spool removal succeeded.
-		// Poison quarantine must not increment DurableAcks.
-		d.clearDeliveryBlocked()
-		d.refreshStats()
-		return false, codeErr(CodePoison, "parked terminal agent-telemetry failure", err, false)
+		// A typed durable Core disposition, not a generic error code, is required
+		// before any local quarantine can remove a continuity sequence.
+		return false, d.retainBlocked(ctx, batch, code, err)
 	}
 
 	if isTransient(err) {
@@ -1022,7 +1009,7 @@ func (d *Drain) persistIdentityConflictMarker() error {
 	return nil
 }
 
-func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
+func (d *Drain) parkHead(batch spool.Batch, reason string, cause error, dispositionID string) error {
 	if len(batch.Records) == 0 {
 		return nil
 	}
@@ -1049,6 +1036,7 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 		meta["batchChecksum"] = payload.BatchChecksum
 		meta["correlationId"] = payload.CorrelationID
 		meta["payloadSHA256"] = hex.EncodeToString(digest[:])
+		meta["coreDispositionId"] = dispositionID
 		meta["replayPolicy"] = "AUTHORITATIVE_RECONCILIATION_REQUIRED"
 	}
 	metaBytes, _ := json.Marshal(meta)
@@ -1113,10 +1101,10 @@ func (d *Drain) parkHead(batch spool.Batch, reason string, cause error) error {
 			return codeErr(CodePoison, "failed publishing identity-conflict health marker", err, true)
 		}
 	}
-	if err := d.spool.AcknowledgeThrough(head.Sequence); err != nil {
-		// DiskSpool may return after durably advancing AckedThrough when later
-		// record cleanup or final directory fsync fails. Reconcile delivery
-		// health from authoritative spool state; never invent a Core ACK.
+	if err := d.spool.CompleteOutboundBatch(head.Sequence); err != nil {
+		// Keep the frozen request identity through any pre-commit failure, so an
+		// exact retry can retrieve the same Core terminal disposition. A later
+		// cleanup failure may follow a durable spool watermark advance.
 		authorityPoison := isAuthorityPoisonCode(reason)
 		if d.reconcileAfterPartialSpoolCommit(head.Sequence, false, authorityPoison) {
 			d.metrics.PoisonCount.Add(1)

@@ -2,6 +2,7 @@ package com.platform.core.ingestion.agentingress;
 
 import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.ReplayReservation;
+import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
 
 import java.util.UUID;
 
@@ -19,6 +20,24 @@ public interface AgentIngressWatermarkStore {
             String batchId,
             String correlationId
     );
+
+    /** Bind the exact encoded request for new dispositions; null legacy digests remain replayable. */
+    default ReplayReservation reserveBatchWithBody(
+            UUID tenantId, String sensorId, String streamId, long firstSeq, long lastSeq,
+            String checksum, String batchId, String correlationId, String requestSha256
+    ) {
+        return reserveBatch(tenantId, sensorId, streamId, firstSeq, lastSeq,
+                checksum, batchId, correlationId);
+    }
+
+    ReplayReservation terminallyRejectIdentityConflict(
+            UUID tenantId, String sensorId, String streamId, long sequence,
+            String checksum, String batchId, String correlationId,
+            AgentIngressRecord record, UUID entityId, Long bindingVersion
+    );
+
+    boolean terminalReplayMatchesRecord(UUID tenantId, String sensorId,
+            UUID dispositionId, AgentIngressRecord record);
 
     PublisherClaimResult claimPublisherLease(
             UUID tenantId,

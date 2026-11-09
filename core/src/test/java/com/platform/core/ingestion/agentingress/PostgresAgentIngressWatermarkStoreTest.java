@@ -2,6 +2,15 @@ package com.platform.core.ingestion.agentingress;
 
 import com.platform.core.ingestion.replay.PublisherClaimResult;
 import com.platform.core.ingestion.replay.ReplayReservation;
+import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
+import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
+import com.platform.core.ingestion.IngestionException;
+import com.platform.core.ingestion.IngestionMetrics;
+import com.platform.core.ingestion.KafkaTelemetryProducer;
+import com.platform.core.ingestion.authority.SensorScope;
+import com.platform.core.ingestion.dto.CanonicalObservation;
+import com.platform.core.ingestion.dto.TelemetryObservationBatch;
+import com.platform.core.agentcontrol.EntityAgentBinding;
 import com.platform.core.support.PostgresTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -10,7 +19,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.jdbc.datasource.DataSourceTransactionManager;
 
 import java.util.Map;
+import java.util.List;
 import java.util.UUID;
+import java.time.Instant;
+import java.security.cert.X509Certificate;
+import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -18,6 +31,9 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.Mockito.*;
+import static org.mockito.ArgumentMatchers.*;
+import org.springframework.http.HttpStatus;
 
 @Tag("postgres")
 class PostgresAgentIngressWatermarkStoreTest {
@@ -56,6 +72,213 @@ class PostgresAgentIngressWatermarkStoreTest {
         store.finalizeReservedBatch(
                 tenantId, sensorId, streamId, first, last, checksum, batchId, correlationId,
                 claim.ownerToken(), claim.publisherEpoch());
+    }
+
+    private AgentIngressRecord terminalRecord(String sensorId, long sequence) {
+        return new AgentIngressRecord(sequence, "ingress-record-" + sequence,
+                tenantId.toString(), terminalAgentId(sensorId), sensorId, 1,
+                sequence, sequence, "agent-batch-" + sequence,
+                "agent-correlation-" + sequence, java.time.Instant.now().toString(),
+                List.of(new com.fasterxml.jackson.databind.ObjectMapper().createObjectNode()));
+    }
+
+    private static String terminalAgentId(String sensorId) {
+        return "agent-" + sensorId;
+    }
+
+    private static String terminalFingerprint(String sensorId) {
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(sensorId.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void seedTerminalAuthority(String sensorId, UUID entityId) {
+        pg.jdbc().update("""
+                INSERT INTO platform.sensor (sensor_id, tenant_id, role, status, created_at, updated_at)
+                VALUES (?, ?, 'INFRASTRUCTURE', 'ACTIVE', now(), now())
+                """, sensorId, tenantId);
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (tenant_id, entity_id, entity_type, display_name,
+                    lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'terminal host', 'ACTIVE', now(), now(), now(), now())
+                """, tenantId, entityId);
+        pg.jdbc().update("""
+                INSERT INTO platform.agent (tenant_id, agent_id, status, created_at, updated_at)
+                VALUES (?, ?, 'ACTIVE', now(), now())
+                """, tenantId, terminalAgentId(sensorId));
+        pg.jdbc().update("""
+                INSERT INTO platform.agent_certificate_credential
+                    (credential_id, tenant_id, agent_id, fingerprint_sha256, serial_number, issuer_dn,
+                     not_before, not_after, status, activated_at, created_at, updated_at)
+                VALUES (?, ?, ?, ?, '01', 'CN=test', now()-interval '1 hour',
+                        now()+interval '1 day', 'ACTIVE', now(), now(), now())
+                """, UUID.randomUUID(), tenantId, terminalAgentId(sensorId), terminalFingerprint(sensorId));
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_agent_binding
+                    (tenant_id, entity_id, agent_id, certificate_identity, system_name, os_identity,
+                     first_enrolled_at, last_heartbeat_at, binding_state, reinstall_generation)
+                VALUES (?, ?, ?, ?, 'terminal-host', 'linux', now(), now(), 'ACTIVE', 1)
+                """, tenantId, entityId, terminalAgentId(sensorId), terminalFingerprint(sensorId));
+        pg.jdbc().update("""
+                INSERT INTO platform.agent_sensor_assignment
+                    (assignment_id, tenant_id, agent_id, sensor_id, generation, status,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, 1, 'ACTIVE', now(), now())
+                """, UUID.randomUUID(), tenantId, terminalAgentId(sensorId), sensorId);
+    }
+
+    @Test
+    void terminalSettlementIsDurableReplayableAndDoesNotAdvanceAcceptedPrefix() {
+        String sensorId = "sensor-terminal-sequence";
+        UUID entityId = UUID.randomUUID();
+        seedTerminalAuthority(sensorId, entityId);
+        String checksum = "a".repeat(64);
+        AgentIngressRecord record = terminalRecord(sensorId, 1);
+
+        assertEquals(ReplayReservation.Status.RESERVED, store.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, checksum, "batch-terminal", "corr-terminal").status());
+        ReplayReservation terminal = store.terminallyRejectIdentityConflict(tenantId, sensorId,
+                streamId, 1, checksum, "batch-terminal", "corr-terminal", record, entityId, 1L);
+        assertEquals(ReplayReservation.Status.TERMINALLY_REJECTED, terminal.status());
+        assertEquals(0, terminal.ackedThroughSequence());
+        assertEquals(1, terminal.settledThroughSequence());
+        assertTrue(store.terminalReplayMatchesRecord(tenantId, sensorId,
+                terminal.terminalDispositionId(), record));
+        assertFalse(store.terminalReplayMatchesRecord(UUID.randomUUID(), sensorId,
+                terminal.terminalDispositionId(), record));
+
+        PostgresAgentIngressWatermarkStore restarted = new PostgresAgentIngressWatermarkStore(
+                pg.jdbc(), new DataSourceTransactionManager(pg.dataSource()));
+        ReplayReservation retry = restarted.reserveBatch(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch-terminal", "corr-terminal");
+        assertEquals(terminal.terminalDispositionId(), retry.terminalDispositionId());
+        ReplayReservation changedTerminalChecksum = restarted.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, "b".repeat(64), "batch-terminal", "corr-terminal");
+        assertEquals(ReplayReservation.Status.REJECTED, changedTerminalChecksum.status());
+        assertEquals("ERR_REPLAY_CONFLICT", changedTerminalChecksum.rejectionCode());
+
+        assertEquals(ReplayReservation.Status.RESERVED, restarted.reserveBatch(tenantId, sensorId,
+                streamId, 2, 2, "c".repeat(64), "batch-next", "corr-next").status());
+        PublisherClaimResult claim = restarted.claimPublisherLease(tenantId, sensorId, streamId,
+                2, 2, "c".repeat(64), "batch-next", "corr-next");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+        restarted.finalizeReservedBatch(tenantId, sensorId, streamId, 2, 2,
+                "c".repeat(64), "batch-next", "corr-next", claim.ownerToken(), claim.publisherEpoch());
+        Map<String, Object> watermarks = pg.jdbc().queryForMap("""
+                SELECT acked_through_sequence, settled_through_sequence
+                  FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(0L, ((Number) watermarks.get("acked_through_sequence")).longValue());
+        assertEquals(2L, ((Number) watermarks.get("settled_through_sequence")).longValue());
+        assertEquals(1, pg.jdbc().queryForObject("""
+                SELECT count(*) FROM platform.sensor_agent_ingress_terminal_disposition
+                 WHERE tenant_id=? AND sensor_id=?
+                """, Integer.class, tenantId, sensorId));
+    }
+
+    @Test
+    void serviceLostTerminalAndAcceptedResponsesUseDurablePostgresDisposition() {
+        String sensorId = "sensor-terminal-service";
+        UUID entityId = UUID.randomUUID();
+        seedTerminalAuthority(sensorId, entityId);
+        AgentIngressRecord rejectedRecord = terminalRecord(sensorId, 1);
+        AgentIngressRecord acceptedRecord = terminalRecord(sensorId, 2);
+        String rejectedChecksum = "d".repeat(64);
+        String acceptedChecksum = "e".repeat(64);
+        AgentTelemetryBatchRequest rejected = new AgentTelemetryBatchRequest(2, sensorId,
+                streamId, "batch-rejected", 1, 1, 1, rejectedChecksum, "corr-rejected",
+                List.of(rejectedRecord));
+        AgentTelemetryBatchRequest accepted = new AgentTelemetryBatchRequest(2, sensorId,
+                streamId, "batch-accepted", 2, 2, 1, acceptedChecksum, "corr-accepted",
+                List.of(acceptedRecord));
+        SensorScope scope = new SensorScope(sensorId, tenantId, null, Set.of(entityId), true);
+        X509Certificate certificate = mock(X509Certificate.class);
+        AgentIngestionValidator validator = mock(AgentIngestionValidator.class);
+        KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
+        when(validator.resolveAuthority(certificate)).thenReturn(scope);
+        when(validator.validateAndExtract(any(), eq(rejected), eq(scope)))
+                .thenThrow(new IngestionException(HttpStatus.CONFLICT,
+                        "ERR_AGENT_IDENTITY_CONFLICT", "conflicting host"));
+        when(validator.validateCurrentTerminalAuthority(rejectedRecord, scope))
+                .thenReturn(new EntityAgentBinding(tenantId, entityId, terminalAgentId(sensorId),
+                        terminalFingerprint(sensorId), "terminal-host", "linux", Instant.now(), Instant.now(),
+                        "ACTIVE", 1));
+        when(validator.validateAndExtract(any(), eq(accepted), eq(scope)))
+                .thenReturn(List.of(new CanonicalObservation(tenantId.toString(), entityId.toString(),
+                        "cpu.util", sensorId, Instant.now(), 1.0, 1, 0, "seq-2", "AGENT_HOST")));
+        AgentIngestionService service = new AgentIngestionService(validator, store, kafka,
+                new IngestionMetrics());
+
+        var first = service.ingestAgentTelemetry(new byte[]{1}, rejected, rejected.batchId(), certificate);
+        var lostTerminalResponseRetry = service.ingestAgentTelemetry(
+                new byte[]{1}, rejected, rejected.batchId(), certificate);
+        assertEquals("TERMINALLY_REJECTED", first.status());
+        assertEquals(first.dispositionId(), lostTerminalResponseRetry.dispositionId());
+        IngestionException alteredTerminalBody = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry(new byte[]{9}, rejected, rejected.batchId(), certificate));
+        assertEquals("ERR_REPLAY_CONFLICT", alteredTerminalBody.getCode());
+        verify(validator, times(1)).validateAndExtract(any(), eq(rejected), eq(scope));
+        verify(kafka, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+
+        var acceptedResponse = service.ingestAgentTelemetry(new byte[]{2}, accepted,
+                accepted.batchId(), certificate);
+        var lostAcceptedResponseRetry = service.ingestAgentTelemetry(new byte[]{2}, accepted,
+                accepted.batchId(), certificate);
+        assertEquals("ACCEPTED", acceptedResponse.status());
+        assertEquals(0L, acceptedResponse.acceptedThroughIngressSequence());
+        assertEquals(2L, acceptedResponse.acceptedLastIngressSequence());
+        assertEquals(acceptedResponse, lostAcceptedResponseRetry);
+        IngestionException alteredAcceptedBody = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry(new byte[]{9}, accepted, accepted.batchId(), certificate));
+        assertEquals("ERR_REPLAY_CONFLICT", alteredAcceptedBody.getCode());
+        verify(kafka, times(1)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        verify(validator, times(1)).validateAndExtract(any(), eq(accepted), eq(scope));
+    }
+
+    @Test
+    void historicalNullBatchIdentityRetainsAcceptedReplayCompatibility() {
+        String sensorId = "sensor-legacy-null-batch";
+        assertEquals(ReplayReservation.Status.RESERVED, store.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, "legacy-checksum", "original-batch", "corr").status());
+        claimAndFinalize(sensorId, 1, 1, "legacy-checksum", "original-batch", "corr");
+        pg.jdbc().update("""
+                UPDATE platform.sensor_agent_ingress_watermark SET last_batch_id = NULL
+                 WHERE tenant_id = ? AND sensor_id = ?
+                """, tenantId, sensorId);
+        assertEquals(ReplayReservation.Status.ALREADY_ACKED, store.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, "legacy-checksum", "historical-retry", "corr").status());
+        assertEquals(ReplayReservation.Status.REJECTED, store.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, "changed-checksum", "historical-retry", "corr").status());
+    }
+
+    @Test
+    void revokedAssignmentCannotCreateTerminalSkip() {
+        String sensorId = "sensor-terminal-stale";
+        UUID entityId = UUID.randomUUID();
+        seedTerminalAuthority(sensorId, entityId);
+        String checksum = "a".repeat(64);
+        assertEquals(ReplayReservation.Status.RESERVED, store.reserveBatch(tenantId, sensorId,
+                streamId, 1, 1, checksum, "stale-batch", "stale-corr").status());
+        pg.jdbc().update("""
+                UPDATE platform.agent_sensor_assignment SET status='REVOKED', revoked_at=now()
+                 WHERE tenant_id=? AND agent_id=?
+                """, tenantId, terminalAgentId(sensorId));
+        IngestionException rejected = assertThrows(IngestionException.class, () ->
+                store.terminallyRejectIdentityConflict(tenantId, sensorId, streamId, 1,
+                        checksum, "stale-batch", "stale-corr", terminalRecord(sensorId, 1), entityId, 1L));
+        assertEquals("ERR_AGENT_ASSIGNMENT_UNKNOWN", rejected.getCode());
+        assertEquals(0, pg.jdbc().queryForObject("""
+                SELECT count(*) FROM platform.sensor_agent_ingress_terminal_disposition
+                 WHERE tenant_id=? AND sensor_id=?
+                """, Integer.class, tenantId, sensorId));
+        assertEquals(0L, pg.jdbc().queryForObject("""
+                SELECT settled_through_sequence FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, Long.class, tenantId, sensorId));
     }
 
     @Test
@@ -132,12 +355,13 @@ class PostgresAgentIngressWatermarkStoreTest {
                 claim.ownerToken(), claim.publisherEpoch());
 
         Map<String, Object> finalized = pg.jdbc().queryForMap("""
-                SELECT acked_through_sequence, last_checksum, pending_first_sequence,
+                SELECT acked_through_sequence, settled_through_sequence, last_checksum, pending_first_sequence,
                        pending_batch_id, pending_correlation_id, pending_publisher_owner
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id=? AND sensor_id=?
                 """, tenantId, sensorId);
         assertEquals(10L, ((Number) finalized.get("acked_through_sequence")).longValue());
+        assertEquals(10L, ((Number) finalized.get("settled_through_sequence")).longValue());
         assertEquals("checksum-a", finalized.get("last_checksum"));
         assertNull(finalized.get("pending_first_sequence"));
         assertNull(finalized.get("pending_batch_id"));
@@ -145,9 +369,24 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertNull(finalized.get("pending_publisher_owner"));
 
         ReplayReservation alreadyAcked = store.reserveBatch(
-                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay", "corr-replay");
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a", "corr-replay");
         assertEquals(ReplayReservation.Status.ALREADY_ACKED, alreadyAcked.status());
         assertEquals(10L, alreadyAcked.ackedThroughSequence());
+
+        ReplayReservation changedBatchIdentity = store.reserveBatch(
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a-replay", "corr-replay");
+        assertEquals(ReplayReservation.Status.REJECTED, changedBatchIdentity.status());
+        assertEquals("ERR_IDEMPOTENCY_CONFLICT", changedBatchIdentity.rejectionCode());
+
+        ReplayReservation changedAcceptedChecksum = store.reserveBatch(
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-changed", "batch-a", "corr-replay");
+        assertEquals(ReplayReservation.Status.REJECTED, changedAcceptedChecksum.status());
+        assertEquals("ERR_REPLAY_CONFLICT", changedAcceptedChecksum.rejectionCode());
+
+        assertEquals(ReplayReservation.Status.RESERVED, store.reserveBatch(
+                tenantId, sensorId, streamId, 11L, 11L, "checksum-next", "batch-next", "corr-next").status());
+        assertEquals(ReplayReservation.Status.ALREADY_ACKED, store.reserveBatch(
+                tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a", "corr-replay").status());
     }
 
     @Test
@@ -213,10 +452,11 @@ class PostgresAgentIngressWatermarkStoreTest {
                 pg.jdbc().update("""
                         INSERT INTO platform.sensor_agent_ingress_watermark (
                             tenant_id, sensor_id, stream_id, acked_through_sequence,
+                            settled_through_sequence,
                             last_first_sequence, last_last_sequence, last_checksum,
                             pending_first_sequence, pending_last_sequence,
                             pending_checksum, pending_reserved_at
-                        ) VALUES (?, ?, ?, 0, 0, 0, '', 1, 1, 'checksum', CURRENT_TIMESTAMP)
+                        ) VALUES (?, ?, ?, 0, 0, 0, 0, '', 1, 1, 'checksum', CURRENT_TIMESTAMP)
                         """, tenantId, sensorId, streamId)
         );
 
