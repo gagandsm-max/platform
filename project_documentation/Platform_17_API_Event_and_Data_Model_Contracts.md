@@ -444,8 +444,48 @@ Applicable Agent / shared-ingress BUILD owners (principally BUILD-062 ingestion 
 3. **Repeated stale request.** Repeated stale rejection does not create a pending wedge.
 4. **Cleanup race.** Conditional cleanup cannot delete publisher-owned, finalized or settled state.
 5. **Cleanup failure.** Cleanup failure remains retryable, preserves Sensor custody and advances neither accepted nor settled watermarks.
+6. **Crash after mutable validation failure, before pending release.** Core crashes after a deterministic mutable-validation failure has been decided but before conditional unpublished pending release commits. Prove: no deletion-authorizing response exists so Sensor retains custody; exact retry after Core restart reconciles/releases that exact unpublished pending reservation; corrected authority may then use the same unsettled sequence; no Kafka/customer duplicate and no fabricated watermark advance.
 
-These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them.
+These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them. Fixture 6 is a required BUILD-062 failure fixture.
+
+#### 7.1.9 Schema migration / release-guard upgrade precondition
+
+**Authority.** This subsection freezes upgrade/schema-migration safety for Agent-ingress pending-release semantics. Runtime pending/replay behavior remains BUILD-062; upgrade/canary/rollback acceptance of the zero-pending preflight remains BUILD-127. Operations preflight lives in `Platform_16` §5.1 and the upgrade journey in `Platform_06` §119.21.
+
+**Root problem.** A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch:
+
+- was never published;
+- was publisher-claimed;
+- was published to Kafka but not finalized;
+- is merely a stale-assignment orphan.
+
+Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous historical pending state. Historical pending publication state is **not inferable** from schema alone. Migration MUST NOT label an unknown pending row as safe-to-release.
+
+**FROZEN precondition.** Any Agent-ingress schema migration that introduces or changes pending-release / pending-replay semantics (a release-guard schema transition; cross-reference the current V021-equivalent Flyway migration when present in the catalogue, without treating that filename as eternal product terminology) MUST require a verified **zero-pending** Agent-ingress precondition before applying the transition:
+
+1. Quiesce new Agent-ingress admission.
+2. Run the old/current pre-upgrade runtime as recovery authority.
+3. Allow exact retries / drain / reconciliation.
+4. Verify Agent-ingress pending reservations are zero.
+5. Verify no active Agent-ingress publisher leases remain.
+6. Only then apply the schema migration.
+
+**Fail-closed migration behavior.**
+
+- If the zero-pending precondition is violated, migration MUST abort; no partial-apply is valid.
+- Migration apply MUST be transactional such that failure leaves the prior schema and data authoritative.
+- No direct DB delete/reset of pending rows is an accepted remediation path for the gate.
+- No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted.
+- Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1).
+- Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure under BUILD-127.
+
+Finite acceptance owned across BUILD-062 (runtime) and BUILD-127 (upgrade gate):
+
+1. V020-equivalent (pre-release-guard) zero-pending → migration succeeds.
+2. One pre-existing pending row → migration aborts with old schema/data intact.
+3. After old-version drain to pending=0 → migration succeeds.
+4. Manual pending deletion/reset is **not** accepted remediation.
+5. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 

@@ -2128,7 +2128,9 @@ class MotherReferenceValidator:
         A deterministic pre-publication non-terminal rejection must not leave an
         unpublished durable pending reservation blocking continuity. Bindings in
         Platform_05/06 and BUILD-062/024 must reference §7.1 without dropping the
-        frozen invariant phrase. Skipped when Platform_17 is absent.
+        frozen invariant phrase. Also pins the zero-pending upgrade/migration
+        gate (Platform_16 §5.1 / §7.1.9 / BUILD-127) and crash/restart exact
+        retry fixture under BUILD-062. Skipped when Platform_17 is absent.
         """
         p17_path = (
             self.docs_root
@@ -2172,6 +2174,7 @@ class MotherReferenceValidator:
             "### 7.1.6 Cleanup failure",
             "### 7.1.7 Terminal disposition remains distinct",
             "### 7.1.8 Mandatory acceptance tests / fixtures",
+            "### 7.1.9 Schema migration / release-guard upgrade precondition",
             "TERMINALLY_REJECTED",
             "ERR_AGENT_IDENTITY_CONFLICT",
             "ERR_AGENT_ASSIGNMENT_UNKNOWN",
@@ -2182,6 +2185,10 @@ class MotherReferenceValidator:
             "publisher-owned",
             "Sensor retains custody",
             "same unsettled sequence",
+            "Historical pending publication state is **not inferable**",
+            "zero-pending",
+            "Crash after mutable validation failure, before pending release",
+            "Manual pending deletion/reset is **not** accepted remediation",
         )
         for needle in required_p17:
             if needle not in p17:
@@ -2225,11 +2232,35 @@ class MotherReferenceValidator:
             for needle in (
                 "Platform_17` §7.1",
                 frozen,
+                "### 119.21 Upgrade / rollback",
+                "pending Agent-ingress = non-zero",
+                "quiesce Agent-ingress admission",
+                "No Core partial-schema state is valid",
             ):
                 if needle not in p06:
                     self.fail(
-                        f"Platform_06 must bind Platform_17 §7.1 "
-                        f"(missing {needle!r})"
+                        f"Platform_06 must bind Platform_17 §7.1 / "
+                        f"zero-pending upgrade preflight (missing {needle!r})"
+                    )
+
+        p16_path = (
+            self.docs_root
+            / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        )
+        if p16_path.is_file():
+            p16 = p16_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                "pending-reservation upgrade gate",
+                "pending Agent-ingress = non-zero",
+                "MUST NOT delete pending Agent-ingress rows manually",
+                "Verify all Agent-ingress pending reservations are zero",
+                "Verify no active Agent-ingress publisher leases remain",
+            ):
+                if needle not in p16:
+                    self.fail(
+                        "Platform_16 must freeze Agent-ingress zero-pending "
+                        f"upgrade gate (missing {needle!r})"
                     )
 
         register_path = (
@@ -2242,6 +2273,9 @@ class MotherReferenceValidator:
                 "pending-reservation",
                 "BUILD-062",
                 "BUILD-024",
+                "BUILD-127",
+                "zero-pending",
+                "crash after mutable-validation failure before pending release",
             ):
                 if needle not in register:
                     self.fail(
@@ -2250,10 +2284,15 @@ class MotherReferenceValidator:
                     )
             # Ownership must stay on 062/024; do not reopen BUILD-003 CERTIFIED.
             summary_003 = ""
+            summary_062 = ""
+            summary_127 = ""
             for line in register.splitlines():
                 if line.startswith("| BUILD-003 |"):
                     summary_003 = line
-                    break
+                elif line.startswith("| BUILD-062 |"):
+                    summary_062 = line
+                elif line.startswith("| BUILD-127 |"):
+                    summary_127 = line
             if summary_003 and "CERTIFIED" not in summary_003:
                 self.fail(
                     "BUILD-003 historical CERTIFIED status must remain intact "
@@ -2264,6 +2303,32 @@ class MotherReferenceValidator:
                     "BUILD-003 summary must state §7.1 does not reopen the "
                     "certified record"
                 )
+            if summary_062 and "runtime" not in summary_062.lower():
+                self.fail(
+                    "BUILD-062 must own runtime pending/replay behavior for "
+                    "Agent-ingress pending-reservation safety"
+                )
+            if summary_127 and "zero-pending" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own zero-pending Agent-ingress migration "
+                    "preflight acceptance"
+                )
+            # Preserve prior Network/Flow status truth closures.
+            for build_id, required in (
+                ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+                ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+                ("BUILD-051", "NOT_IMPLEMENTED"),
+            ):
+                row = ""
+                for line in register.splitlines():
+                    if line.startswith(f"| {build_id} |"):
+                        row = line
+                        break
+                if row and required not in row:
+                    self.fail(
+                        f"{build_id} maturity truth must remain {required!r} "
+                        "when binding Agent-ingress upgrade gate"
+                    )
 
     def validate(self) -> list[str]:
         self.errors = []

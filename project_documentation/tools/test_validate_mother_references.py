@@ -3699,6 +3699,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
         p05 = (docs / "Platform_05_LLD.md").read_text(encoding="utf-8")
         p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
         register = (
             root / "Platform_Master_Build_Sequence_Register_v1.0.md"
         ).read_text(encoding="utf-8")
@@ -3722,6 +3725,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "Sensor retains custody",
             "same unsettled sequence",
             "### 7.1.8 Mandatory acceptance tests / fixtures",
+            "### 7.1.9 Schema migration / release-guard upgrade precondition",
+            "Historical pending publication state is **not inferable**",
+            "zero-pending",
+            "Crash after mutable validation failure, before pending release",
+            "Manual pending deletion/reset is **not** accepted remediation",
         ):
             self.assertIn(needle, p17, needle)
 
@@ -3732,6 +3740,43 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertIn("`Platform_17` §7.1", register)
         self.assertIn("pending-reservation", register)
         self.assertIn("does **not** reopen this certified record", register)
+
+        # Zero-pending upgrade gate + ownership split.
+        self.assertIn("pending Agent-ingress = non-zero", p16)
+        self.assertIn("MUST NOT delete pending Agent-ingress rows manually", p16)
+        self.assertIn("pending Agent-ingress = non-zero", p06)
+        self.assertIn("No Core partial-schema state is valid", p06)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn("runtime", row_062.lower())
+        self.assertIn(
+            "crash-after-mutable-validation-before-pending-release",
+            row_062,
+        )
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("zero-pending", row_127)
+        self.assertIn("BUILD-127", register)
+        ledger_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 127 |")
+        )
+        self.assertIn("V020-equivalent zero-pending", ledger_127)
+        self.assertIn(
+            "one pre-existing Agent-ingress pending row → migration aborts",
+            ledger_127,
+        )
+        self.assertIn(
+            "manual pending deletion/reset is **not** accepted remediation",
+            ledger_127,
+        )
 
         # Just-corrected Network/Flow status truth must remain intact.
         for build_id, required in (
@@ -3790,6 +3835,154 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertTrue(validator.errors, "expected pending-reservation failures")
             self.assertIn("pending-reservation", joined.lower())
             self.assertIn("MUST NOT", joined)
+
+    def test_99c_agent_ingress_zero_pending_upgrade_gate(self) -> None:
+        """Zero-pending upgrade gate + crash recovery + BUILD-127 ownership."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        # Migration abort on pending state; fail closed; transactional.
+        for needle in (
+            "If the zero-pending precondition is violated, migration MUST abort",
+            "Migration apply MUST be transactional",
+            "V020-equivalent (pre-release-guard) zero-pending → migration succeeds",
+            "One pre-existing pending row → migration aborts with old schema/data intact",
+            "After old-version drain to pending=0 → migration succeeds",
+            "Failure is observable/audited",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        # Crash/restart exact retry recovery fixture under BUILD-062.
+        self.assertIn(
+            "Crash after mutable validation failure, before pending release",
+            p17,
+        )
+        self.assertIn("Fixture 6 is a required BUILD-062 failure fixture", p17)
+        ledger_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 062 |")
+        )
+        self.assertIn(
+            "crash after mutable-validation failure before pending release",
+            ledger_062,
+        )
+        self.assertIn("exact retry reconciles/releases unpublished pending", ledger_062)
+
+        # BUILD-127 owns the upgrade gate; BUILD-062 owns runtime.
+        self.assertIn("zero-pending migration preflight", register)
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("zero-pending migration preflight", row_127)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn("Zero-pending **upgrade/migration preflight acceptance**", row_062)
+        self.assertIn("BUILD-127", row_062)
+
+        # Platform_16 / §119.21 preflight surface.
+        self.assertIn("Quiesce new Agent-ingress admission", p16)
+        self.assertIn("upgrade aborts at preflight/migration gate", p16)
+        self.assertIn("quiesce Agent-ingress admission", p06)
+        self.assertIn("publisher ownership/leases drained", p06)
+
+        # No regression of sFlow + status truth.
+        self.assertIn("sFlow v5", register)
+        self.assertIn("S5 sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99d_agent_ingress_zero_pending_upgrade_gate_regression_fails(
+        self,
+    ) -> None:
+        """Dropping zero-pending upgrade gate / BUILD-127 ownership fails closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # Keep §7.1 runtime contract but strip the upgrade-gate subsection.
+        stripped = p17_full.replace(
+            "#### 7.1.9 Schema migration / release-guard upgrade precondition",
+            "#### 7.1.9 REMOVED",
+        )
+        self.assertNotIn(
+            "#### 7.1.9 Schema migration / release-guard upgrade precondition",
+            stripped,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            # Register without BUILD-127 zero-pending ownership.
+            register_bad = (
+                "# Register\n\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED — does **not** "
+                "reopen this certified record | z |\n"
+                "| BUILD-024 | agent gateway | pending-reservation | "
+                "`Platform_17` §7.1 | Partial | z |\n"
+                "| BUILD-062 | ingestion | runtime pending-reservation | "
+                "`Platform_17` §7.1 | Partial | z |\n"
+                "| BUILD-127 | upgrade | matrix only | 126 | Incomplete | "
+                "Upgrade matrix |\n"
+                "| BUILD-043 | net | x | y | SPECIFIED_ONLY / NOT_IMPLEMENTED | z |\n"
+                "| BUILD-044 | net | x | y | SPECIFIED_ONLY / NOT_IMPLEMENTED | z |\n"
+                "| BUILD-051 | flow | x | y | NOT_IMPLEMENTED | z |\n"
+            )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(register_bad, encoding="utf-8")
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected zero-pending gate failures")
+            self.assertTrue(
+                "7.1.9" in joined
+                or "zero-pending" in joined.lower()
+                or "BUILD-127" in joined,
+                joined,
+            )
 
     def test_100_dependency_activation_any_all_combine(self) -> None:
         """DependencyActivationV1 MUST persist explicit ANY|ALL combination."""

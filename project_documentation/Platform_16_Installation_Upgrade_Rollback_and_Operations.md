@@ -104,7 +104,35 @@ Preflight → capacity/free-space check → package signature → state/config b
 
 **Phase 1 standalone upgrades** exercise backup/restore prerequisites, signature/provenance checks, schema migration safety, identity/certificate continuity, unacknowledged spool continuity and post-upgrade health without Core-HA switchover claims.
 
-**Phase 1.5 HA Core upgrades** are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active, with fencing/rejoin safety preserved. Exact data-service upgrade sequencing follows component version compatibility.
+### 5.1 Phase-1 standalone preflight — Agent-ingress pending-reservation upgrade gate
+
+**Upgrade blocker.** Any Core schema migration that introduces or changes Agent-ingress pending-release / pending-replay semantics (including a V021-equivalent release-guard transition when present in the Flyway catalogue) MUST NOT proceed while any pre-migration Agent-ingress pending reservation exists.
+
+`pending Agent-ingress = non-zero` is an upgrade blocker for migrations that change pending/replay semantics. A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch was never published, was publisher-claimed, was published to Kafka but not finalized, or is merely a stale-assignment orphan. Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous historical pending state.
+
+**Supported upgrade precondition (fail-closed):**
+
+1. Quiesce new Agent-ingress admission.
+2. Run the old/current pre-upgrade Core runtime (old version remains the recovery authority).
+3. Allow exact retries / drain / reconciliation under that old runtime.
+4. Verify all Agent-ingress pending reservations are zero.
+5. Verify no active Agent-ingress publisher leases remain.
+6. Only then apply the schema migration that changes pending-release semantics.
+
+If any pending reservation remains:
+
+- the upgrade aborts at preflight/migration gate;
+- no migration partial-apply is valid;
+- no direct DB delete/reset of pending rows is accepted remediation;
+- no guessed publication state may be fabricated;
+- the old package/schema remains authoritative for recovery;
+- the operator receives actionable diagnostic/support guidance (stream identity, pending sequence range, publisher-lease presence, correlation IDs) without secret exposure.
+
+**Operator prohibition.** The operator MUST NOT delete pending Agent-ingress rows manually to bypass this gate. Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure recorded under Platform Operations / BUILD-127 acceptance. No Core partial-schema state is a valid end state.
+
+Cross-reference: `Platform_17` §7.1 (pending-reservation safety and schema-migration precondition), `Platform_06` §119.21, BUILD-062 (runtime pending/replay) and BUILD-127 (upgrade/canary/rollback acceptance of the zero-pending preflight).
+
+**Phase 1.5 HA Core upgrades** are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active, with fencing/rejoin safety preserved. Exact data-service upgrade sequencing follows component version compatibility. The Agent-ingress zero-pending gate above remains mandatory for each Core before a pending-release semantics migration is applied on that node.
 
 ## 6. Rollback
 
