@@ -25,7 +25,7 @@ This checkpoint supersedes earlier current-dispatch assertions only. Historical 
 
 ## Historical execution checkpoint — 2026-11-06
 
-This dated checkpoint is preserved as provenance from the pre-#302 documentation handoff. It is **not** current main truth. Current dispatch is the 2026-11-08 checkpoint above.
+This dated checkpoint is preserved as provenance from the pre-#302 documentation handoff. It is **not** current main truth. Current dispatch is the 2026-11-10 checkpoint above.
 
 | Current field | Verified fact / remaining gate (historical 2026-11-06) |
 |---|---|
