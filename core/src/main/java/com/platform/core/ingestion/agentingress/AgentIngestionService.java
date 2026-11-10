@@ -140,25 +140,39 @@ public class AgentIngestionService {
         List<CanonicalObservation> observations;
         try {
             if (validatedPending) {
-                observations = validator.extractValidatedSnapshot(request, scope, reservation.pendingEntityIds());
-            } else {
-                AgentIngestionValidator.ValidatedBatch validated = legacyPending
-                        ? validator.validateLegacyAndSnapshot(request, scope)
-                        : validator.validateAndSnapshot(request, scope);
-                observations = validated.observations();
-                if (observations.isEmpty()) {
-                    throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_NO_CANONICAL_OBSERVATIONS",
-                            "Batch contains zero supported canonical numeric observations");
+                observations = validator.extractValidatedSnapshot(request, scope, reservation.pendingBindings());
+                if (reservation.pendingCanonicalBatchSha256() == null
+                        || !reservation.pendingCanonicalBatchSha256().equals(
+                                validator.canonicalBatchDigest(observations))) {
+                    throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "ERR_AGENT_CANONICAL_DIGEST_MISMATCH",
+                            "Validated canonical batch digest does not match the pending authority checkpoint");
                 }
-                if (!watermarkStore.checkpointAuthority(scope.tenantId(), scope.sensorId(),
+            } else {
+                AgentIngressWatermarkStore.AuthorityCheckpoint checkpoint =
+                        watermarkStore.checkpointAuthority(scope.tenantId(), scope.sensorId(),
                         request.sensorAgentSpoolStreamId(), request.firstIngressSequence(),
                         request.lastIngressSequence(), request.checksum(), request.batchId(),
                         request.correlationId(), requestSha256, reservation.pendingReservationId(),
-                        validated.entityIds())) {
+                        () -> {
+                            AgentIngestionValidator.ValidatedBatch validated = legacyPending
+                                    ? validator.validateLegacyAndSnapshot(request, scope)
+                                    : validator.validateAndSnapshot(request, scope);
+                            if (validated.observations().isEmpty()) {
+                                throw new IngestionException(HttpStatus.BAD_REQUEST,
+                                        "ERR_NO_CANONICAL_OBSERVATIONS",
+                                        "Batch contains zero supported canonical numeric observations");
+                            }
+                            return new AgentIngressWatermarkStore.AuthorityCheckpoint(
+                                    validated.observations(), validated.bindings(),
+                                    validator.canonicalBatchDigest(validated.observations()));
+                        });
+                if (checkpoint == null) {
                     throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
                             "ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN",
                             "Agent-ingress authority checkpoint is unconfirmed; retain and retry exact batch");
                 }
+                observations = checkpoint.observations();
             }
         } catch (IngestionException validationFailure) {
             if ("ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN".equals(validationFailure.getCode())) {

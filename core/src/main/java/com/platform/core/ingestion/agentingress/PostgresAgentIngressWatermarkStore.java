@@ -14,12 +14,9 @@ import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
-import java.sql.Array;
-import java.sql.SQLException;
-import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 import java.util.UUID;
+import java.util.function.Supplier;
 import java.util.regex.Pattern;
 
 @Repository
@@ -160,7 +157,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                     SELECT stream_id, acked_through_sequence, settled_through_sequence,
                            pending_first_sequence, pending_last_sequence, pending_checksum,
                            pending_request_sha256,
-                           pending_batch_id, pending_correlation_id, pending_publisher_owner,
+                           pending_batch_id, pending_correlation_id, pending_reservation_id,
+                           pending_publisher_owner,
                            pending_authority_state, pending_publication_attempted
                       FROM platform.sensor_agent_ingress_watermark
                      WHERE tenant_id = ? AND sensor_id = ? FOR UPDATE
@@ -172,6 +170,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                             rs.getString("pending_checksum"), rs.getString("pending_request_sha256"),
                             rs.getString("pending_batch_id"),
                             rs.getString("pending_correlation_id"),
+                            (UUID) rs.getObject("pending_reservation_id"),
                             (UUID) rs.getObject("pending_publisher_owner"),
                             rs.getString("pending_authority_state"),
                             (Boolean) rs.getObject("pending_publication_attempted")), tenantId, sensorId);
@@ -244,7 +243,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                            pending_checksum = NULL, pending_request_sha256 = NULL,
                            pending_reservation_id = NULL, pending_publication_attempted = FALSE,
                            pending_authority_state = 'NONE', pending_authority_validated_at = NULL,
-                           pending_entity_ids = NULL,
+                           pending_canonical_batch_sha256 = NULL,
                            pending_batch_id = NULL,
                            pending_correlation_id = NULL, pending_reserved_at = NULL,
                            pending_publisher_owner = NULL, pending_publisher_claimed_at = NULL,
@@ -255,6 +254,9 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             if (updated != 1) {
                 throw new IllegalStateException("Agent-ingress terminal continuity advance failed");
             }
+            jdbcTemplate.update("DELETE FROM platform.sensor_agent_ingress_pending_canonical_binding "
+                    + "WHERE tenant_id = ? AND sensor_id = ? AND reservation_id = ?",
+                    tenantId, sensorId, row.reservationId());
             return ReplayReservation.terminallyRejected(
                     row.ackedThroughSequence(), sequence, dispositionId, "ERR_AGENT_IDENTITY_CONFLICT");
         });
@@ -325,7 +327,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_first_sequence, pending_last_sequence,
                        pending_checksum, pending_request_sha256,
                        pending_batch_id, pending_correlation_id, pending_reservation_id,
-                       pending_authority_state, pending_entity_ids
+                       pending_authority_state, pending_canonical_batch_sha256
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
@@ -347,7 +349,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_correlation_id"),
                         (UUID) rs.getObject("pending_reservation_id"),
                         rs.getString("pending_authority_state"),
-                        readEntityIds(rs.getArray("pending_entity_ids"))
+                        rs.getString("pending_canonical_batch_sha256")
                 ),
                 tenantId,
                 sensorId
@@ -440,8 +442,11 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 if (checksum.equalsIgnoreCase(row.pendingChecksum())
                         && batchIdEquals(row.pendingBatchId(), batchId)
                         && batchIdEquals(row.pendingCorrelationId(), correlationId)) {
+                    List<PendingCanonicalBindingV1> bindings = "AUTHORITY_VALIDATED".equals(row.pendingAuthorityState())
+                            ? loadBindings(tenantId, sensorId, row.pendingReservationId()) : null;
                     return ReplayReservation.retryPending(row.ackedThroughSequence(),
-                            row.pendingReservationId(), row.pendingAuthorityState(), row.pendingEntityIds());
+                            row.pendingReservationId(), row.pendingAuthorityState(), bindings,
+                            row.pendingCanonicalBatchSha256());
                 }
                 return ReplayReservation.rejected(
                         row.ackedThroughSequence(),
@@ -493,7 +498,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_reservation_id = ?,
                        pending_authority_state = 'UNVALIDATED',
                        pending_authority_validated_at = NULL,
-                       pending_entity_ids = NULL,
+                       pending_canonical_batch_sha256 = NULL,
                        pending_publication_attempted = FALSE,
                        pending_publisher_owner = NULL,
                        pending_publisher_claimed_at = NULL,
@@ -520,7 +525,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
         if (pendingReservationId == null || requestSha256 == null) return false;
         Boolean released = transactionTemplate.execute(status -> {
             acquireSensorLock(tenantId, sensorId);
-            return jdbcTemplate.update(
+            int releasedRows = jdbcTemplate.update(
                     """
                     UPDATE platform.sensor_agent_ingress_watermark
                        SET pending_first_sequence = NULL, pending_last_sequence = NULL,
@@ -528,7 +533,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                            pending_batch_id = NULL, pending_correlation_id = NULL,
                            pending_reserved_at = NULL, pending_reservation_id = NULL,
                            pending_authority_state = 'NONE',
-                           pending_authority_validated_at = NULL, pending_entity_ids = NULL,
+                           pending_authority_validated_at = NULL, pending_canonical_batch_sha256 = NULL,
                            pending_publication_attempted = FALSE,
                            updated_at = CURRENT_TIMESTAMP
                      WHERE tenant_id = ? AND sensor_id = ? AND stream_id = ?
@@ -551,27 +556,26 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                     tenantId, sensorId, streamId, firstSeq - 1, firstSeq, lastSeq,
                     checksum, batchId, correlationId, requestSha256, pendingReservationId,
                     tenantId, sensorId, streamId, firstSeq
-            ) == 1;
+            );
+            if (releasedRows == 1) {
+                jdbcTemplate.update("DELETE FROM platform.sensor_agent_ingress_pending_canonical_binding "
+                        + "WHERE tenant_id = ? AND sensor_id = ? AND reservation_id = ?",
+                        tenantId, sensorId, pendingReservationId);
+            }
+            return releasedRows == 1;
         });
         return Boolean.TRUE.equals(released);
     }
 
     @Override
-    public boolean checkpointAuthority(UUID tenantId, String sensorId, String streamId,
+    public AuthorityCheckpoint checkpointAuthority(UUID tenantId, String sensorId, String streamId,
             long firstSeq, long lastSeq, String checksum, String batchId, String correlationId,
-            String requestSha256, UUID reservationId, List<UUID> entityIds) {
-        if (requestSha256 == null || reservationId == null || entityIds == null
-                || entityIds.isEmpty() || entityIds.size() != lastSeq - firstSeq + 1
-                || entityIds.stream().anyMatch(Objects::isNull)) return false;
-        Boolean checkpointed = transactionTemplate.execute(status -> {
+            String requestSha256, UUID reservationId, Supplier<AuthorityCheckpoint> validate) {
+        if (requestSha256 == null || reservationId == null || validate == null) return null;
+        return transactionTemplate.execute(status -> {
             acquireSensorLock(tenantId, sensorId);
-            int updated = jdbcTemplate.update(connection -> {
-                PreparedStatement ps = connection.prepareStatement("""
-                    UPDATE platform.sensor_agent_ingress_watermark
-                       SET pending_authority_state = 'AUTHORITY_VALIDATED',
-                           pending_authority_validated_at = clock_timestamp(),
-                           pending_entity_ids = ?, pending_publication_attempted = FALSE,
-                           updated_at = CURRENT_TIMESTAMP
+            List<UUID> exact = jdbcTemplate.query("""
+                    SELECT pending_reservation_id FROM platform.sensor_agent_ingress_watermark
                      WHERE tenant_id = ? AND sensor_id = ? AND stream_id = ?
                        AND pending_first_sequence = ? AND pending_last_sequence = ?
                        AND lower(pending_checksum) = lower(?)
@@ -581,23 +585,49 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        AND pending_publisher_owner IS NULL
                        AND pending_publisher_claimed_at IS NULL
                        AND pending_publisher_lease_until IS NULL
-                    """);
-                ps.setArray(1, connection.createArrayOf("uuid", entityIds.toArray(UUID[]::new)));
-                ps.setObject(2, tenantId);
-                ps.setString(3, sensorId);
-                ps.setString(4, streamId);
-                ps.setLong(5, firstSeq);
-                ps.setLong(6, lastSeq);
-                ps.setString(7, checksum);
-                ps.setString(8, batchId);
-                ps.setString(9, correlationId);
-                ps.setString(10, requestSha256);
-                ps.setObject(11, reservationId);
-                return ps;
-            });
-            return updated == 1;
+                     FOR UPDATE
+                    """, (rs, n) -> (UUID) rs.getObject(1), tenantId, sensorId, streamId,
+                    firstSeq, lastSeq, checksum, batchId, correlationId, requestSha256, reservationId);
+            if (exact.size() != 1) return null;
+            AuthorityCheckpoint checkpoint = validate.get();
+            if (checkpoint == null || checkpoint.observations() == null
+                    || checkpoint.observations().isEmpty() || checkpoint.bindings() == null
+                    || checkpoint.bindings().size() != lastSeq - firstSeq + 1
+                    || checkpoint.canonicalBatchSha256() == null
+                    || !checkpoint.canonicalBatchSha256().matches("^[0-9a-f]{64}$")) {
+                throw new IllegalStateException("Incomplete Agent-ingress canonical authority checkpoint");
+            }
+            for (int i = 0; i < checkpoint.bindings().size(); i++) {
+                PendingCanonicalBindingV1 binding = checkpoint.bindings().get(i);
+                if (binding == null || binding.sensorIngressSequence() != firstSeq + i
+                        || binding.agentId() == null || binding.agentId().isBlank()
+                        || binding.hostId() == null || binding.hostId().isBlank()
+                        || binding.entityIdentifierId() == null || binding.entityId() == null
+                        || binding.assignmentGeneration() < 1 || binding.bindingVersion() < 1) {
+                    throw new IllegalStateException("Incomplete Agent-ingress canonical binding row");
+                }
+                jdbcTemplate.update("""
+                        INSERT INTO platform.sensor_agent_ingress_pending_canonical_binding
+                          (tenant_id, sensor_id, reservation_id, sensor_ingress_sequence,
+                           agent_id, assignment_generation, host_id, entity_identifier_id,
+                           entity_id, binding_version, validated_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, clock_timestamp())
+                        """, tenantId, sensorId, reservationId, binding.sensorIngressSequence(),
+                        binding.agentId(), binding.assignmentGeneration(), binding.hostId(),
+                        binding.entityIdentifierId(), binding.entityId(), binding.bindingVersion());
+            }
+            int updated = jdbcTemplate.update("""
+                    UPDATE platform.sensor_agent_ingress_watermark
+                       SET pending_authority_state = 'AUTHORITY_VALIDATED',
+                           pending_authority_validated_at = clock_timestamp(),
+                           pending_canonical_batch_sha256 = ?, pending_publication_attempted = FALSE,
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE tenant_id = ? AND sensor_id = ? AND pending_reservation_id = ?
+                       AND pending_authority_state IN ('UNVALIDATED', 'LEGACY_UNKNOWN')
+                    """, checkpoint.canonicalBatchSha256(), tenantId, sensorId, reservationId);
+            if (updated != 1) throw new IllegalStateException("Agent-ingress checkpoint transition failed");
+            return checkpoint;
         });
-        return Boolean.TRUE.equals(checkpointed);
     }
 
     @Override
@@ -648,6 +678,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 SELECT stream_id, pending_first_sequence, pending_last_sequence, pending_checksum,
                        pending_batch_id, pending_correlation_id,
                        pending_request_sha256, pending_reservation_id, pending_authority_state,
+                       pending_canonical_batch_sha256,
                        pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until,
                        (pending_publisher_owner IS NOT NULL
                         AND pending_publisher_lease_until IS NOT NULL
@@ -666,6 +697,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_request_sha256"),
                         (UUID) rs.getObject("pending_reservation_id"),
                         rs.getString("pending_authority_state"),
+                        rs.getString("pending_canonical_batch_sha256"),
                         (UUID) rs.getObject("pending_publisher_owner"),
                         rs.getLong("pending_publisher_epoch"),
                         rs.getTimestamp("pending_publisher_lease_until"),
@@ -695,7 +727,10 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
         }
         if (!"AUTHORITY_VALIDATED".equals(row.authorityState())
                 || requestSha256 == null || !requestSha256.equals(row.requestSha256())
-                || reservationId == null || !reservationId.equals(row.reservationId())) {
+                || reservationId == null || !reservationId.equals(row.reservationId())
+                || row.canonicalBatchSha256() == null
+                || !row.canonicalBatchSha256().matches("^[0-9a-f]{64}$")
+                || !bindingSnapshotComplete(loadBindings(tenantId, sensorId, reservationId), firstSeq, lastSeq)) {
             return PublisherClaimResult.rejected("ERR_AGENT_AUTHORITY_CHECKPOINT_REQUIRED",
                     "Publisher claim requires exact validated request authority");
         }
@@ -804,7 +839,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 SELECT stream_id, acked_through_sequence, settled_through_sequence,
                        last_first_sequence, last_last_sequence,
                        last_checksum, last_batch_id, pending_first_sequence, pending_last_sequence,
-                       pending_checksum, pending_batch_id, pending_correlation_id,
+                       pending_checksum, pending_batch_id, pending_correlation_id, pending_reservation_id,
                        pending_publisher_owner, pending_publisher_epoch, pending_publisher_lease_until
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
@@ -823,6 +858,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_checksum"),
                         rs.getString("pending_batch_id"),
                         rs.getString("pending_correlation_id"),
+                        (UUID) rs.getObject("pending_reservation_id"),
                         (UUID) rs.getObject("pending_publisher_owner"),
                         rs.getLong("pending_publisher_epoch"),
                         rs.getTimestamp("pending_publisher_lease_until")
@@ -887,7 +923,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_reservation_id = NULL,
                        pending_publication_attempted = FALSE,
                        pending_authority_state = 'NONE', pending_authority_validated_at = NULL,
-                       pending_entity_ids = NULL,
+                       pending_canonical_batch_sha256 = NULL,
                        pending_batch_id = NULL,
                        pending_correlation_id = NULL,
                        pending_reserved_at = NULL,
@@ -908,6 +944,9 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             throw new IllegalStateException(
                     "Agent-ingress publisher lease expired or ownership changed before finalize; pending reservation retained");
         }
+        jdbcTemplate.update("DELETE FROM platform.sensor_agent_ingress_pending_canonical_binding "
+                + "WHERE tenant_id = ? AND sensor_id = ? AND reservation_id = ?",
+                tenantId, sensorId, row.reservationId());
     }
 
     private void bindStreamIfNeeded(
@@ -968,13 +1007,28 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
         return left.equals(right);
     }
 
-    private static List<UUID> readEntityIds(Array sqlArray) throws SQLException {
-        if (sqlArray == null) return null;
-        try {
-            return List.copyOf(Arrays.asList((UUID[]) sqlArray.getArray()));
-        } finally {
-            sqlArray.free();
+    private List<PendingCanonicalBindingV1> loadBindings(UUID tenantId, String sensorId, UUID reservationId) {
+        if (reservationId == null) return List.of();
+        return jdbcTemplate.query("""
+                SELECT sensor_ingress_sequence, agent_id, assignment_generation, host_id,
+                       entity_identifier_id, entity_id, binding_version
+                  FROM platform.sensor_agent_ingress_pending_canonical_binding
+                 WHERE tenant_id = ? AND sensor_id = ? AND reservation_id = ?
+                 ORDER BY sensor_ingress_sequence
+                """, (rs, n) -> new PendingCanonicalBindingV1(
+                rs.getLong("sensor_ingress_sequence"), rs.getString("agent_id"),
+                rs.getLong("assignment_generation"), rs.getString("host_id"),
+                (UUID) rs.getObject("entity_identifier_id"), (UUID) rs.getObject("entity_id"),
+                rs.getLong("binding_version")), tenantId, sensorId, reservationId);
+    }
+
+    private static boolean bindingSnapshotComplete(List<PendingCanonicalBindingV1> bindings,
+            long firstSeq, long lastSeq) {
+        if (bindings.size() != lastSeq - firstSeq + 1) return false;
+        for (int i = 0; i < bindings.size(); i++) {
+            if (bindings.get(i).sensorIngressSequence() != firstSeq + i) return false;
         }
+        return true;
     }
 
     private record ReplayRow(
@@ -994,7 +1048,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String pendingCorrelationId,
             UUID pendingReservationId,
             String pendingAuthorityState,
-            List<UUID> pendingEntityIds
+            String pendingCanonicalBatchSha256
     ) {}
 
     private record TerminalRow(UUID id, long lastSequence, String checksum, String requestSha256,
@@ -1004,6 +1058,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             long settledThroughSequence, Long pendingFirstSequence, Long pendingLastSequence,
             String pendingChecksum, String pendingRequestSha256,
             String pendingBatchId, String pendingCorrelationId,
+            UUID reservationId,
             UUID publisherOwner, String authorityState, Boolean publicationAttempted) {}
 
     private record LeaseRow(
@@ -1016,6 +1071,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String requestSha256,
             UUID reservationId,
             String authorityState,
+            String canonicalBatchSha256,
             UUID owner,
             long publisherEpoch,
             Timestamp leaseUntil,
@@ -1035,6 +1091,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String pendingChecksum,
             String pendingBatchId,
             String pendingCorrelationId,
+            UUID reservationId,
             UUID owner,
             long publisherEpoch,
             Timestamp leaseUntil

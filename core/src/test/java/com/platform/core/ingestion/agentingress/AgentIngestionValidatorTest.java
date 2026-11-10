@@ -82,7 +82,12 @@ class AgentIngestionValidatorTest {
         return new AgentIngressRecord(
                 ingressSeq, "ingress-" + ingressSeq, tenantId.toString(), "agent-1",
                 acceptingSensor, generation, 10, 10, "agent-batch-1", "corr-1",
-                acceptedAt, List.of(delivery)
+                acceptedAt,
+                acceptedAt == null ? null : new com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1(
+                        objectMapper.valueToTree(1), acceptedAt, "QUALIFIED",
+                        objectMapper.valueToTree(0), objectMapper.valueToTree(0),
+                        "TEST_CLOCK", "sensor-instance-1", objectMapper.valueToTree(ingressSeq)),
+                List.of(delivery)
         );
     }
 
@@ -92,6 +97,84 @@ class AgentIngestionValidatorTest {
                 2, sensorId, STREAM, "batch-1", record.sensorIngressSequence(), record.sensorIngressSequence(),
                 1, checksum, "corr-batch", List.of(record)
         );
+    }
+
+    private AgentIngressRecord withEvidence(AgentIngressRecord record,
+            com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1 evidence) {
+        return new AgentIngressRecord(record.sensorIngressSequence(), record.sensorIngressRecordId(),
+                record.tenantId(), record.agentId(), record.acceptingSensorId(),
+                record.assignmentGeneration(), record.agentFirstSequence(), record.agentLastSequence(),
+                record.agentBatchId(), record.correlationId(), record.acceptedAt(), evidence, record.records());
+    }
+
+    private com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1 qualifiedEvidence(
+            String acceptedAt, long sequence, JsonNode maxError, JsonNode syncAge) {
+        return new com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1(
+                objectMapper.valueToTree(1), acceptedAt, "QUALIFIED", maxError, syncAge,
+                "TEST_CLOCK", "sensor-instance-1", objectMapper.valueToTree(sequence));
+    }
+
+    @Test
+    void qualifiedAcceptanceRejectsMalformedAndUnboundedClockNumbers() throws Exception {
+        AgentIngressRecord base = sampleRecord(1, "sensor-infra-01", 1);
+        JsonNode zero = objectMapper.valueToTree(0);
+        List<JsonNode[]> invalid = List.of(
+                new JsonNode[]{objectMapper.valueToTree(-1), zero},
+                new JsonNode[]{zero, objectMapper.valueToTree(-1)},
+                new JsonNode[]{objectMapper.valueToTree(5001), zero},
+                new JsonNode[]{zero, objectMapper.valueToTree(300001)},
+                new JsonNode[]{null, zero},
+                new JsonNode[]{zero, null},
+                new JsonNode[]{objectMapper.valueToTree("1"), zero},
+                new JsonNode[]{objectMapper.valueToTree(1.5), zero},
+                new JsonNode[]{objectMapper.readTree("9223372036854775808"), zero});
+        for (JsonNode[] values : invalid) {
+            AgentIngressRecord record = withEvidence(base,
+                    qualifiedEvidence(base.acceptedAt(), 1, values[0], values[1]));
+            IngestionException failure = assertThrows(IngestionException.class, () ->
+                    validator.validateImmutableBatch(new byte[0], batchWith(record, "sensor-infra-01"), scope));
+            assertEquals("ERR_SENSOR_ACCEPTANCE_EVIDENCE_INVALID", failure.getCode());
+        }
+        verifyNoInteractions(agentRepo);
+    }
+
+    @Test
+    void qualifiedIntervalOneMillisecondOverlapAndNegativeErrorCannotPassRevocation() throws Exception {
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T10:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), tenantId,
+                        "agent-1", "sensor-infra-01", 2, AgentAssignmentStatus.REVOKED,
+                        created, created, revoked)));
+        AgentIngressRecord overlapBase = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2,
+                "2026-09-11T09:59:59.999Z");
+        AgentIngressRecord overlap = withEvidence(overlapBase, qualifiedEvidence(overlapBase.acceptedAt(), 1,
+                objectMapper.valueToTree(1), objectMapper.valueToTree(0)));
+        AgentTelemetryBatchRequest overlapBatch = batchWith(overlap, "sensor-infra-01");
+        IngestionException overlapFailure = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(new byte[0], overlapBatch, scope));
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", overlapFailure.getCode());
+
+        AgentIngressRecord attackBase = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2,
+                "2026-09-11T10:00:01Z");
+        AgentIngressRecord attack = withEvidence(attackBase, qualifiedEvidence(attackBase.acceptedAt(), 1,
+                objectMapper.valueToTree(-1000), objectMapper.valueToTree(0)));
+        AgentTelemetryBatchRequest attackBatch = batchWith(attack, "sensor-infra-01");
+        IngestionException attackFailure = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(new byte[0], attackBatch, scope));
+        assertEquals("ERR_SENSOR_ACCEPTANCE_EVIDENCE_INVALID", attackFailure.getCode());
+    }
+
+    @Test
+    void qualifiedAcceptanceRejectsTimestampArithmeticOverflow() throws Exception {
+        for (String acceptedAt : List.of(Instant.MAX.toString(), Instant.MIN.toString())) {
+            AgentIngressRecord base = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 1, acceptedAt);
+            AgentIngressRecord record = withEvidence(base, qualifiedEvidence(acceptedAt, 1,
+                    objectMapper.valueToTree(1), objectMapper.valueToTree(0)));
+            IngestionException failure = assertThrows(IngestionException.class, () ->
+                    validator.validateImmutableBatch(new byte[0], batchWith(record, "sensor-infra-01"), scope));
+            assertEquals("ERR_SENSOR_ACCEPTANCE_EVIDENCE_INVALID", failure.getCode());
+        }
     }
 
     private void stubAssignment(long generation, String sensorId) {
@@ -109,8 +192,9 @@ class AgentIngestionValidatorTest {
         when(identifierRepo.findByResolutionKey(
                 tenantId, "platform.agent", "HOST_ID", "host-abc"
         )).thenReturn(Optional.of(new EntityIdentifier(
-                UUID.randomUUID(), tenantId, entityId, "HOST_ID", "platform.agent",
-                "host-abc", BigDecimal.ONE, Instant.now(), Instant.now()
+                UUID.fromString("018f0e0a-0000-7000-8000-000000000020"), tenantId, entityId,
+                "HOST_ID", "platform.agent", "host-abc", BigDecimal.ONE,
+                Instant.parse("2026-01-01T00:00:00Z"), Instant.now()
         )));
     }
 
@@ -150,9 +234,10 @@ class AgentIngestionValidatorTest {
         payload.put("hostId", "new-dhcp-host").put("entityId", UUID.randomUUID().toString());
         ((ObjectNode) payload.path("observations").get(0))
                 .put("hostId", "new-dhcp-host").put("entityId", UUID.randomUUID().toString());
-        var observations = validator.validateAndExtract(new byte[0],
-                batchWith(withPayload(record, payload), "sensor-infra-01"), scope);
-        assertEquals(entityId.toString(), observations.get(0).entityId());
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(new byte[0],
+                        batchWith(withPayload(record, payload), "sensor-infra-01"), scope));
+        assertEquals("ERR_AGENT_ENTITY_IDENTIFIER_UNPROVEN", failure.getCode());
         verify(agentRepo).findActiveEntityBinding(tenantId, "agent-1");
         verify(agentRepo).findAssignmentByGeneration(tenantId, "agent-1", 1);
         verifyNoMoreInteractions(agentRepo);
@@ -169,10 +254,10 @@ class AgentIngestionValidatorTest {
         for (int i = 0; i < 128; i++) {
             items.add(((ObjectNode) original.deepCopy()).put("hostId", "unknown-" + i));
         }
-        var output = validator.validateAndExtract(new byte[0],
-                batchWith(withPayload(record, payload), "sensor-infra-01"), scope);
-        assertEquals(128, output.size());
-        verify(identifierRepo).hasConflictingHostEvidence(eq(tenantId), eq(entityId), argThat(ids -> ids.size() == 129));
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract(new byte[0],
+                        batchWith(withPayload(record, payload), "sensor-infra-01"), scope));
+        assertEquals("ERR_AGENT_IDENTITY_CONFLICT", failure.getCode());
         verifyNoMoreInteractions(identifierRepo);
     }
 
@@ -243,6 +328,10 @@ class AgentIngestionValidatorTest {
         when(watermarks.reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
                 anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0, pendingReservationId));
+        when(watermarks.checkpointAuthority(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(call -> ((java.util.function.Supplier<AgentIngressWatermarkStore.AuthorityCheckpoint>)
+                        call.getArgument(10)).get());
         when(watermarks.releaseUnpublishedPending(any(), anyString(), anyString(), anyLong(), anyLong(),
                 anyString(), anyString(), anyString(), anyString(), eq(pendingReservationId)))
                 .thenReturn(true);
@@ -276,7 +365,7 @@ class AgentIngestionValidatorTest {
     void typedProcessNetworkWithoutHostIdRejectedBeforeCoreAck() throws Exception {
         assertRejectedBeforeCoreAck(List.of(withPayload(
                 sampleRecord(1, "sensor-infra-01", 1), processNetworkPayload(false)
-        )), "ERR_NON_NUMERIC_RECORD");
+        )), "ERR_AGENT_IDENTITY_CONFLICT", HttpStatus.CONFLICT);
         verifyNoInteractions(identifierRepo);
     }
 
@@ -285,7 +374,7 @@ class AgentIngestionValidatorTest {
         assertRejectedBeforeCoreAck(List.of(withPayload(
                 sampleRecord(1, "sensor-infra-01", 1), processNetworkPayload(true)
         )), "ERR_NON_NUMERIC_RECORD");
-        verify(identifierRepo).findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc");
+        verify(identifierRepo, times(2)).findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc");
     }
 
     @Test
@@ -363,7 +452,9 @@ class AgentIngestionValidatorTest {
                 anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0, UUID.randomUUID()));
         when(watermarks.checkpointAuthority(any(), anyString(), anyString(), anyLong(), anyLong(),
-                anyString(), anyString(), anyString(), anyString(), any(), anyList())).thenReturn(true);
+                anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(call -> ((java.util.function.Supplier<AgentIngressWatermarkStore.AuthorityCheckpoint>)
+                        call.getArgument(10)).get());
         when(watermarks.claimPublisherLeaseExact(any(), anyString(), anyString(), anyLong(), anyLong(),
                 anyString(), anyString(), anyString(), anyString(), any()))
                 .thenReturn(PublisherClaimResult.claimed(owner, 1L));
@@ -451,8 +542,9 @@ class AgentIngestionValidatorTest {
         when(agentRepo.findActiveEntityBinding(tenantId, "agent-1"))
                 .thenReturn(Optional.of(new EntityAgentBinding(tenantId, entityId, "agent-1",
                         "a".repeat(64), "host-abc", "linux", created, revoked, "ACTIVE", 1)));
+        stubEntity();
         AgentIngestionValidator.ValidatedBatch validated = validator.validateLegacyAndSnapshot(batch, scope);
-        assertEquals(List.of(entityId), validated.entityIds());
+        assertEquals(List.of(entityId), validated.bindings().stream().map(PendingCanonicalBindingV1::entityId).toList());
         assertEquals(1, validated.observations().size());
         assertEquals(entityId.toString(), validated.observations().get(0).entityId());
     }
@@ -470,20 +562,63 @@ class AgentIngestionValidatorTest {
         when(agentRepo.findActiveEntityBinding(tenantId, "agent-1"))
                 .thenReturn(Optional.of(new EntityAgentBinding(tenantId, entityId, "agent-1",
                         "a".repeat(64), "host-abc", "linux", revoked, revoked, "ACTIVE", 1)));
+        stubEntity();
+        when(identifierRepo.findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc"))
+                .thenReturn(Optional.of(new EntityIdentifier(
+                        UUID.fromString("018f0e0a-0000-7000-8000-000000000021"), tenantId,
+                        entityId, "HOST_ID", "platform.agent", "host-abc", BigDecimal.ONE,
+                        revoked, revoked)));
         IngestionException failure = assertThrows(IngestionException.class,
                 () -> validator.validateLegacyAndSnapshot(batch, scope));
         assertEquals("ERR_AGENT_LEGACY_ENTITY_UNPROVEN", failure.getCode());
     }
 
     @Test
+    void legacyActiveAssignmentCreatedAfterAcceptanceCannotProveHistoricalAuthority() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T10:00:00.001Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), tenantId,
+                        "agent-1", "sensor-infra-01", 2, AgentAssignmentStatus.ACTIVE,
+                        created, created, null)));
+        stubEntity();
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                validator.validateLegacyAndSnapshot(batch, scope));
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", failure.getCode());
+    }
+
+    @Test
     void validatedSnapshotSurvivesCurrentBindingRevocationAndRetainsLogicalIdentity() throws Exception {
         AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
         AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
-        List<CanonicalObservation> replay = validator.extractValidatedSnapshot(batch, scope, List.of(entityId));
+        List<CanonicalObservation> replay = validator.extractValidatedSnapshot(batch, scope,
+                List.of(new PendingCanonicalBindingV1(1, "agent-1", 2, "host-abc",
+                        UUID.fromString("018f0e0a-0000-7000-8000-000000000020"), entityId, 1)));
         assertEquals(1, replay.size());
         assertEquals(entityId.toString(), replay.get(0).entityId());
         assertTrue(replay.get(0).sequenceId().contains("agent-1:2:10:0:cpu.util"));
         verifyNoInteractions(agentRepo);
+    }
+
+    @Test
+    void validatedSnapshotRejectsChangedSequenceAgentGenerationAndHost() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        UUID identifier = UUID.fromString("018f0e0a-0000-7000-8000-000000000020");
+        for (PendingCanonicalBindingV1 binding : List.of(
+                new PendingCanonicalBindingV1(2, "agent-1", 2, "host-abc", identifier, entityId, 1),
+                new PendingCanonicalBindingV1(1, "agent-other", 2, "host-abc", identifier, entityId, 1),
+                new PendingCanonicalBindingV1(1, "agent-1", 3, "host-abc", identifier, entityId, 1),
+                new PendingCanonicalBindingV1(1, "agent-1", 2, "host-other", identifier, entityId, 1))) {
+            IngestionException failure = assertThrows(IngestionException.class, () ->
+                    validator.extractValidatedSnapshot(batch, scope, List.of(binding)));
+            assertEquals("ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE", failure.getCode());
+        }
+        IngestionException missing = assertThrows(IngestionException.class, () ->
+                validator.extractValidatedSnapshot(batch, scope, List.of()));
+        assertEquals("ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE", missing.getCode());
+        verifyNoInteractions(agentRepo, identifierRepo);
     }
 
     @Test
@@ -503,7 +638,7 @@ class AgentIngestionValidatorTest {
     }
 
     @Test
-    void historicalRevokedGenerationAcceptedExactlyOnRevocationBoundary() throws Exception {
+    void historicalRevokedGenerationRejectedExactlyOnRevocationBoundary() throws Exception {
         AgentIngressRecord record = sampleRecordWithAcceptedAt(1, "sensor-infra-01", 2, "2026-09-11T10:00:00Z");
         AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
         Instant created = Instant.parse("2026-09-11T09:00:00Z");
@@ -514,8 +649,9 @@ class AgentIngestionValidatorTest {
                         AgentAssignmentStatus.REVOKED, created, created, revoked
                 )));
         stubEntity();
-        List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
-        assertEquals(1, obs.size());
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                validator.validateAndExtract("{}".getBytes(), batch, scope));
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", failure.getCode());
     }
 
     @Test
@@ -531,7 +667,7 @@ class AgentIngestionValidatorTest {
                 )));
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
-        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTED_AFTER_REVOCATION", ex.getCode());
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", ex.getCode());
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
     }
 
@@ -548,7 +684,7 @@ class AgentIngestionValidatorTest {
                 )));
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
-        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTED_BEFORE_ACTIVATION", ex.getCode());
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", ex.getCode());
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
     }
 
@@ -565,7 +701,7 @@ class AgentIngestionValidatorTest {
                 )));
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
-        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_REQUIRED", ex.getCode());
+        assertEquals("ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", ex.getCode());
         assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
     }
 
@@ -582,8 +718,8 @@ class AgentIngestionValidatorTest {
                 )));
         IngestionException ex = assertThrows(IngestionException.class, () ->
                 validator.validateAndExtract("{}".getBytes(), batch, scope));
-        assertEquals("ERR_REVOKED_ASSIGNMENT_ACCEPTANCE_TIME_INVALID", ex.getCode());
-        assertEquals(HttpStatus.FORBIDDEN, ex.getStatus());
+        assertEquals("ERR_SENSOR_ACCEPTANCE_EVIDENCE_INVALID", ex.getCode());
+        assertEquals(HttpStatus.BAD_REQUEST, ex.getStatus());
     }
 
     @Test

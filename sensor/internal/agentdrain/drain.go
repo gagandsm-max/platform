@@ -64,18 +64,19 @@ func codeErr(code ErrorCode, msg string, cause error, transient bool) error {
 
 // durableBatchPayload mirrors agentreceiver.durableBatchPayload for decode-only use.
 type durableBatchPayload struct {
-	TenantID      string          `json:"tenantId"`
-	AgentID       string          `json:"agentId"`
-	SensorID      string          `json:"sensorId"`
-	Generation    int64           `json:"assignmentGeneration"`
-	FirstSequence uint64          `json:"firstSequence"`
-	LastSequence  uint64          `json:"lastSequence"`
-	RecordIDs     []string        `json:"recordIds"`
-	BatchChecksum string          `json:"batchChecksum"`
-	BatchID       string          `json:"batchId"`
-	CorrelationID string          `json:"correlationId"`
-	Timestamp     time.Time       `json:"timestamp"`
-	Envelope      json.RawMessage `json:"envelope"`
+	TenantID           string                                `json:"tenantId"`
+	AgentID            string                                `json:"agentId"`
+	SensorID           string                                `json:"sensorId"`
+	Generation         int64                                 `json:"assignmentGeneration"`
+	FirstSequence      uint64                                `json:"firstSequence"`
+	LastSequence       uint64                                `json:"lastSequence"`
+	RecordIDs          []string                              `json:"recordIds"`
+	BatchChecksum      string                                `json:"batchChecksum"`
+	BatchID            string                                `json:"batchId"`
+	CorrelationID      string                                `json:"correlationId"`
+	Timestamp          time.Time                             `json:"timestamp"`
+	AcceptanceEvidence coreclient.SensorAcceptanceEvidenceV1 `json:"acceptanceEvidence"`
+	Envelope           json.RawMessage                       `json:"envelope"`
 }
 
 type envelopeLite struct {
@@ -912,8 +913,17 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 			AgentBatchID:          payload.BatchID,
 			CorrelationID:         payload.CorrelationID,
 			AcceptedAt:            acceptedAt,
+			AcceptanceEvidence:    &payload.AcceptanceEvidence,
 			Records:               deliveryRecords,
 		}
+		if ingress.AcceptanceEvidence.EvidenceVersion == 0 {
+			ingress.AcceptanceEvidence = &coreclient.SensorAcceptanceEvidenceV1{
+				EvidenceVersion: 1, AcceptedAtUTC: acceptedAt,
+				ClockQuality: "UNQUALIFIED", ClockSource: "LEGACY_SPOOL",
+				SensorServiceInstanceID: "legacy-unknown",
+			}
+		}
+		ingress.AcceptanceEvidence.DurableSpoolSequence = rec.Sequence
 		// Stable checksum shared with Core AgentIngestionValidator (scalar identity fields).
 		var line = fmt.Sprintf("%d|%s|%d|%d|%d|%s|%s|%s",
 			ingress.SensorIngressSequence, ingress.AgentBatchID,

@@ -14,7 +14,9 @@ import (
 	"sync"
 	"time"
 
+	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/spool"
+	"platform/sensor/internal/supportability"
 )
 
 const (
@@ -67,20 +69,21 @@ type streamStateEntry struct {
 }
 
 type durableBatchPayload struct {
-	Version       int              `json:"version,omitempty"`
-	TenantID      string           `json:"tenantId"`
-	AgentID       string           `json:"agentId"`
-	AgentStreamID string           `json:"agentStreamId,omitempty"`
-	SensorID      string           `json:"sensorId"`
-	Generation    int64            `json:"assignmentGeneration"`
-	FirstSequence uint64           `json:"firstSequence"`
-	LastSequence  uint64           `json:"lastSequence"`
-	RecordIDs     []string         `json:"recordIds"`
-	BatchChecksum string           `json:"batchChecksum"`
-	BatchID       string           `json:"batchId"`
-	CorrelationID string           `json:"correlationId"`
-	Timestamp     time.Time        `json:"timestamp"`
-	Envelope      DeliveryEnvelope `json:"envelope"`
+	Version            int                                   `json:"version,omitempty"`
+	TenantID           string                                `json:"tenantId"`
+	AgentID            string                                `json:"agentId"`
+	AgentStreamID      string                                `json:"agentStreamId,omitempty"`
+	SensorID           string                                `json:"sensorId"`
+	Generation         int64                                 `json:"assignmentGeneration"`
+	FirstSequence      uint64                                `json:"firstSequence"`
+	LastSequence       uint64                                `json:"lastSequence"`
+	RecordIDs          []string                              `json:"recordIds"`
+	BatchChecksum      string                                `json:"batchChecksum"`
+	BatchID            string                                `json:"batchId"`
+	CorrelationID      string                                `json:"correlationId"`
+	Timestamp          time.Time                             `json:"timestamp"`
+	AcceptanceEvidence coreclient.SensorAcceptanceEvidenceV1 `json:"acceptanceEvidence"`
+	Envelope           DeliveryEnvelope                      `json:"envelope"`
 }
 
 // SpoolAcceptanceSink durably accepts Agent batches into a dedicated DiskSpool
@@ -93,17 +96,19 @@ type durableBatchPayload struct {
 // are safely compacted only when wholly covered by the durable persisted contiguous
 // watermark.
 type SpoolAcceptanceSink struct {
-	spool              *spool.DiskSpool
-	indexDir           string
-	stateDir           string
-	mu                 sync.Mutex
-	reconcileRequired  bool
-	ranges             map[string][]batchIndexEntry
-	streams            map[string]*streamStateEntry
-	owners             map[string]*LineageOwnerRecord
-	tombstones         map[string]*LegacyTombstoneRecord
-	maxSparseRanges    int
-	maxDrainedReceipts int
+	spool                 *spool.DiskSpool
+	indexDir              string
+	stateDir              string
+	mu                    sync.Mutex
+	reconcileRequired     bool
+	ranges                map[string][]batchIndexEntry
+	streams               map[string]*streamStateEntry
+	owners                map[string]*LineageOwnerRecord
+	tombstones            map[string]*LegacyTombstoneRecord
+	maxSparseRanges       int
+	maxDrainedReceipts    int
+	clockEvidenceProvider ClockEvidenceProvider
+	serviceInstanceID     string
 	// indexPublisher is an unexported test seam for exercising the critical
 	// append-succeeds/index-publication-fails boundary. Production leaves it nil.
 	indexPublisher func(string, batchIndexEntry) error
@@ -115,7 +120,25 @@ type SpoolAcceptanceSink struct {
 	streamStatePublisher func(dir, path, tmpPattern string, v any) error
 }
 
-func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (*SpoolAcceptanceSink, error) {
+type AcceptanceOption func(*SpoolAcceptanceSink)
+
+func WithClockEvidenceProvider(provider ClockEvidenceProvider) AcceptanceOption {
+	return func(s *SpoolAcceptanceSink) {
+		if provider != nil {
+			s.clockEvidenceProvider = provider
+		}
+	}
+}
+
+func WithServiceInstanceID(id string) AcceptanceOption {
+	return func(s *SpoolAcceptanceSink) {
+		if strings.TrimSpace(id) != "" {
+			s.serviceInstanceID = id
+		}
+	}
+}
+
+func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string, options ...AcceptanceOption) (*SpoolAcceptanceSink, error) {
 	if agentSpool == nil {
 		return nil, errors.New("ERR_INVALID_CONFIG: agent DiskSpool is required")
 	}
@@ -144,15 +167,20 @@ func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string) (
 	}
 
 	sink := &SpoolAcceptanceSink{
-		spool:              agentSpool,
-		indexDir:           indexDir,
-		stateDir:           stateDir,
-		ranges:             make(map[string][]batchIndexEntry),
-		streams:            make(map[string]*streamStateEntry),
-		owners:             make(map[string]*LineageOwnerRecord),
-		tombstones:         make(map[string]*LegacyTombstoneRecord),
-		maxSparseRanges:    defaultMaxSparseRanges,
-		maxDrainedReceipts: defaultMaxSparseRanges,
+		spool:                 agentSpool,
+		indexDir:              indexDir,
+		stateDir:              stateDir,
+		ranges:                make(map[string][]batchIndexEntry),
+		streams:               make(map[string]*streamStateEntry),
+		owners:                make(map[string]*LineageOwnerRecord),
+		tombstones:            make(map[string]*LegacyTombstoneRecord),
+		maxSparseRanges:       defaultMaxSparseRanges,
+		maxDrainedReceipts:    defaultMaxSparseRanges,
+		clockEvidenceProvider: productionClockEvidenceProvider(),
+		serviceInstanceID:     supportability.NewServiceInstanceID(),
+	}
+	for _, option := range options {
+		option(sink)
 	}
 	if err := sink.ensureOwnerDir(); err != nil {
 		return nil, err
@@ -452,6 +480,8 @@ func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, st
 	for _, r := range env.Records {
 		recordIDs = append(recordIDs, r.ID)
 	}
+	acceptedAt := time.Now().UTC()
+	clock := s.clockEvidenceProvider.Sample(acceptedAt)
 	payload := durableBatchPayload{
 		TenantID:      env.TenantID,
 		AgentID:       env.AgentID,
@@ -463,8 +493,17 @@ func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, st
 		BatchChecksum: checksum,
 		BatchID:       env.BatchID,
 		CorrelationID: env.CorrelationID,
-		Timestamp:     time.Now().UTC(),
-		Envelope:      env,
+		Timestamp:     acceptedAt,
+		AcceptanceEvidence: coreclient.SensorAcceptanceEvidenceV1{
+			EvidenceVersion:         1,
+			AcceptedAtUTC:           acceptedAt.Format(time.RFC3339Nano),
+			ClockQuality:            clock.Quality,
+			ClockMaxErrorMs:         clock.MaxErrorMs,
+			ClockSyncAgeMs:          clock.SyncAgeMs,
+			ClockSource:             clock.Source,
+			SensorServiceInstanceID: s.serviceInstanceID,
+		},
+		Envelope: env,
 	}
 	if streamID != "" {
 		payload.Version = modernDurableVersion

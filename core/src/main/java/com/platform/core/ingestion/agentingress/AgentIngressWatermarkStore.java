@@ -6,6 +6,8 @@ import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
 
 import java.util.UUID;
 import java.util.List;
+import java.util.function.Supplier;
+import com.platform.core.ingestion.dto.CanonicalObservation;
 
 public interface AgentIngressWatermarkStore {
 
@@ -47,11 +49,14 @@ public interface AgentIngressWatermarkStore {
     boolean terminalReplayMatchesRecord(UUID tenantId, String sensorId,
             UUID dispositionId, AgentIngressRecord record);
 
-    /** Persist exact-request authority and the per-ingress-record entity snapshot. */
-    default boolean checkpointAuthority(UUID tenantId, String sensorId, String streamId,
+    record AuthorityCheckpoint(List<CanonicalObservation> observations,
+            List<PendingCanonicalBindingV1> bindings, String canonicalBatchSha256) {}
+
+    /** Validate and persist all authority evidence in one exact-reservation transaction. */
+    default AuthorityCheckpoint checkpointAuthority(UUID tenantId, String sensorId, String streamId,
             long firstSeq, long lastSeq, String checksum, String batchId, String correlationId,
-            String requestSha256, UUID reservationId, List<UUID> entityIds) {
-        return false;
+            String requestSha256, UUID reservationId, Supplier<AuthorityCheckpoint> validate) {
+        return null;
     }
 
     default PublisherClaimResult claimPublisherLeaseExact(UUID tenantId, String sensorId,

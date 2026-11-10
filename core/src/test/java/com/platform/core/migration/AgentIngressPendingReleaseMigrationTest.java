@@ -17,6 +17,7 @@ import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.persistence.EntityIdentifierRepository;
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.replay.ReplayReservation;
 import org.junit.jupiter.api.AfterEach;
@@ -77,11 +78,13 @@ class AgentIngressPendingReleaseMigrationTest {
 
         assertEquals(before, state(TENANT_A, "sensor-a"));
         assertEquals(1, count("SELECT count(*) FROM platform.schema_history WHERE version='V021'"));
+        assertEquals(1, count("SELECT count(*) FROM information_schema.tables WHERE table_schema='platform' "
+                + "AND table_name='sensor_agent_ingress_pending_canonical_binding'"));
         assertEquals(5, count("""
                 SELECT count(*) FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='sensor_agent_ingress_watermark'
                    AND column_name IN ('pending_reservation_id','pending_publication_attempted',
-                       'pending_authority_state','pending_authority_validated_at','pending_entity_ids')
+                       'pending_authority_state','pending_authority_validated_at','pending_canonical_batch_sha256')
                 """));
         assertEquals(1, count("""
                 SELECT count(*) FROM pg_constraint
@@ -109,7 +112,7 @@ class AgentIngressPendingReleaseMigrationTest {
         assertNotNull(pending.get("pending_reservation_id"));
         assertNull(pending.get("pending_publication_attempted"));
         assertNull(pending.get("pending_authority_validated_at"));
-        assertNull(pending.get("pending_entity_ids"));
+        assertNull(pending.get("pending_canonical_batch_sha256"));
     }
 
     @Test
@@ -152,8 +155,8 @@ class AgentIngressPendingReleaseMigrationTest {
 
     @Test
     void u5LegacyExactRetryValidatesRevokedHistoryPublishesAndFinalizes() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
-        UUID entity = UUID.randomUUID();
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        UUID entity = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae01");
         LegacyRequest legacy = legacyRequest(mapper);
         seedAccepted(TENANT_A, "sensor-a");
         seedPending(TENANT_A, "sensor-a");
@@ -163,10 +166,12 @@ class AgentIngressPendingReleaseMigrationTest {
                  WHERE tenant_id=? AND sensor_id='sensor-a'
                 """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
         pg.migrate();
+        seedCanonicalIdentity(entity, Instant.parse("2026-11-09T09:00:00Z"));
         assertEquals("LEGACY_UNKNOWN", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
         SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
         AgentControlRepository agentRepo = mock(AgentControlRepository.class);
-        EntityIdentifierRepository identifiers = mock(EntityIdentifierRepository.class);
+        EntityIdentifierRepository identifiers = new EntityIdentifierRepository(
+                new NamedParameterJdbcTemplate(pg.dataSource()));
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         X509Certificate certificate = mock(X509Certificate.class);
         SensorScope scope = new SensorScope("sensor-a", TENANT_A, null, Set.of(entity), true);
@@ -180,8 +185,6 @@ class AgentIngressPendingReleaseMigrationTest {
         when(agentRepo.findActiveEntityBinding(TENANT_A, "agent-a"))
                 .thenReturn(Optional.of(new EntityAgentBinding(TENANT_A, entity, "agent-a",
                         "a".repeat(64), "host-a", "linux", created, revoked, "ACTIVE", 1)));
-        when(identifiers.findByResolutionKey(TENANT_A, "platform.agent", "HOST_ID", "host-a"))
-                .thenReturn(Optional.empty());
         AgentIngestionValidator validator = new AgentIngestionValidator(mapper, authority,
                 agentRepo, identifiers, new IngestionMetrics());
         AgentIngestionService service = new AgentIngestionService(validator, store(), kafka,
@@ -193,11 +196,12 @@ class AgentIngressPendingReleaseMigrationTest {
         assertEquals(3L, state(TENANT_A, "sensor-a").get("settled_through_sequence"));
         assertNull(state(TENANT_A, "sensor-a").get("pending_first_sequence"));
         assertEquals("NONE", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
+        assertEquals(0, count("SELECT count(*) FROM platform.sensor_agent_ingress_pending_canonical_binding"));
     }
 
     @Test
-    void u6LegacyExactRetryWithoutHistoricalEntityProofRetainsPending() throws Exception {
-        ObjectMapper mapper = new ObjectMapper();
+    void u5bLegacyExactRetryWithNewEntityBRequiresReconciliation() throws Exception {
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         LegacyRequest legacy = legacyRequest(mapper);
         seedAccepted(TENANT_A, "sensor-a");
         seedPending(TENANT_A, "sensor-a");
@@ -207,13 +211,15 @@ class AgentIngressPendingReleaseMigrationTest {
                  WHERE tenant_id=? AND sensor_id='sensor-a'
                 """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
         pg.migrate();
+        UUID entity = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae02");
+        seedCanonicalIdentity(entity, Instant.parse("2026-11-09T11:00:00Z"));
         Map<String, Object> before = state(TENANT_A, "sensor-a");
         SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
         AgentControlRepository agentRepo = mock(AgentControlRepository.class);
-        EntityIdentifierRepository identifiers = mock(EntityIdentifierRepository.class);
+        EntityIdentifierRepository identifiers = new EntityIdentifierRepository(
+                new NamedParameterJdbcTemplate(pg.dataSource()));
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         X509Certificate certificate = mock(X509Certificate.class);
-        UUID entity = UUID.randomUUID();
         when(authority.resolve(certificate)).thenReturn(
                 new SensorScope("sensor-a", TENANT_A, null, Set.of(entity), true));
         Instant created = Instant.parse("2026-11-09T09:00:00Z");
@@ -236,6 +242,7 @@ class AgentIngressPendingReleaseMigrationTest {
         assertEquals("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED", failure.getCode());
         assertEquals(before, state(TENANT_A, "sensor-a"));
         assertEquals("LEGACY_UNKNOWN", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
+        assertEquals(0, count("SELECT count(*) FROM platform.sensor_agent_ingress_pending_canonical_binding"));
         verifyNoInteractions(kafka);
     }
 
@@ -272,7 +279,12 @@ class AgentIngressPendingReleaseMigrationTest {
     private static LegacyRequest legacyRequest(ObjectMapper mapper) throws Exception {
         AgentIngressRecord record = new AgentIngressRecord(3, "ingress-3", TENANT_A.toString(),
                 "agent-a", "sensor-a", 1, 10, 10, "agent-batch", "agent-corr",
-                "2026-11-09T10:00:00Z", List.of(mapper.readTree("""
+                "2026-11-09T10:00:00Z",
+                new com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1(
+                        mapper.valueToTree(1), "2026-11-09T10:00:00Z", "QUALIFIED",
+                        mapper.valueToTree(0), mapper.valueToTree(0), "TEST_CLOCK",
+                        "migration-sensor-instance", mapper.valueToTree(3)),
+                List.of(mapper.readTree("""
                     {"sequence":10,"id":"delivery-10","checksum":"abc",
                      "payload":{"hostId":"host-a","collectedAt":"2026-11-09T10:00:00Z",
                      "observations":[{"metricKey":"cpu.util","value":42.5,
@@ -286,6 +298,26 @@ class AgentIngressPendingReleaseMigrationTest {
     }
 
     private record LegacyRequest(AgentTelemetryBatchRequest request, byte[] body, String checksum) { }
+
+    private void seedCanonicalIdentity(UUID entity, Instant firstSeen) {
+        pg.jdbc().update("""
+                INSERT INTO platform.agent (agent_id, tenant_id, status, created_at, updated_at)
+                VALUES ('agent-a', ?, 'ACTIVE', ?, now())
+                """, TENANT_A, java.sql.Timestamp.from(firstSeen));
+        pg.jdbc().update("""
+                INSERT INTO platform.entity
+                  (entity_id, tenant_id, entity_type, display_name, lifecycle_state,
+                   first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'historical-agent', 'ACTIVE', ?, now(), ?, now())
+                """, entity, TENANT_A, java.sql.Timestamp.from(firstSeen), java.sql.Timestamp.from(firstSeen));
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier
+                  (identifier_id, tenant_id, entity_id, identifier_type, namespace,
+                   identifier_value, confidence, first_seen_at, last_seen_at)
+                VALUES ('018f0e0a-0000-7000-8000-00000000a101', ?, ?,
+                        'HOST_ID', 'platform.agent', 'host-a', 1.0, ?, now())
+                """, TENANT_A, entity, java.sql.Timestamp.from(firstSeen));
+    }
 
     private PostgresAgentIngressWatermarkStore store() {
         return new PostgresAgentIngressWatermarkStore(pg.jdbc(),
@@ -337,7 +369,7 @@ class AgentIngressPendingReleaseMigrationTest {
     private Map<String, Object> pendingState(UUID tenant, String sensor) {
         return pg.jdbc().queryForMap("""
                 SELECT pending_reservation_id, pending_authority_state,
-                       pending_authority_validated_at, pending_entity_ids,
+                       pending_authority_validated_at, pending_canonical_batch_sha256,
                        pending_publication_attempted
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id=? AND sensor_id=?
@@ -346,11 +378,13 @@ class AgentIngressPendingReleaseMigrationTest {
 
     private void assertV021Absent() {
         assertEquals(0, count("SELECT count(*) FROM platform.schema_history WHERE version='V021'"));
+        assertEquals(0, count("SELECT count(*) FROM information_schema.tables WHERE table_schema='platform' "
+                + "AND table_name='sensor_agent_ingress_pending_canonical_binding'"));
         assertEquals(0, count("""
                 SELECT count(*) FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='sensor_agent_ingress_watermark'
                    AND column_name IN ('pending_reservation_id','pending_publication_attempted',
-                       'pending_authority_state','pending_authority_validated_at','pending_entity_ids')
+                       'pending_authority_state','pending_authority_validated_at','pending_canonical_batch_sha256')
                 """));
         assertEquals(0, count("""
                 SELECT count(*) FROM pg_constraint

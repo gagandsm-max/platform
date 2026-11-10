@@ -242,7 +242,7 @@ func main() {
 		agentDrain  *agentdrain.Drain
 	)
 	if cfg.AgentReceiverEnabled {
-		agentServer, agentSpool, err = startAgentReceiver(cfg, client, logger)
+		agentServer, agentSpool, err = startAgentReceiver(cfg, client, logger, serviceInstanceID)
 		if err != nil {
 			logger.Error("Failed to start Agent Receiver",
 				"error_code", "SENSOR_AGENT_RECEIVER_INIT_FAILED",
@@ -460,7 +460,7 @@ func attachAgentDeliveryHealth(hs *health.HealthServer, drain *agentdrain.Drain)
 	hs.SetAgentDelivery(drain)
 }
 
-func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *slog.Logger) (*agentreceiver.Server, *spool.DiskSpool, error) {
+func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *slog.Logger, serviceInstanceID string) (*agentreceiver.Server, *spool.DiskSpool, error) {
 	if err := config.ValidateAgentReceiverConfig(cfg); err != nil {
 		return nil, nil, err
 	}
@@ -488,7 +488,8 @@ func startAgentReceiver(cfg *config.Config, client *coreclient.Client, logger *s
 		_ = agentSpool.Close()
 		return nil, nil, err
 	}
-	acceptance, err := agentreceiver.NewSpoolAcceptanceSink(agentSpool, agentDir)
+	acceptance, err := agentreceiver.NewSpoolAcceptanceSink(agentSpool, agentDir,
+		agentreceiver.WithServiceInstanceID(serviceInstanceID))
 	if err != nil {
 		_ = agentSpool.Close()
 		return nil, nil, err

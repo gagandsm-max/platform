@@ -30,18 +30,19 @@ type AgentTelemetryBatch struct {
 
 // AgentIngressRecord preserves immutable accepted evidence from the Sensor Agent spool.
 type AgentIngressRecord struct {
-	SensorIngressSequence uint64          `json:"sensorIngressSequence"`
-	SensorIngressRecordID string          `json:"sensorIngressRecordId"`
-	TenantID              string          `json:"tenantId"`
-	AgentID               string          `json:"agentId"`
-	AcceptingSensorID     string          `json:"acceptingSensorId"`
-	AssignmentGeneration  int64           `json:"assignmentGeneration"`
-	AgentFirstSequence    uint64          `json:"agentFirstSequence"`
-	AgentLastSequence     uint64          `json:"agentLastSequence"`
-	AgentBatchID          string          `json:"agentBatchId"`
-	CorrelationID         string          `json:"correlationId"`
-	AcceptedAt            string          `json:"acceptedAt"`
-	Records               json.RawMessage `json:"records"`
+	SensorIngressSequence uint64                      `json:"sensorIngressSequence"`
+	SensorIngressRecordID string                      `json:"sensorIngressRecordId"`
+	TenantID              string                      `json:"tenantId"`
+	AgentID               string                      `json:"agentId"`
+	AcceptingSensorID     string                      `json:"acceptingSensorId"`
+	AssignmentGeneration  int64                       `json:"assignmentGeneration"`
+	AgentFirstSequence    uint64                      `json:"agentFirstSequence"`
+	AgentLastSequence     uint64                      `json:"agentLastSequence"`
+	AgentBatchID          string                      `json:"agentBatchId"`
+	CorrelationID         string                      `json:"correlationId"`
+	AcceptedAt            string                      `json:"acceptedAt"`
+	AcceptanceEvidence    *SensorAcceptanceEvidenceV1 `json:"acceptanceEvidence,omitempty"`
+	Records               json.RawMessage             `json:"records"`
 }
 
 // AgentTelemetryAck is the durable Core acknowledgement for agent-telemetry.
@@ -240,7 +241,9 @@ func classifyAgentTelemetryStatus(status int, body []byte) error {
 	switch code {
 	case "ERR_PREVIOUS_BATCH_PENDING", "ERR_BATCH_PUBLICATION_IN_PROGRESS":
 		transient = true
-	case "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED":
+	case "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED",
+		"ERR_AGENT_CANONICAL_DIGEST_MISMATCH",
+		"ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE":
 		// Retain and retry the frozen head, while exposing a persistent blocked
 		// stream in Sensor self-health until governed reconciliation succeeds.
 		transient = false

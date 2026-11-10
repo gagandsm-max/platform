@@ -106,11 +106,37 @@ class PostgresAgentIngressWatermarkStoreTest {
                     ((Number) row.get("pending_last_sequence")).longValue(),
                     (String) row.get("pending_checksum"), (String) row.get("pending_batch_id"),
                     (String) row.get("pending_correlation_id"), digest, reservationId,
-                    java.util.Collections.nCopies((int) (((Number) row.get("pending_last_sequence")).longValue()
-                            - ((Number) row.get("pending_first_sequence")).longValue() + 1), UUID.randomUUID()));
+                    () -> testCheckpoint(tenant, sensor,
+                            ((Number) row.get("pending_first_sequence")).longValue(),
+                            ((Number) row.get("pending_last_sequence")).longValue(), UUID.randomUUID()));
         }
         return subject.claimPublisherLeaseExact(tenant, sensor, stream, first, last,
                 checksum, batchId, correlationId, digest, reservationId);
+    }
+
+    private AgentIngressWatermarkStore.AuthorityCheckpoint testCheckpoint(
+            UUID tenant, String sensor, long first, long last, UUID entity) {
+        String agent = terminalAgentId(sensor);
+        pg.jdbc().update("""
+                INSERT INTO platform.agent (tenant_id, agent_id, status, created_at, updated_at)
+                VALUES (?, ?, 'ACTIVE', now(), now()) ON CONFLICT (agent_id) DO NOTHING
+                """, tenant, agent);
+        pg.jdbc().update("""
+                INSERT INTO platform.entity
+                  (tenant_id, entity_id, entity_type, display_name, lifecycle_state,
+                   first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'Checkpoint fixture', 'ACTIVE', now(), now(), now(), now())
+                ON CONFLICT (entity_id) DO NOTHING
+                """, tenant, entity);
+        List<PendingCanonicalBindingV1> bindings = new java.util.ArrayList<>();
+        for (long sequence = first; sequence <= last; sequence++) {
+            bindings.add(new PendingCanonicalBindingV1(sequence, agent, 1, "fixture-host",
+                    UUID.randomUUID(), entity, 1));
+        }
+        return new AgentIngressWatermarkStore.AuthorityCheckpoint(
+                List.of(new CanonicalObservation(tenant.toString(), entity.toString(),
+                        "cpu.util", sensor, Instant.now(), 1.0, 1, 0, "seq-fixture", "AGENT_HOST")),
+                bindings, "c".repeat(64));
     }
 
     private AgentIngressRecord terminalRecord(String sensorId, long sequence) {
@@ -138,31 +164,31 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(PublisherClaimResult.Status.REJECTED,
                 store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
                         checksum, "batch", "corr", digest, id).status());
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                checksum, "batch", "corr", "e".repeat(64), id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                "b".repeat(64), "batch", "corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(UUID.randomUUID(), sensor, streamId, 1, 1,
-                checksum, "batch", "corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, "other-sensor", streamId, 1, 1,
-                checksum, "batch", "corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor,
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", "e".repeat(64), id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                "b".repeat(64), "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(UUID.randomUUID(), sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, "other-sensor", streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor,
                 "stream-ffffffffffffffffffffffffffffffff", 1, 1,
-                checksum, "batch", "corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                checksum, "other-batch", "corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                checksum, "batch", "other-corr", digest, id, List.of(entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 2,
-                checksum, "batch", "corr", digest, id, List.of(entity, entity)));
-        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                checksum, "batch", "corr", digest, UUID.randomUUID(), List.of(entity)));
+                checksum, "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "other-batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "other-corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 2,
+                checksum, "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 2, entity)));
+        assertNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, UUID.randomUUID(), () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
         assertEquals("UNVALIDATED", pg.jdbc().queryForObject("""
                 SELECT pending_authority_state FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id=? AND sensor_id=?
                 """, String.class, tenantId, sensor));
-        assertTrue(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
-                checksum, "batch", "corr", digest, id, List.of(entity)));
+        assertNotNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, () -> testCheckpoint(tenantId, sensor, 1, 1, entity)));
         assertThrows(IllegalStateException.class, () -> store.terminallyRejectIdentityConflict(
                 tenantId, sensor, streamId, 1, checksum, "batch", "corr",
                 terminalRecord(sensor, 1), entity, 1L));
@@ -178,6 +204,31 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(PublisherClaimResult.Status.CLAIMED,
                 store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
                         checksum, "batch", "corr", digest, id).status());
+    }
+
+    @Test
+    void publisherClaimRejectsMissingCanonicalBindingRowsOrDigest() {
+        String sensor = "sensor-incomplete-binding";
+        String checksum = "a".repeat(64);
+        String requestDigest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensor, streamId,
+                1, 1, checksum, "batch", "corr", requestDigest);
+        UUID reservation = pending.pendingReservationId();
+        assertNotNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", requestDigest, reservation,
+                () -> testCheckpoint(tenantId, sensor, 1, 1, UUID.randomUUID())));
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", "e".repeat(64), reservation).status());
+        pg.jdbc().update("DELETE FROM platform.sensor_agent_ingress_pending_canonical_binding "
+                + "WHERE tenant_id=? AND sensor_id=? AND reservation_id=?", tenantId, sensor, reservation);
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", requestDigest, reservation).status());
+        assertNull(pg.jdbc().queryForObject("""
+                SELECT pending_publisher_owner FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, UUID.class, tenantId, sensor));
     }
 
     @Test
@@ -572,6 +623,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         AgentIngestionValidator validator = mock(AgentIngestionValidator.class);
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         when(validator.resolveAuthority(certificate)).thenReturn(scope);
+        when(validator.canonicalBatchDigest(anyList())).thenReturn("c".repeat(64));
         when(validator.validateAndSnapshot(eq(rejected), eq(scope)))
                 .thenThrow(new IngestionException(HttpStatus.CONFLICT,
                         "ERR_AGENT_IDENTITY_CONFLICT", "conflicting host"));
@@ -583,7 +635,8 @@ class PostgresAgentIngressWatermarkStoreTest {
                 .thenReturn(new AgentIngestionValidator.ValidatedBatch(
                         List.of(new CanonicalObservation(tenantId.toString(), entityId.toString(),
                                 "cpu.util", sensorId, Instant.now(), 1.0, 1, 0, "seq-2", "AGENT_HOST")),
-                        List.of(entityId)));
+                        List.of(new PendingCanonicalBindingV1(2, terminalAgentId(sensorId), 1,
+                                "terminal-host", UUID.randomUUID(), entityId, 1))));
         AgentIngestionService service = new AgentIngestionService(validator, store, kafka,
                 new IngestionMetrics());
 

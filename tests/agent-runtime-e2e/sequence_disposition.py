@@ -8,6 +8,9 @@ from pathlib import Path
 import subprocess
 import sys
 import time
+from datetime import datetime, timezone
+import secrets
+import uuid
 
 from build_envelope import build_envelope
 
@@ -17,6 +20,15 @@ AGENT = "agent-e2e-01"
 SENSOR = os.environ.get("SENSOR_INFRA_ID", "sensor-infra-01")
 GOOD_HOST = "host-e2e-agent-01"
 CONFLICT_HOST = "host-e2e-probe-01"
+ENTITY_A = "018f0e0a-0000-7000-8000-00000000ae01"
+ENTITY_B = "018f0e0a-0000-7000-8000-00000000ae03"
+
+
+def fresh_uuid7():
+    milliseconds = int(time.time() * 1000)
+    bits = ((milliseconds << 80) | (7 << 76) | (secrets.randbits(12) << 64)
+            | (2 << 62) | secrets.randbits(62))
+    return str(uuid.UUID(int=bits))
 
 
 class Matrix:
@@ -45,7 +57,8 @@ class Matrix:
                         "pending_correlation_id, pending_reservation_id, pending_publisher_owner, "
                         "pending_publisher_epoch, pending_publisher_claimed_at, "
                         "pending_publisher_lease_until, pending_publication_attempted, "
-                        "pending_authority_state, pending_authority_validated_at, pending_entity_ids, last_batch_id "
+                        "pending_authority_state, pending_authority_validated_at, "
+                        "pending_canonical_batch_sha256, last_batch_id "
                         "FROM platform.sensor_agent_ingress_watermark WHERE tenant_id='" + TENANT +
                         "' AND sensor_id='" + SENSOR + "') t")
         return json.loads(rows) if rows else None
@@ -57,6 +70,15 @@ class Matrix:
                         "FROM platform.sensor_agent_ingress_terminal_disposition WHERE tenant_id='" + TENANT +
                         "' AND sensor_id='" + SENSOR + "' AND first_sequence=" + str(seq) + ") t")
         return json.loads(rows) if rows else None
+
+    def bindings(self, reservation_id):
+        rows = self.sql("SELECT coalesce(json_agg(row_to_json(t) ORDER BY sensor_ingress_sequence), '[]') "
+                        "FROM (SELECT sensor_ingress_sequence, agent_id, assignment_generation, "
+                        "host_id, entity_identifier_id, entity_id, binding_version "
+                        "FROM platform.sensor_agent_ingress_pending_canonical_binding WHERE tenant_id='" + TENANT +
+                        "' AND sensor_id='" + SENSOR + "' AND reservation_id='" + reservation_id +
+                        "' ORDER BY sensor_ingress_sequence) t")
+        return json.loads(rows)
 
     def wait_watermark(self, acked, settled, seconds=90):
         until = time.monotonic() + seconds
@@ -129,20 +151,28 @@ class Matrix:
                   "assignmentGeneration": payload["assignmentGeneration"],
                   "agentFirstSequence": payload["firstSequence"], "agentLastSequence": payload["lastSequence"],
                   "agentBatchId": payload["batchId"], "correlationId": payload["correlationId"],
-                  "acceptedAt": payload["timestamp"], "records": env["records"]}
+                  "acceptedAt": payload["timestamp"],
+                  "acceptanceEvidence": {**payload["acceptanceEvidence"], "durableSpoolSequence": 3},
+                  "records": env["records"]}
         return {"schemaVersion": 2, "sensorId": SENSOR, "sensorAgentSpoolStreamId": terminal["stream_id"],
                 "batchId": terminal["batch_id"], "firstIngressSequence": 3, "lastIngressSequence": 3,
                 "recordCount": 1, "checksum": terminal["checksum"],
                 "correlationId": terminal["correlation_id"], "records": [record]}
 
-    def direct_batch(self, seq, stream, metric, generation=1, tenant=TENANT):
+    def direct_batch(self, seq, stream, metric, generation=1, tenant=TENANT,
+                     accepted_at="2026-11-09T00:00:00Z", qualified=False):
         env = self.envelope(seq, GOOD_HOST, metric)
         record = {"sensorIngressSequence": seq, "sensorIngressRecordId": f"direct-p0-{seq}",
                   "tenantId": tenant, "agentId": AGENT, "acceptingSensorId": SENSOR,
                   "assignmentGeneration": generation, "agentFirstSequence": seq,
                   "agentLastSequence": seq, "agentBatchId": env["batchId"],
-                  "correlationId": env["correlationId"], "acceptedAt": "2026-11-09T00:00:00Z",
+                  "correlationId": env["correlationId"], "acceptedAt": accepted_at,
                   "records": env["records"]}
+        if qualified:
+            record["acceptanceEvidence"] = {
+                "evidenceVersion": 1, "acceptedAtUtc": accepted_at, "clockQuality": "QUALIFIED",
+                "clockMaxErrorMs": 0, "clockSyncAgeMs": 0, "clockSource": "TEST_QUALIFIED",
+                "sensorServiceInstanceId": "runtime-matrix-instance", "durableSpoolSequence": seq}
         delivery = env["records"][0]
         line = "|".join(map(str, [seq, record["agentBatchId"], seq, seq, generation,
                                   tenant, AGENT, SENSOR, seq, delivery["id"], delivery["checksum"]]))
@@ -152,6 +182,30 @@ class Matrix:
                 "batchId": bid, "firstIngressSequence": seq, "lastIngressSequence": seq,
                 "recordCount": 1, "checksum": checksum, "correlationId": "agentdrain-" + bid,
                 "records": [record]}
+
+    def crash_pending(self, batch, settled):
+        body = json.dumps(batch, separators=(",", ":"))
+        digest = hashlib.sha256(body.encode()).hexdigest()
+        sequence = batch["firstIngressSequence"]
+        changed = self.sql("UPDATE platform.sensor_agent_ingress_watermark SET "
+                           "pending_first_sequence=" + str(sequence) + ", pending_last_sequence=" + str(sequence) + ", "
+                           "pending_checksum='" + batch["checksum"] + "', "
+                           "pending_request_sha256='" + digest + "', "
+                           "pending_batch_id='" + batch["batchId"] + "', "
+                           "pending_correlation_id='" + batch["correlationId"] + "', "
+                           "pending_reserved_at=clock_timestamp(), pending_reservation_id=gen_random_uuid(), "
+                           "pending_authority_state='UNVALIDATED', pending_authority_validated_at=NULL, "
+                           "pending_canonical_batch_sha256=NULL, pending_publication_attempted=FALSE, "
+                           "pending_publisher_owner=NULL, pending_publisher_claimed_at=NULL, "
+                           "pending_publisher_lease_until=NULL "
+                           "WHERE tenant_id='" + TENANT + "' AND sensor_id='" + SENSOR + "' "
+                           "AND settled_through_sequence=" + str(settled) + " AND pending_first_sequence IS NULL "
+                           "RETURNING pending_reservation_id")
+        assert changed, (sequence, self.watermark())
+        pending = self.watermark()
+        assert pending["pending_authority_state"] == "UNVALIDATED"
+        assert pending["pending_request_sha256"] == digest
+        return pending
 
     def kafka_metric(self, metric):
         lines = []
@@ -408,7 +462,7 @@ class Matrix:
                  "pending_correlation_id='" + crash_stale["correlationId"] + "', "
                  "pending_reserved_at=clock_timestamp(), pending_reservation_id=gen_random_uuid(), "
                  "pending_authority_state='UNVALIDATED', "
-                 "pending_authority_validated_at=NULL, pending_entity_ids=NULL, "
+                 "pending_authority_validated_at=NULL, pending_canonical_batch_sha256=NULL, "
                  "pending_publication_attempted=FALSE, pending_publisher_owner=NULL, "
                  "pending_publisher_claimed_at=NULL, pending_publisher_lease_until=NULL "
                  "WHERE tenant_id='" + TENANT + "' AND sensor_id='" + SENSOR + "' "
@@ -467,7 +521,9 @@ class Matrix:
             assert pending_eight["pending_first_sequence"] == 8
             assert pending_eight["pending_authority_state"] == "AUTHORITY_VALIDATED"
             assert pending_eight["pending_authority_validated_at"] is not None
-            assert pending_eight["pending_entity_ids"]
+            assert pending_eight["pending_canonical_batch_sha256"]
+            bindings_eight = self.bindings(pending_eight["pending_reservation_id"])
+            assert len(bindings_eight) == 1 and bindings_eight[0]["entity_id"] == ENTITY_A
             assert pending_eight["pending_publication_attempted"] is True
             assert pending_eight["pending_publisher_owner"] is None
             first_hits = self.kafka_metric("p0.sequence.uncertain.8")
@@ -484,6 +540,23 @@ class Matrix:
                  "' AND agent_id='" + AGENT + "' AND generation=1")
         self.sql("UPDATE platform.entity_agent_binding SET binding_state='REVOKED' "
                  "WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "'")
+        self.sql("INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name, "
+                 "lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at) VALUES ('" +
+                 ENTITY_B + "','" + TENANT + "','HOST','reassigned-entity-b','ACTIVE',now(),now(),now(),now())")
+        self.sql("DELETE FROM platform.entity_identifier WHERE tenant_id='" + TENANT +
+                 "' AND namespace='platform.agent' AND identifier_type='HOST_ID' "
+                 "AND identifier_value='" + GOOD_HOST + "'")
+        self.sql("INSERT INTO platform.entity_identifier "
+                 "(identifier_id, tenant_id, entity_id, identifier_type, namespace, identifier_value, "
+                 "confidence, first_seen_at, last_seen_at) VALUES ('" + fresh_uuid7() + "','" +
+                 TENANT + "','" + ENTITY_B + "','HOST_ID','platform.agent','" + GOOD_HOST +
+                 "',1.0,now(),now())")
+        self.sql("UPDATE platform.entity_agent_binding SET entity_id='" + ENTITY_B +
+                 "', binding_state='ACTIVE' WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "'")
+        live_b = self.sql("SELECT entity_id FROM platform.entity_identifier WHERE tenant_id='" + TENANT +
+                          "' AND namespace='platform.agent' AND identifier_type='HOST_ID' "
+                          "AND identifier_value='" + GOOD_HOST + "'")
+        assert live_b == ENTITY_B
         assignment_revoked = self.sql("SELECT row_to_json(a) FROM (SELECT tenant_id, agent_id, "
                                       "sensor_id, generation, status, created_at, revoked_at "
                                       "FROM platform.agent_sensor_assignment WHERE tenant_id='" + TENANT +
@@ -498,6 +571,8 @@ class Matrix:
         hits = self.kafka_metric("p0.sequence.uncertain.8")
         assert len(hits) >= 2, hits
         assert len({(h["sequenceId"], h["entityId"]) for h in hits}) == 1
+        assert all(h["entityId"] == ENTITY_A for h in hits)
+        assert self.bindings(pending_eight["pending_reservation_id"]) == []
         until = time.monotonic() + 30
         while time.monotonic() < until and self.clickhouse_count("p0.sequence.uncertain.8") != 1:
             time.sleep(1)
@@ -508,6 +583,7 @@ class Matrix:
             "first_response": first_uncertain, "pending_after_finalize_failure": pending_eight,
             "assignment_before": json.loads(assignment_before),
             "assignment_revoked": json.loads(assignment_revoked),
+            "live_mapping_after_change": live_b, "pending_bindings": bindings_eight,
             "recovery_response": recovered_eight, "final_watermark": after_eight,
             "physical_kafka_count": len(hits), "canonical_clickhouse_count": 1,
             "canonical_value": 8.0,
@@ -518,6 +594,16 @@ class Matrix:
                  "WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "' AND generation=1")
         self.sql("UPDATE platform.entity_agent_binding SET binding_state='ACTIVE' "
                  "WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "'")
+        self.sql("UPDATE platform.entity_agent_binding SET entity_id='" + ENTITY_A +
+                 "' WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "'")
+        self.sql("DELETE FROM platform.entity_identifier WHERE tenant_id='" + TENANT +
+                 "' AND namespace='platform.agent' AND identifier_type='HOST_ID' "
+                 "AND identifier_value='" + GOOD_HOST + "'")
+        self.sql("INSERT INTO platform.entity_identifier "
+                 "(identifier_id, tenant_id, entity_id, identifier_type, namespace, identifier_value, "
+                 "confidence, first_seen_at, last_seen_at) VALUES ('" + fresh_uuid7() + "','" +
+                 TENANT + "','" + ENTITY_A + "','HOST_ID','platform.agent','" + GOOD_HOST +
+                 "',1.0,now(),now())")
         next_nine = self.direct_batch(9, stream, "p0.sequence.next.9", generation=1)
         code, accepted_nine = self.core(next_nine)
         assert code == 200 and accepted_nine["status"] == "ACCEPTED", (code, accepted_nine)
@@ -525,13 +611,99 @@ class Matrix:
         assert next_watermark["pending_first_sequence"] is None
         self.mark("J7-next-sequence", {"response": accepted_nine, "watermark": next_watermark})
 
+        # UNVALIDATED reservation survives a real Core restart. Its original
+        # qualified Sensor acceptance precedes revocation of generation 1.
+        accepted_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        historical_ten = self.direct_batch(10, stream, "p0.sequence.historical.10",
+                                           generation=1, accepted_at=accepted_at, qualified=True)
+        pending_ten = self.crash_pending(historical_ten, 9)
+        self.call(self.compose + ["restart", "core"], timeout=90)
+        self.wait_healthy("core")
+        self.sql("UPDATE platform.agent_sensor_assignment SET status='REVOKED', "
+                 "revoked_at=clock_timestamp() WHERE tenant_id='" + TENANT +
+                 "' AND agent_id='" + AGENT + "' AND generation=1")
+        self.sql("INSERT INTO platform.agent_sensor_assignment "
+                 "(assignment_id, tenant_id, agent_id, sensor_id, generation, status, "
+                 "created_at, updated_at, revoked_at) VALUES "
+                 "(gen_random_uuid(),'" + TENANT + "','" + AGENT + "','" + SENSOR +
+                 "',2,'ACTIVE',clock_timestamp(),clock_timestamp(),NULL)")
+        self.sql("CREATE TABLE platform.test_j8_checkpoint_audit "
+                 "(reservation_id uuid NOT NULL, authority_state text NOT NULL, "
+                 "canonical_digest text NOT NULL)")
+        self.sql("CREATE FUNCTION platform.test_j8_checkpoint_capture() RETURNS trigger "
+                 "LANGUAGE plpgsql AS $$ BEGIN INSERT INTO platform.test_j8_checkpoint_audit "
+                 "VALUES (NEW.pending_reservation_id, NEW.pending_authority_state, "
+                 "NEW.pending_canonical_batch_sha256); RETURN NEW; END; $$")
+        self.sql("CREATE TRIGGER test_j8_checkpoint_capture AFTER UPDATE "
+                 "ON platform.sensor_agent_ingress_watermark FOR EACH ROW "
+                 "WHEN (OLD.pending_authority_state = 'UNVALIDATED' "
+                 "AND NEW.pending_authority_state = 'AUTHORITY_VALIDATED' "
+                 "AND NEW.pending_first_sequence = 10) "
+                 "EXECUTE FUNCTION platform.test_j8_checkpoint_capture()")
+        code, recovered_ten = self.core(historical_ten)
+        assert code == 200 and recovered_ten["status"] == "ACCEPTED", (code, recovered_ten)
+        checkpoint_ten = self.sql("SELECT row_to_json(a) FROM (SELECT reservation_id, authority_state, "
+                                  "canonical_digest FROM platform.test_j8_checkpoint_audit) a")
+        checkpoint_ten = json.loads(checkpoint_ten)
+        assert checkpoint_ten["reservation_id"] == pending_ten["pending_reservation_id"]
+        assert checkpoint_ten["authority_state"] == "AUTHORITY_VALIDATED"
+        assert len(checkpoint_ten["canonical_digest"]) == 64
+        self.sql("DROP TRIGGER test_j8_checkpoint_capture ON platform.sensor_agent_ingress_watermark")
+        self.sql("DROP FUNCTION platform.test_j8_checkpoint_capture()")
+        self.sql("DROP TABLE platform.test_j8_checkpoint_audit")
+        after_ten = self.wait_watermark(2, 10)
+        assert after_ten["pending_first_sequence"] is None
+        assert self.bindings(pending_ten["pending_reservation_id"]) == []
+        ten_hits = self.kafka_metric("p0.sequence.historical.10")
+        assert len(ten_hits) == 1 and ten_hits[0]["entityId"] == ENTITY_A
+        self.mark("J8_UNVALIDATED_CRASH_THEN_REVOCATION_positive", {
+            "pending_before_restart": pending_ten, "response": recovered_ten,
+            "committed_authority_checkpoint": checkpoint_ten,
+            "final_watermark": after_ten, "entity": ten_hits[0]["entityId"],
+            "physical_kafka_count": len(ten_hits), "binding_cleanup": True})
+
+        next_eleven = self.direct_batch(11, stream, "p0.sequence.next.11", generation=2)
+        code, accepted_eleven = self.core(next_eleven)
+        assert code == 200 and accepted_eleven["status"] == "ACCEPTED", (code, accepted_eleven)
+        self.wait_watermark(2, 11)
+
+        negative_at = datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        unqualified_twelve = self.direct_batch(12, stream, "p0.sequence.unqualified.12",
+                                               generation=2, accepted_at=negative_at)
+        unqualified_twelve["records"][0]["acceptanceEvidence"] = {
+            "evidenceVersion": 1, "acceptedAtUtc": negative_at, "clockQuality": "UNQUALIFIED",
+            "clockSource": "TEST_CLOCK_UNPROVEN", "sensorServiceInstanceId": "runtime-matrix-instance",
+            "durableSpoolSequence": 12}
+        pending_twelve = self.crash_pending(unqualified_twelve, 11)
+        self.call(self.compose + ["restart", "core"], timeout=90)
+        self.wait_healthy("core")
+        self.sql("UPDATE platform.agent_sensor_assignment SET status='REVOKED', "
+                 "revoked_at=clock_timestamp() WHERE tenant_id='" + TENANT +
+                 "' AND agent_id='" + AGENT + "' AND generation=2")
+        code, denied_twelve = self.core(unqualified_twelve)
+        assert code == 403 and denied_twelve["code"] == "ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN", (code, denied_twelve)
+        after_denied = self.watermark()
+        assert after_denied["acked_through_sequence"] == 2
+        assert after_denied["settled_through_sequence"] == 11
+        assert after_denied["pending_first_sequence"] is None
+        assert after_denied["pending_publisher_owner"] is None
+        assert self.bindings(pending_twelve["pending_reservation_id"]) == []
+        assert not self.kafka_metric("p0.sequence.unqualified.12")
+        assert self.clickhouse_count("p0.sequence.unqualified.12") == 0
+        assert self.terminal(12) is None
+        self.mark("J8_UNVALIDATED_CRASH_THEN_REVOCATION_negative", {
+            "pending_before_restart": pending_twelve, "response": denied_twelve,
+            "watermark_after_release": after_denied, "physical_kafka_count": 0,
+            "canonical_clickhouse_count": 0, "binding_cleanup": True,
+            "next_sequence_response": accepted_eleven})
+
         malformed_code, _ = self.sensor("{")
         assert malformed_code == 400
         oversized = self.envelope(6, GOOD_HOST, "p0.sequence.oversize.6")
         oversized["correlationId"] = "x" * (1024 * 1024)
         oversized_code, oversize_response = self.sensor(json.dumps(oversized, separators=(",", ":")))
         assert oversized_code == 413, (oversized_code, oversize_response)
-        assert self.watermark()["settled_through_sequence"] == 9
+        assert self.watermark()["settled_through_sequence"] == 11
         self.mark("K", {"malformed_http": malformed_code, "oversize_http": oversized_code})
 
         rejected_hits = self.kafka_metric("p0.sequence.rejected.3")

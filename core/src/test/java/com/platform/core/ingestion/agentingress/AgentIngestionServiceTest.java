@@ -19,6 +19,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -49,8 +50,9 @@ class AgentIngestionServiceTest {
         metrics = new IngestionMetrics();
         service = new AgentIngestionService(validator, watermarkStore, kafkaProducer, metrics);
         when(watermarkStore.checkpointAuthority(any(), anyString(), anyString(), anyLong(),
-                anyLong(), anyString(), anyString(), anyString(), anyString(), any(), anyList()))
-                .thenReturn(true);
+                anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any()))
+                .thenAnswer(call -> ((Supplier<AgentIngressWatermarkStore.AuthorityCheckpoint>) call.getArgument(10)).get());
+        when(validator.canonicalBatchDigest(anyList())).thenReturn("d".repeat(64));
         when(watermarkStore.reserveBatchWithBody(
                 any(), anyString(), anyString(), anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(ReplayReservation.reserved(0, PENDING_ID));
@@ -77,6 +79,11 @@ class AgentIngestionServiceTest {
         ));
     }
 
+    private PendingCanonicalBindingV1 binding(long sequence) {
+        return new PendingCanonicalBindingV1(sequence, "agent-1", 1, "host-abc",
+                UUID.fromString("018f0e0a-0000-7000-8000-000000000020"), entityId, 1);
+    }
+
     @Test
     void exactValidatedRetryUsesPersistedEntityWithoutCurrentAgentAuthority() {
         X509Certificate c = cert();
@@ -85,16 +92,34 @@ class AgentIngestionServiceTest {
         when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
                 8L, 8L, "chk-validated", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.retryPending(7, PENDING_ID,
-                        "AUTHORITY_VALIDATED", List.of(entityId)));
-        when(validator.extractValidatedSnapshot(request, scope, List.of(entityId))).thenReturn(obs());
+                        "AUTHORITY_VALIDATED", List.of(binding(8)), "d".repeat(64)));
+        when(validator.extractValidatedSnapshot(request, scope, List.of(binding(8)))).thenReturn(obs());
 
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);
         assertEquals("ACCEPTED", ack.status());
         verify(validator, never()).validateAndSnapshot(any(), any());
         verify(validator, never()).validateLegacyAndSnapshot(any(), any());
         verify(watermarkStore, never()).checkpointAuthority(any(), anyString(), anyString(),
-                anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString(), any(), anyList());
+                anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(kafkaProducer).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+    }
+
+    @Test
+    void exactValidatedRetryRejectsCanonicalDigestMismatchBeforeClaim() {
+        X509Certificate certificate = cert();
+        AgentTelemetryBatchRequest request = req(8, 8, "chk-validated");
+        when(validator.resolveAuthority(certificate)).thenReturn(scope);
+        when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
+                8L, 8L, "chk-validated", "batch-1", "corr-1", BODY_SHA))
+                .thenReturn(ReplayReservation.retryPending(7, PENDING_ID,
+                        "AUTHORITY_VALIDATED", List.of(binding(8)), "e".repeat(64)));
+        when(validator.extractValidatedSnapshot(request, scope, List.of(binding(8)))).thenReturn(obs());
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", certificate));
+        assertEquals("ERR_AGENT_CANONICAL_DIGEST_MISMATCH", failure.getCode());
+        verify(watermarkStore, never()).claimPublisherLeaseExact(any(), anyString(), anyString(),
+                anyLong(), anyLong(), anyString(), anyString(), anyString(), anyString(), any());
+        verifyNoInteractions(kafkaProducer);
     }
 
     @Test
@@ -105,7 +130,7 @@ class AgentIngestionServiceTest {
         when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
                 8L, 8L, "chk-legacy", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.retryPending(7, PENDING_ID,
-                        "LEGACY_UNKNOWN", null));
+                        "LEGACY_UNKNOWN", null, null));
         when(validator.validateLegacyAndSnapshot(request, scope))
                 .thenThrow(new IngestionException(HttpStatus.FORBIDDEN,
                         "ERR_AGENT_LEGACY_ENTITY_UNPROVEN", "no historical entity"));
@@ -191,7 +216,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(10, 12, "chk-abc");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-abc", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.alreadyAcked(12L));
@@ -229,7 +254,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(10, 12, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 10L, 12L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
@@ -248,7 +273,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(5, 8, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 5L, 8L, "chk", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
@@ -264,7 +289,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(20, 22, "chk");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 20L, 22L, "chk", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.rejected(
@@ -281,7 +306,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.reserved(12L, PENDING_ID));
@@ -305,7 +330,7 @@ class AgentIngestionServiceTest {
         X509Certificate c = cert();
         AgentTelemetryBatchRequest request = req(13, 15, "chk-new");
         when(validator.resolveAuthority(c)).thenReturn(scope);
-        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(entityId)));
+        when(validator.validateAndSnapshot(eq(request), eq(scope))).thenReturn(new AgentIngestionValidator.ValidatedBatch(obs(), List.of(binding(request.firstIngressSequence()))));
         when(watermarkStore.reserveBatchWithBody(
                 tenantId, "sensor-infra-01", STREAM, 13L, 15L, "chk-new", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.reserved(12L, PENDING_ID))
