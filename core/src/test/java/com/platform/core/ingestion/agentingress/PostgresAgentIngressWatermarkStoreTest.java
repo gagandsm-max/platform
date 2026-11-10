@@ -68,12 +68,49 @@ class PostgresAgentIngressWatermarkStoreTest {
     private void claimAndFinalize(
             String sensorId, long first, long last, String checksum, String batchId, String correlationId
     ) {
-        PublisherClaimResult claim = store.claimPublisherLease(
+        PublisherClaimResult claim = claimExact(store,
                 tenantId, sensorId, streamId, first, last, checksum, batchId, correlationId);
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
         store.finalizeReservedBatch(
                 tenantId, sensorId, streamId, first, last, checksum, batchId, correlationId,
                 claim.ownerToken(), claim.publisherEpoch());
+    }
+
+    private PublisherClaimResult claimExact(PostgresAgentIngressWatermarkStore subject,
+            UUID tenant, String sensor, String stream, long first, long last,
+            String checksum, String batchId, String correlationId) {
+        List<Map<String, Object>> rows = pg.jdbc().queryForList("""
+                SELECT pending_first_sequence, pending_last_sequence, pending_checksum,
+                       pending_batch_id, pending_correlation_id, pending_request_sha256,
+                       pending_reservation_id, pending_authority_state
+                  FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenant, sensor);
+        if (rows.isEmpty() || rows.get(0).get("pending_first_sequence") == null) {
+            return subject.claimPublisherLeaseExact(tenant, sensor, stream, first, last,
+                    checksum, batchId, correlationId, "d".repeat(64), UUID.randomUUID());
+        }
+        Map<String, Object> row = rows.get(0);
+        String digest = (String) row.get("pending_request_sha256");
+        if (digest == null) {
+            digest = "d".repeat(64);
+            pg.jdbc().update("""
+                    UPDATE platform.sensor_agent_ingress_watermark
+                       SET pending_request_sha256=? WHERE tenant_id=? AND sensor_id=?
+                    """, digest, tenant, sensor);
+        }
+        UUID reservationId = (UUID) row.get("pending_reservation_id");
+        if ("UNVALIDATED".equals(row.get("pending_authority_state"))) {
+            subject.checkpointAuthority(tenant, sensor, stream,
+                    ((Number) row.get("pending_first_sequence")).longValue(),
+                    ((Number) row.get("pending_last_sequence")).longValue(),
+                    (String) row.get("pending_checksum"), (String) row.get("pending_batch_id"),
+                    (String) row.get("pending_correlation_id"), digest, reservationId,
+                    java.util.Collections.nCopies((int) (((Number) row.get("pending_last_sequence")).longValue()
+                            - ((Number) row.get("pending_first_sequence")).longValue() + 1), UUID.randomUUID()));
+        }
+        return subject.claimPublisherLeaseExact(tenant, sensor, stream, first, last,
+                checksum, batchId, correlationId, digest, reservationId);
     }
 
     private AgentIngressRecord terminalRecord(String sensorId, long sequence) {
@@ -86,6 +123,82 @@ class PostgresAgentIngressWatermarkStoreTest {
 
     private static String terminalAgentId(String sensorId) {
         return "agent-" + sensorId;
+    }
+
+    @Test
+    void authorityCheckpointAndPublisherClaimAreExactRequestScoped() {
+        String sensor = "sensor-checkpoint-exact";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation reserved = store.reserveBatchWithBody(tenantId, sensor, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        UUID id = reserved.pendingReservationId();
+        UUID entity = UUID.randomUUID();
+        assertEquals("UNVALIDATED", reserved.pendingAuthorityState());
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", digest, id).status());
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", "e".repeat(64), id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                "b".repeat(64), "batch", "corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(UUID.randomUUID(), sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, "other-sensor", streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor,
+                "stream-ffffffffffffffffffffffffffffffff", 1, 1,
+                checksum, "batch", "corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "other-batch", "corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "other-corr", digest, id, List.of(entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 2,
+                checksum, "batch", "corr", digest, id, List.of(entity, entity)));
+        assertFalse(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, UUID.randomUUID(), List.of(entity)));
+        assertEquals("UNVALIDATED", pg.jdbc().queryForObject("""
+                SELECT pending_authority_state FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, String.class, tenantId, sensor));
+        assertTrue(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                checksum, "batch", "corr", digest, id, List.of(entity)));
+        assertThrows(IllegalStateException.class, () -> store.terminallyRejectIdentityConflict(
+                tenantId, sensor, streamId, 1, checksum, "batch", "corr",
+                terminalRecord(sensor, 1), entity, 1L));
+        assertEquals(ReplayReservation.Status.REJECTED,
+                store.reserveBatchWithBody(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", "e".repeat(64)).status());
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", "e".repeat(64), id).status());
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", digest, UUID.randomUUID()).status());
+        assertEquals(PublisherClaimResult.Status.CLAIMED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", digest, id).status());
+    }
+
+    @Test
+    void legacyUnknownCannotClaimBeforeHistoricalValidation() {
+        String sensor = "sensor-legacy-unknown-claim";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensor, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        pg.jdbc().update("""
+                UPDATE platform.sensor_agent_ingress_watermark
+                   SET pending_authority_state='LEGACY_UNKNOWN', pending_publication_attempted=NULL
+                 WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensor);
+        assertEquals(PublisherClaimResult.Status.REJECTED,
+                store.claimPublisherLeaseExact(tenantId, sensor, streamId, 1, 1,
+                        checksum, "batch", "corr", digest, pending.pendingReservationId()).status());
+        assertEquals("LEGACY_UNKNOWN", pg.jdbc().queryForObject("""
+                SELECT pending_authority_state FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, String.class, tenantId, sensor));
     }
 
     @Test
@@ -133,7 +246,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         String digest = "d".repeat(64);
         ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
                 1, 1, checksum, "batch", "corr", digest);
-        PublisherClaimResult claim = store.claimPublisherLease(tenantId, sensorId, streamId,
+        PublisherClaimResult claim = claimExact(store, tenantId, sensorId, streamId,
                 1, 1, checksum, "batch", "corr");
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
         assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
@@ -143,7 +256,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
                 1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()),
                 "released lease does not prove Kafka was never attempted");
-        PublisherClaimResult retry = store.claimPublisherLease(tenantId, sensorId, streamId,
+        PublisherClaimResult retry = claimExact(store, tenantId, sensorId, streamId,
                 1, 1, checksum, "batch", "corr");
         store.finalizeReservedBatch(tenantId, sensorId, streamId, 1, 1, checksum, "batch", "corr",
                 retry.ownerToken(), retry.publisherEpoch());
@@ -192,7 +305,7 @@ class PostgresAgentIngressWatermarkStoreTest {
             });
             var claim = pool.submit(() -> {
                 start.await();
-                return store.claimPublisherLease(tenantId, sensorId, streamId,
+                return claimExact(store, tenantId, sensorId, streamId,
                         1, 1, checksum, "batch", "corr");
             });
             start.countDown();
@@ -229,7 +342,7 @@ class PostgresAgentIngressWatermarkStoreTest {
                 1, 1, checksum, "batch", "corr", digest);
         ExecutorService pool = Executors.newFixedThreadPool(2);
         try (Connection gate = holdSensorAdvisoryLock(sensorId)) {
-            var claim = pool.submit(() -> store.claimPublisherLease(tenantId, sensorId, streamId,
+            var claim = pool.submit(() -> claimExact(store, tenantId, sensorId, streamId,
                     1, 1, checksum, "batch", "corr"));
             awaitAdvisoryWaiters(1);
             var release = pool.submit(() -> store.releaseUnpublishedPending(tenantId, sensorId, streamId,
@@ -266,7 +379,7 @@ class PostgresAgentIngressWatermarkStoreTest {
             var release = pool.submit(() -> store.releaseUnpublishedPending(tenantId, sensorId, streamId,
                     1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
             awaitAdvisoryWaiters(1);
-            var claim = pool.submit(() -> store.claimPublisherLease(tenantId, sensorId, streamId,
+            var claim = pool.submit(() -> claimExact(store, tenantId, sensorId, streamId,
                     1, 1, checksum, "batch", "corr"));
             awaitAdvisoryWaiters(2);
             assertFalse(release.isDone());
@@ -421,7 +534,7 @@ class PostgresAgentIngressWatermarkStoreTest {
 
         assertEquals(ReplayReservation.Status.RESERVED, restarted.reserveBatch(tenantId, sensorId,
                 streamId, 2, 2, "c".repeat(64), "batch-next", "corr-next").status());
-        PublisherClaimResult claim = restarted.claimPublisherLease(tenantId, sensorId, streamId,
+        PublisherClaimResult claim = claimExact(restarted, tenantId, sensorId, streamId,
                 2, 2, "c".repeat(64), "batch-next", "corr-next");
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
         restarted.finalizeReservedBatch(tenantId, sensorId, streamId, 2, 2,
@@ -459,16 +572,18 @@ class PostgresAgentIngressWatermarkStoreTest {
         AgentIngestionValidator validator = mock(AgentIngestionValidator.class);
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         when(validator.resolveAuthority(certificate)).thenReturn(scope);
-        when(validator.validateAndExtract(any(), eq(rejected), eq(scope)))
+        when(validator.validateAndSnapshot(eq(rejected), eq(scope)))
                 .thenThrow(new IngestionException(HttpStatus.CONFLICT,
                         "ERR_AGENT_IDENTITY_CONFLICT", "conflicting host"));
         when(validator.validateCurrentTerminalAuthority(rejectedRecord, scope))
                 .thenReturn(new EntityAgentBinding(tenantId, entityId, terminalAgentId(sensorId),
                         terminalFingerprint(sensorId), "terminal-host", "linux", Instant.now(), Instant.now(),
                         "ACTIVE", 1));
-        when(validator.validateAndExtract(any(), eq(accepted), eq(scope)))
-                .thenReturn(List.of(new CanonicalObservation(tenantId.toString(), entityId.toString(),
-                        "cpu.util", sensorId, Instant.now(), 1.0, 1, 0, "seq-2", "AGENT_HOST")));
+        when(validator.validateAndSnapshot(eq(accepted), eq(scope)))
+                .thenReturn(new AgentIngestionValidator.ValidatedBatch(
+                        List.of(new CanonicalObservation(tenantId.toString(), entityId.toString(),
+                                "cpu.util", sensorId, Instant.now(), 1.0, 1, 0, "seq-2", "AGENT_HOST")),
+                        List.of(entityId)));
         AgentIngestionService service = new AgentIngestionService(validator, store, kafka,
                 new IngestionMetrics());
 
@@ -480,7 +595,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         IngestionException alteredTerminalBody = assertThrows(IngestionException.class, () ->
                 service.ingestAgentTelemetry(new byte[]{9}, rejected, rejected.batchId(), certificate));
         assertEquals("ERR_REPLAY_CONFLICT", alteredTerminalBody.getCode());
-        verify(validator, times(1)).validateAndExtract(any(), eq(rejected), eq(scope));
+        verify(validator, times(1)).validateAndSnapshot(eq(rejected), eq(scope));
         verify(kafka, never()).publishBatchTransactionally(any(TelemetryObservationBatch.class));
 
         var acceptedResponse = service.ingestAgentTelemetry(new byte[]{2}, accepted,
@@ -495,7 +610,7 @@ class PostgresAgentIngressWatermarkStoreTest {
                 service.ingestAgentTelemetry(new byte[]{9}, accepted, accepted.batchId(), certificate));
         assertEquals("ERR_REPLAY_CONFLICT", alteredAcceptedBody.getCode());
         verify(kafka, times(1)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
-        verify(validator, times(1)).validateAndExtract(any(), eq(accepted), eq(scope));
+        verify(validator, times(1)).validateAndSnapshot(eq(accepted), eq(scope));
     }
 
     @Test
@@ -601,11 +716,11 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(ReplayReservation.Status.REJECTED, outOfOrderWhilePending.status());
         assertEquals("ERR_PREVIOUS_BATCH_PENDING", outOfOrderWhilePending.rejectionCode());
 
-        PublisherClaimResult claim = store.claimPublisherLease(
+        PublisherClaimResult claim = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a", "corr-a");
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
 
-        PublisherClaimResult busy = store.claimPublisherLease(
+        PublisherClaimResult busy = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 10L, "checksum-a", "batch-a", "corr-a");
         assertEquals(PublisherClaimResult.Status.BUSY, busy.status());
 
@@ -788,7 +903,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(ReplayReservation.Status.RESERVED,
                 store.reserveBatch(tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp", "corr-exp").status());
 
-        PublisherClaimResult claim = store.claimPublisherLease(
+        PublisherClaimResult claim = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp", "corr-exp");
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
 
@@ -823,7 +938,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(claim.ownerToken(), pending.get("pending_publisher_owner"));
         assertEquals(claim.publisherEpoch(), ((Number) pending.get("pending_publisher_epoch")).longValue());
 
-        PublisherClaimResult takeover = store.claimPublisherLease(
+        PublisherClaimResult takeover = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 5L, "chk-exp", "batch-exp", "corr-exp");
         assertEquals(PublisherClaimResult.Status.CLAIMED, takeover.status());
         assertEquals(claim.publisherEpoch() + 1, takeover.publisherEpoch());
@@ -842,7 +957,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         assertEquals(ReplayReservation.Status.RESERVED,
                 store.reserveBatch(tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale", "corr-stale").status());
 
-        PublisherClaimResult oldClaim = store.claimPublisherLease(
+        PublisherClaimResult oldClaim = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale", "corr-stale");
         assertEquals(PublisherClaimResult.Status.CLAIMED, oldClaim.status());
 
@@ -853,7 +968,7 @@ class PostgresAgentIngressWatermarkStoreTest {
                  WHERE tenant_id=? AND sensor_id=?
                 """, tenantId, sensorId);
 
-        PublisherClaimResult newClaim = store.claimPublisherLease(
+        PublisherClaimResult newClaim = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 1L, "chk-stale", "batch-stale", "corr-stale");
         assertEquals(PublisherClaimResult.Status.CLAIMED, newClaim.status());
 
@@ -885,7 +1000,7 @@ class PostgresAgentIngressWatermarkStoreTest {
         String sensorId = "sensor-agent-lease-lock-delay-01";
         assertEquals(ReplayReservation.Status.RESERVED,
                 store.reserveBatch(tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld", "corr-ld").status());
-        PublisherClaimResult claim = store.claimPublisherLease(
+        PublisherClaimResult claim = claimExact(store,
                 tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld", "corr-ld");
         assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
 
@@ -962,7 +1077,7 @@ class PostgresAgentIngressWatermarkStoreTest {
             assertEquals("batch-ld", pending.get("pending_batch_id"));
             assertEquals(claim.ownerToken(), pending.get("pending_publisher_owner"));
 
-            PublisherClaimResult takeover = store.claimPublisherLease(
+            PublisherClaimResult takeover = claimExact(store,
                     tenantId, sensorId, streamId, 1L, 3L, "chk-ld", "batch-ld", "corr-ld");
             assertEquals(PublisherClaimResult.Status.CLAIMED, takeover.status());
             assertDoesNotThrow(() -> store.finalizeReservedBatch(

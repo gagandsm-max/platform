@@ -358,7 +358,24 @@ public class AgentIngestionValidator {
             AgentTelemetryBatchRequest batch,
             SensorScope scope
     ) {
+        return validateAndSnapshot(batch, scope).observations();
+    }
+
+    /** Entity IDs are ordered by ingress sequence and durably checkpointed before publishing. */
+    public record ValidatedBatch(List<CanonicalObservation> observations, List<UUID> entityIds) {}
+
+    public ValidatedBatch validateAndSnapshot(AgentTelemetryBatchRequest batch, SensorScope scope) {
+        return validateAndSnapshot(batch, scope, false);
+    }
+
+    public ValidatedBatch validateLegacyAndSnapshot(AgentTelemetryBatchRequest batch, SensorScope scope) {
+        return validateAndSnapshot(batch, scope, true);
+    }
+
+    private ValidatedBatch validateAndSnapshot(AgentTelemetryBatchRequest batch, SensorScope scope,
+            boolean requireHistoricalEntityProof) {
         List<CanonicalObservation> results = new ArrayList<>();
+        List<UUID> entityIds = new ArrayList<>();
         Instant ingestTime = Instant.now();
         String authoritativeSensorId = scope.sensorId();
         UUID authoritativeTenantId = scope.tenantId();
@@ -416,17 +433,60 @@ public class AgentIngestionValidator {
                 throw new IngestionException(HttpStatus.FORBIDDEN,
                         "ERR_AGENT_IDENTITY_CONFLICT", "Canonical Agent binding scope mismatch");
             }
+            if (requireHistoricalEntityProof) {
+                Instant accepted;
+                try {
+                    accepted = Instant.parse(ingress.acceptedAt());
+                } catch (RuntimeException e) {
+                    throw new IngestionException(HttpStatus.FORBIDDEN,
+                            "ERR_AGENT_LEGACY_AUTHORITY_TIME_UNPROVEN", "Legacy Sensor acceptance time is invalid");
+                }
+                if (accepted.isBefore(asg.createdAt())
+                        || binding.firstEnrolledAt() == null
+                        || accepted.isBefore(binding.firstEnrolledAt())) {
+                    throw new IngestionException(HttpStatus.FORBIDDEN,
+                            "ERR_AGENT_LEGACY_ENTITY_UNPROVEN", "Legacy canonical entity was not established at acceptance time");
+                }
+            }
+            entityIds.add(binding.entityId());
 
             for (JsonNode deliveryRecord : ingress.records()) {
                 results.addAll(extractFromDeliveryRecord(
                         deliveryRecord,
-                        binding,
+                        binding.entityId(), true,
                         ingress,
                         authoritativeSensorId,
                         recordTenantId,
                         ingestTime,
                         batch.correlationId()
                 ));
+            }
+        }
+        return new ValidatedBatch(List.copyOf(results), List.copyOf(entityIds));
+    }
+
+    /** Exact validated retry uses the persisted canonical entity snapshot. */
+    public List<CanonicalObservation> extractValidatedSnapshot(
+            AgentTelemetryBatchRequest batch, SensorScope scope, List<UUID> entityIds) {
+        if (entityIds == null || entityIds.size() != batch.records().size()) {
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE", "Validated entity snapshot is incomplete");
+        }
+        List<AgentIngressRecord> sorted = new ArrayList<>(batch.records());
+        sorted.sort(Comparator.comparingLong(AgentIngressRecord::sensorIngressSequence));
+        List<CanonicalObservation> results = new ArrayList<>();
+        Instant ingestTime = Instant.now();
+        for (int i = 0; i < sorted.size(); i++) {
+            AgentIngressRecord ingress = sorted.get(i);
+            validateIngressRecordAuthority(ingress, scope.sensorId(), scope.tenantId());
+            UUID entityId = entityIds.get(i);
+            if (entityId == null || ingress.records() == null || ingress.records().isEmpty()) {
+                throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE", "Validated record snapshot is incomplete");
+            }
+            for (JsonNode delivery : ingress.records()) {
+                results.addAll(extractFromDeliveryRecord(delivery, entityId, false,
+                        ingress, scope.sensorId(), scope.tenantId(), ingestTime, batch.correlationId()));
             }
         }
         return results;
@@ -525,7 +585,8 @@ public class AgentIngestionValidator {
 
     private List<CanonicalObservation> extractFromDeliveryRecord(
             JsonNode deliveryRecord,
-            EntityAgentBinding binding,
+            UUID canonicalEntityId,
+            boolean validateCurrentHostEvidence,
             AgentIngressRecord ingress,
             String authoritativeSensorId,
             UUID tenantId,
@@ -591,14 +652,14 @@ public class AgentIngestionValidator {
                 if (!observedHost.isBlank()) checkedHosts.add(observedHost);
             }
         }
-        if (checkedHosts.size() == 1) {
-            validateHostEvidence(tenantId, binding.entityId(), checkedHosts.iterator().next());
-        } else if (!checkedHosts.isEmpty() && entityIdentifierRepository.hasConflictingHostEvidence(
-                tenantId, binding.entityId(), List.copyOf(checkedHosts))) {
+        if (validateCurrentHostEvidence && checkedHosts.size() == 1) {
+            validateHostEvidence(tenantId, canonicalEntityId, checkedHosts.iterator().next());
+        } else if (validateCurrentHostEvidence && !checkedHosts.isEmpty() && entityIdentifierRepository.hasConflictingHostEvidence(
+                tenantId, canonicalEntityId, List.copyOf(checkedHosts))) {
             throw new IngestionException(HttpStatus.CONFLICT, "ERR_AGENT_IDENTITY_CONFLICT",
                     "Observed host identity conflicts with canonical Agent binding");
         }
-        String entityId = binding.entityId().toString();
+        String entityId = canonicalEntityId.toString();
         String correlation = ingress.correlationId() != null && !ingress.correlationId().isBlank()
                 ? ingress.correlationId()
                 : batchCorrelationId;

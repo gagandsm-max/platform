@@ -5,6 +5,7 @@ import com.platform.core.ingestion.replay.ReplayReservation;
 import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
 
 import java.util.UUID;
+import java.util.List;
 
 public interface AgentIngressWatermarkStore {
 
@@ -45,6 +46,20 @@ public interface AgentIngressWatermarkStore {
 
     boolean terminalReplayMatchesRecord(UUID tenantId, String sensorId,
             UUID dispositionId, AgentIngressRecord record);
+
+    /** Persist exact-request authority and the per-ingress-record entity snapshot. */
+    default boolean checkpointAuthority(UUID tenantId, String sensorId, String streamId,
+            long firstSeq, long lastSeq, String checksum, String batchId, String correlationId,
+            String requestSha256, UUID reservationId, List<UUID> entityIds) {
+        return false;
+    }
+
+    default PublisherClaimResult claimPublisherLeaseExact(UUID tenantId, String sensorId,
+            String streamId, long firstSeq, long lastSeq, String checksum, String batchId,
+            String correlationId, String requestSha256, UUID reservationId) {
+        return PublisherClaimResult.rejected("ERR_AGENT_AUTHORITY_CHECKPOINT_REQUIRED",
+                "Exact authority checkpoint support is required for Agent-ingress publisher claim");
+    }
 
     PublisherClaimResult claimPublisherLease(
             UUID tenantId,

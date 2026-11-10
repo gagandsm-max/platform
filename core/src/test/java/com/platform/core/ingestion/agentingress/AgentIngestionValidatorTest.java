@@ -360,9 +360,13 @@ class AgentIngestionValidatorTest {
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         UUID owner = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
         when(watermarks.reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
-        when(watermarks.claimPublisherLease(any(), anyString(), anyString(), anyLong(), anyLong(),
-                anyString(), anyString(), anyString())).thenReturn(PublisherClaimResult.claimed(owner, 1L));
+                anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(ReplayReservation.reserved(0, UUID.randomUUID()));
+        when(watermarks.checkpointAuthority(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString(), any(), anyList())).thenReturn(true);
+        when(watermarks.claimPublisherLeaseExact(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString(), any()))
+                .thenReturn(PublisherClaimResult.claimed(owner, 1L));
         AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);
 
         var ack = service.ingestAgentTelemetry(objectMapper.writeValueAsBytes(batch), batch, batch.batchId(), cert);
@@ -432,6 +436,54 @@ class AgentIngestionValidatorTest {
         assertEquals(2L, obs.get(0).assignmentGeneration());
         assertEquals(entityId.toString(), obs.get(0).entityId());
         assertTrue(obs.get(0).sequenceId().contains("agent-1:2:10:0:cpu.util"));
+    }
+
+    @Test
+    void legacyRevokedAssignmentWithinAcceptanceIntervalCheckpointsOriginalEntity() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T11:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), tenantId,
+                        "agent-1", "sensor-infra-01", 2, AgentAssignmentStatus.REVOKED,
+                        created, created, revoked)));
+        when(agentRepo.findActiveEntityBinding(tenantId, "agent-1"))
+                .thenReturn(Optional.of(new EntityAgentBinding(tenantId, entityId, "agent-1",
+                        "a".repeat(64), "host-abc", "linux", created, revoked, "ACTIVE", 1)));
+        AgentIngestionValidator.ValidatedBatch validated = validator.validateLegacyAndSnapshot(batch, scope);
+        assertEquals(List.of(entityId), validated.entityIds());
+        assertEquals(1, validated.observations().size());
+        assertEquals(entityId.toString(), validated.observations().get(0).entityId());
+    }
+
+    @Test
+    void legacyPendingWithoutHistoricalEntityProofRequiresReconciliation() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T11:00:00Z");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), tenantId,
+                        "agent-1", "sensor-infra-01", 2, AgentAssignmentStatus.REVOKED,
+                        created, created, revoked)));
+        when(agentRepo.findActiveEntityBinding(tenantId, "agent-1"))
+                .thenReturn(Optional.of(new EntityAgentBinding(tenantId, entityId, "agent-1",
+                        "a".repeat(64), "host-abc", "linux", revoked, revoked, "ACTIVE", 1)));
+        IngestionException failure = assertThrows(IngestionException.class,
+                () -> validator.validateLegacyAndSnapshot(batch, scope));
+        assertEquals("ERR_AGENT_LEGACY_ENTITY_UNPROVEN", failure.getCode());
+    }
+
+    @Test
+    void validatedSnapshotSurvivesCurrentBindingRevocationAndRetainsLogicalIdentity() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        List<CanonicalObservation> replay = validator.extractValidatedSnapshot(batch, scope, List.of(entityId));
+        assertEquals(1, replay.size());
+        assertEquals(entityId.toString(), replay.get(0).entityId());
+        assertTrue(replay.get(0).sequenceId().contains("agent-1:2:10:0:cpu.util"));
+        verifyNoInteractions(agentRepo);
     }
 
     @Test

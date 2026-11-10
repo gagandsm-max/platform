@@ -240,6 +240,10 @@ func classifyAgentTelemetryStatus(status int, body []byte) error {
 	switch code {
 	case "ERR_PREVIOUS_BATCH_PENDING", "ERR_BATCH_PUBLICATION_IN_PROGRESS":
 		transient = true
+	case "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED":
+		// Retain and retry the frozen head, while exposing a persistent blocked
+		// stream in Sensor self-health until governed reconciliation succeeds.
+		transient = false
 	}
 	if code != "" {
 		return &CoreAPIError{Status: apiErr.Status, Code: code, Message: msg, HTTPStatus: status, transient: transient}
@@ -274,7 +278,8 @@ func IsAgentIngressSpoolRetainingCode(code string) bool {
 		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
 		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
 		"ERR_TENANT_SCOPE_MISMATCH",
-		"ERR_AGENT_ENTITY_UNRESOLVED":
+		"ERR_AGENT_ENTITY_UNRESOLVED",
+		"ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED":
 		return true
 	default:
 		return false

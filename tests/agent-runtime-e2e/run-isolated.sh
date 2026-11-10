@@ -13,7 +13,10 @@ export PLATFORM_KAFKA_DATA_VOLUME="$PLATFORM_E2E_PREFIX-platform_kafka_data"
 export PLATFORM_KAFKA_STORAGE_ID="$PLATFORM_E2E_PREFIX"
 export PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="$PLATFORM_KAFKA_STORAGE_ID"
 export PLATFORM_KAFKA_CLUSTER_ID
-PLATFORM_KAFKA_CLUSTER_ID=$(openssl rand -base64 16 | tr '+/' '-_' | tr -d '=\n')
+while :; do
+    PLATFORM_KAFKA_CLUSTER_ID=$(openssl rand -base64 16 | tr '+/' '-_' | tr -d '=\n')
+    [[ $PLATFORM_KAFKA_CLUSTER_ID != -* ]] && break
+done
 export COMPOSE_PROFILES=dev COMPOSE_PARALLEL_LIMIT=1
 cd "$ROOT"
 git rev-parse HEAD 'HEAD^{tree}' > "$PLATFORM_E2E_RUN_DIR/source-head.txt"

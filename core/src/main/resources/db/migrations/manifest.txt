@@ -18,4 +18,4 @@ V017__sensor_poll_grant_audit_intent.sql|Issue 294 G1b-C2 inert same-transaction
 V018__sensor_execution_incarnation_authority.sql|Issue 288 G1b-C3 inert Core-side Sensor execution incarnation authority (no legacy backfill; not credential/bootEpoch; CASCADE on Sensor delete)
 V019__entity_agent_binding.sql|Platform20 current canonical Agent entity certificate binding; no inferred legacy backfill
 V020__agent_ingress_terminal_settlement.sql|Core-authoritative Agent-ingress terminal settlement and separate contiguous continuity watermark
-V021__agent_ingress_pending_release_guard.sql|Fail-closed V020 pending upgrade gate and exact unpublished pending release identity
+V021__agent_ingress_pending_release_guard.sql|Legacy pending preservation, exact authority checkpoint, publisher claim fence, and unpublished release identity

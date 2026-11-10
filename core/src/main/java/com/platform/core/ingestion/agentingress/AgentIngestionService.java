@@ -126,17 +126,56 @@ public class AgentIngestionService {
             } else if ("ERR_SENSOR_STREAM_CHANGED".equals(code)) {
                 metrics.recordStreamMismatch();
             }
-            HttpStatus status = "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
+            HttpStatus status = "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED".equals(code)
+                    ? HttpStatus.SERVICE_UNAVAILABLE
+                    : "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
                     || "ERR_AGENT_STREAM_ID_INVALID".equals(code)
                     ? HttpStatus.BAD_REQUEST
                     : HttpStatus.CONFLICT;
             throw new IngestionException(status, code, reservation.rejectionMessage());
         }
 
+        boolean legacyPending = "LEGACY_UNKNOWN".equals(reservation.pendingAuthorityState());
+        boolean validatedPending = "AUTHORITY_VALIDATED".equals(reservation.pendingAuthorityState());
         List<CanonicalObservation> observations;
         try {
-            observations = validator.validateAndExtract(rawBody, request, scope);
+            if (validatedPending) {
+                observations = validator.extractValidatedSnapshot(request, scope, reservation.pendingEntityIds());
+            } else {
+                AgentIngestionValidator.ValidatedBatch validated = legacyPending
+                        ? validator.validateLegacyAndSnapshot(request, scope)
+                        : validator.validateAndSnapshot(request, scope);
+                observations = validated.observations();
+                if (observations.isEmpty()) {
+                    throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_NO_CANONICAL_OBSERVATIONS",
+                            "Batch contains zero supported canonical numeric observations");
+                }
+                if (!watermarkStore.checkpointAuthority(scope.tenantId(), scope.sensorId(),
+                        request.sensorAgentSpoolStreamId(), request.firstIngressSequence(),
+                        request.lastIngressSequence(), request.checksum(), request.batchId(),
+                        request.correlationId(), requestSha256, reservation.pendingReservationId(),
+                        validated.entityIds())) {
+                    throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN",
+                            "Agent-ingress authority checkpoint is unconfirmed; retain and retry exact batch");
+                }
+            }
         } catch (IngestionException validationFailure) {
+            if ("ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN".equals(validationFailure.getCode())) {
+                metrics.recordBatchRejected(validationFailure.getCode());
+                throw validationFailure;
+            }
+            if (legacyPending) {
+                metrics.recordBatchRejected("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED");
+                throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED",
+                        "Historical Agent authority cannot be proven; retain the exact pending batch",
+                        validationFailure);
+            }
+            metrics.recordBatchRejected(validationFailure.getCode());
+            if (validatedPending) {
+                throw validationFailure;
+            }
             if (!"ERR_AGENT_IDENTITY_CONFLICT".equals(validationFailure.getCode())
                     || request.records().size() != 1) {
                 releaseRejectedPending(scope, request, requestSha256, reservation);
@@ -166,7 +205,7 @@ public class AgentIngestionService {
             }
         }
 
-        PublisherClaimResult claim = watermarkStore.claimPublisherLease(
+        PublisherClaimResult claim = watermarkStore.claimPublisherLeaseExact(
                 scope.tenantId(),
                 scope.sensorId(),
                 request.sensorAgentSpoolStreamId(),
@@ -174,7 +213,7 @@ public class AgentIngestionService {
                 request.lastIngressSequence(),
                 request.checksum(),
                 request.batchId(),
-                request.correlationId()
+                request.correlationId(), requestSha256, reservation.pendingReservationId()
         );
         if (claim.status() == PublisherClaimResult.Status.BUSY) {
             metrics.recordPublisherLeaseContention();

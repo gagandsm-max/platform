@@ -11,7 +11,9 @@ public record ReplayReservation(
         String rejectionMessage,
         java.util.UUID terminalDispositionId,
         long settledThroughSequence,
-        java.util.UUID pendingReservationId
+        java.util.UUID pendingReservationId,
+        String pendingAuthorityState,
+        java.util.List<java.util.UUID> pendingEntityIds
 ) {
     public enum Status {
         RESERVED,
@@ -27,7 +29,7 @@ public record ReplayReservation(
 
     public static ReplayReservation reserved(long ackedThroughSequence, java.util.UUID pendingReservationId) {
         return new ReplayReservation(Status.RESERVED, ackedThroughSequence, null, null, null, 0,
-                pendingReservationId);
+                pendingReservationId, "UNVALIDATED", null);
     }
 
     public static ReplayReservation retryPending(long ackedThroughSequence) {
@@ -36,20 +38,27 @@ public record ReplayReservation(
 
     public static ReplayReservation retryPending(long ackedThroughSequence, java.util.UUID pendingReservationId) {
         return new ReplayReservation(Status.RETRY_PENDING, ackedThroughSequence, null, null, null, 0,
-                pendingReservationId);
+                pendingReservationId, "UNVALIDATED", null);
+    }
+
+    public static ReplayReservation retryPending(long ackedThroughSequence,
+            java.util.UUID pendingReservationId, String authorityState,
+            java.util.List<java.util.UUID> entityIds) {
+        return new ReplayReservation(Status.RETRY_PENDING, ackedThroughSequence, null, null, null, 0,
+                pendingReservationId, authorityState, entityIds == null ? null : java.util.List.copyOf(entityIds));
     }
 
     public static ReplayReservation alreadyAcked(long ackedThroughSequence) {
-        return new ReplayReservation(Status.ALREADY_ACKED, ackedThroughSequence, null, null, null, 0, null);
+        return new ReplayReservation(Status.ALREADY_ACKED, ackedThroughSequence, null, null, null, 0, null, null, null);
     }
 
     public static ReplayReservation rejected(long ackedThroughSequence, String code, String message) {
-        return new ReplayReservation(Status.REJECTED, ackedThroughSequence, code, message, null, 0, null);
+        return new ReplayReservation(Status.REJECTED, ackedThroughSequence, code, message, null, 0, null, null, null);
     }
 
     public static ReplayReservation terminallyRejected(long ackedThroughSequence,
             long settledThroughSequence, java.util.UUID dispositionId, String reasonCode) {
         return new ReplayReservation(Status.TERMINALLY_REJECTED, ackedThroughSequence,
-                reasonCode, null, dispositionId, settledThroughSequence, null);
+                reasonCode, null, dispositionId, settledThroughSequence, null, null, null);
     }
 }

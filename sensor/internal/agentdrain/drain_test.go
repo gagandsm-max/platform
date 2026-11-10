@@ -608,6 +608,7 @@ func TestDrainRetainsSpoolOnAuthorityAndContinuityErrors(t *testing.T) {
 		{"previous_batch_pending", "ERR_PREVIOUS_BATCH_PENDING", 409, true},
 		{"publication_in_progress", "ERR_BATCH_PUBLICATION_IN_PROGRESS", 429, true},
 		{"pending_release_uncertain", "ERR_AGENT_PENDING_RELEASE_UNCERTAIN", 503, true},
+		{"legacy_pending_reconciliation", "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED", 503, false},
 		{"stream_changed", "ERR_SENSOR_STREAM_CHANGED", 409, false},
 		{"idempotency_conflict", "ERR_IDEMPOTENCY_CONFLICT", 409, false},
 		{"sequence_regression", "ERR_SEQUENCE_REGRESSION", 409, false},
@@ -657,6 +658,11 @@ func TestDrainRetainsSpoolOnAuthorityAndContinuityErrors(t *testing.T) {
 			}
 			if d.Metrics().PoisonCount.Load() != 0 {
 				t.Fatalf("poison must not be created for %s", tc.code)
+			}
+			if tc.code == "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED" {
+				if snap := d.Snapshot(); !snap.Blocked || snap.ReasonCode != tc.code {
+					t.Fatalf("legacy reconciliation must expose blocked stream: %+v", snap)
+				}
 			}
 			entries, _ := os.ReadDir(filepath.Join(dir, poisonDirName))
 			if len(entries) != 0 {

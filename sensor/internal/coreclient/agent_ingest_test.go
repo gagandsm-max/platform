@@ -397,6 +397,10 @@ func TestUploadAgentTelemetryRejectsNonExactAcceptedStatus(t *testing.T) {
 }
 
 func TestClassifyAgentTelemetryFailureRetryableAndSpoolRetaining(t *testing.T) {
+	legacy := ClassifyAgentTelemetryFailure(503, []byte(`{"code":"ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED","message":"retain"}`))
+	if IsTransient(legacy) || !IsAgentIngressSpoolRetainingCode("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED") {
+		t.Fatalf("legacy reconciliation must retain custody and expose a persistent block, got %v", legacy)
+	}
 	pending := ClassifyAgentTelemetryFailure(409, []byte(`{"code":"ERR_PREVIOUS_BATCH_PENDING","message":"x"}`))
 	if !IsTransient(pending) {
 		t.Fatalf("ERR_PREVIOUS_BATCH_PENDING must be transient, got %v", pending)
