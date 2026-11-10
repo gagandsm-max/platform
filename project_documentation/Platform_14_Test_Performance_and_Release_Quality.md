@@ -634,6 +634,23 @@ At baseline main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`, `.github/workflows/
 
 The release evidence ledger must pair each requirement with an actual executed check/artifact, or label its acceptance definition pending. Approved ORT/Syft/Trivy/ScanCode catalog entries are not proof those tools execute in current CI. `compose.yaml` contains all six `dev/test/ha/scale/security/dr` profile names; a profile name is not a failure drill, load-generator workload or certification result.
 
+### Host-global runtime exclusion acceptance — shared Docker host
+
+Canonical lock semantics are owned by `Platform_13` §22; CI hold/release ownership is owned by `Platform_15` §3.8. This subsection owns acceptance fixtures only.
+
+**Test 20 invariant (do not weaken):** `Persistence, Structured JSON Logs, and Workstation Isolation` remains a legitimate failure when foreign container state changes during the Platform Compose restart. Foreign `agent-e2e-*` containers changing during Test 20 remain a correct failure. The remediation is host-global runtime exclusion, **not** an allowlist for `agent-e2e-*` or any other foreign name pattern.
+
+Required acceptance fixtures:
+
+1. Local E2E owns the lock → CI Integration job cannot mutate runtime concurrently.
+2. CI owns the lock → local heavy runner cannot acquire it.
+3. CI waiting for a local owner proceeds after proper release.
+4. Foreign containers remain unchanged throughout Test 20.
+5. CI cancellation / process death releases the lock automatically (process-bound kernel lock).
+6. CI cleanup never deletes foreign `agent-e2e-*` resources.
+7. Same-inode independent nonblocking acquisition succeeds after clean release (no unlink/replace release).
+8. Two GitHub Integration jobs cannot become simultaneous runtime owners on the same host.
+
 ## Storage assurance A+B+C acceptance — Issue #292
 
 Authority: [Issue #292](https://github.com/gagandsm-max/platform/issues/292) and [source-to-implementation adjudication](https://github.com/gagandsm-max/platform/issues/292#issuecomment-6576078417). This is bounded specification/acceptance reconciliation only: SPECIFIED, not implemented/tested/certified. Preserve current Sensor spool protection; do not claim a Core-wide capacity estimator or legal-hold controller from `sensor/internal/spool/spool.go`. Reuse BUILD-061/064/074/086/094/097/130 and existing Storage Lifecycle/Operations/Notification owners; no new service, queue, database or BUILD ID.

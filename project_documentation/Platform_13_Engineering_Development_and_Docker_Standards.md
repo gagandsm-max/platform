@@ -159,6 +159,60 @@ Container stdout/stderr must be structured and bounded by Docker logging setting
 
 Agent business logic and cross-compilation can run in Docker. Final Windows Service/SCM/MSI/reboot testing requires an isolated Windows VM/CI runner. This is required for correctness; Linux containers cannot certify Windows service semantics.
 
+## 22. Host-global shared Docker runtime exclusion
+
+The self-hosted AmrudAi development/CI host shares one Docker daemon across local heavy runners and GitHub Actions jobs labeled `[self-hosted, Linux, X64, platform-ci]`. Concurrent Compose/runtime mutation on that host is prohibited.
+
+### 22.1 Frozen invariant
+
+Any workload that creates, removes, restarts, pauses or mutates shared Docker runtime resources on that host MUST participate in the **same** host-global runtime exclusion mechanism. Project-scoped Compose names, unique CI volume prefixes and foreign-container isolation checks do **not** replace host-global exclusion.
+
+### 22.2 Canonical lock
+
+Canonical lock path (stable):
+
+`/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock`
+
+Acquisition MUST use an OS advisory lock compatible with existing local execution: `flock` / `fcntl.flock`. Do **not** invent a second unrelated lock file, lock service or soft-mutex. Kernel lock ownership is authoritative for exclusion. Human-readable Issue #211 ACQUIRED/RELEASED records may supplement provenance but do **not** replace the OS exclusion primitive. Never unlink, truncate-replace or recreate the lock inode as a release mechanism.
+
+Ownership metadata written while holding the lock SHOULD identify:
+
+- owner type (for example `ci-integration`, `codex-desktop-e2e`, `codex-cli`, `antigravity-runtime`, `cursor-heavy`, `manual-integration`);
+- GitHub run ID / attempt, or local session identity;
+- repository SHA under test;
+- acquisition time (UTC);
+- responsible process PID where applicable.
+
+### 22.3 Mandatory participants
+
+Workloads that MUST acquire the same lock before shared Docker mutation include, where applicable:
+
+- CODEX Desktop heavy E2E;
+- Codex CLI heavy runtime;
+- Antigravity runtime testing;
+- Cursor heavy runtime;
+- manually launched Platform integration/E2E tests that mutate Compose/containers/volumes/networks;
+- GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]` that execute Platform integration/runtime/Compose tests.
+
+Static-contract, source-only and UI/unit jobs do **not** automatically require this lock unless they mutate shared Platform runtime resources. CI job ownership and hold duration are governed by `Platform_15`; acceptance fixtures are owned by `Platform_14`.
+
+### 22.4 Contention behavior
+
+When another owner holds the lock, a contending workload MUST NOT:
+
+- kill the foreign workload;
+- delete foreign containers (including `agent-e2e-*`);
+- stop another tool's Compose stack;
+- clear volumes;
+- reset the environment to seize the host;
+- bypass workstation/foreign-container isolation checks.
+
+It MAY wait within its bounded job/session timeout. If it cannot obtain the lock safely, it MUST fail visibly as **runtime-busy** rather than mutating another workload.
+
+### 22.5 Crash / cancellation
+
+Lock ownership MUST be process-bound so process or job death releases the kernel lock automatically. Cleanup that runs after cancellation MUST clean only positively owned resources, terminate the caller's lock-holder process when this workload was the owner, and independently verify the lock is free afterwards. Foreign resources remain untouched.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

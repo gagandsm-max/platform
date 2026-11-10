@@ -2457,6 +2457,101 @@ class MotherReferenceValidator:
                         "when binding Agent-ingress upgrade gate"
                     )
 
+    def validate_host_global_runtime_exclusion_contract(self) -> None:
+        """Pin shared-host Docker runtime exclusion across Platform_13/14/15.
+
+        Concurrent Compose/runtime mutation on the self-hosted AmrudAi
+        development/CI host is forbidden. One OS advisory lock
+        (``flock`` / ``fcntl.flock``) on the stable path is mandatory; CI
+        Integration is a heavy owner; Test 20 foreign-container failure must
+        not be weakened by an ``agent-e2e-*`` allowlist. Skipped when the
+        Docker standards owner document is absent (minimal fixture trees).
+        """
+        p13_path = (
+            self.docs_root
+            / "Platform_13_Engineering_Development_and_Docker_Standards.md"
+        )
+        if not p13_path.is_file():
+            return
+        p13 = p13_path.read_text(encoding="utf-8")
+        if "## 22. Host-global shared Docker runtime exclusion" not in p13:
+            # Minimal stubs without the Docker contract surface are skipped.
+            if "Docker Compose" not in p13 and "Compose profiles" not in p13:
+                return
+            self.fail(
+                "Platform_13 must own host-global shared Docker runtime "
+                "exclusion under ## 22. Host-global shared Docker runtime "
+                "exclusion"
+            )
+            return
+
+        lock_path = (
+            "/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock"
+        )
+        for required in (
+            lock_path,
+            "flock",
+            "fcntl.flock",
+            "Kernel lock ownership is authoritative",
+            "Never unlink",
+            "runtime-busy",
+            "agent-e2e-*",
+            "CODEX Desktop heavy E2E",
+            "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
+        ):
+            if required not in p13:
+                self.fail(
+                    "Platform_13 §22 host-global runtime exclusion missing "
+                    f"{required!r}"
+                )
+
+        p15_path = (
+            self.docs_root / "Platform_15_CI_CD_Packaging_and_Distribution.md"
+        )
+        if p15_path.is_file():
+            p15 = p15_path.read_text(encoding="utf-8")
+            if "### 3." in p15 or "CI/CD" in p15:
+                for required in (
+                    "### 3.8 Self-hosted host-global runtime exclusion",
+                    "Integration, PostgreSQL, contract, security",
+                    lock_path,
+                    "before any Platform Docker mutation",
+                    "owned cleanup",
+                    "always()",
+                    "runtime-busy",
+                    "agent-e2e-*",
+                ):
+                    if required not in p15:
+                        self.fail(
+                            "Platform_15 §3.8 Integration runtime-lock "
+                            f"binding missing {required!r}"
+                        )
+
+        p14_path = (
+            self.docs_root
+            / "Platform_14_Test_Performance_and_Release_Quality.md"
+        )
+        if p14_path.is_file():
+            p14 = p14_path.read_text(encoding="utf-8")
+            if "Current CI evidence boundary" in p14 or "release quality" in p14.lower():
+                for required in (
+                    "### Host-global runtime exclusion acceptance",
+                    "Persistence, Structured JSON Logs, and Workstation Isolation",
+                    "not** an allowlist for `agent-e2e-*`",
+                    "Local E2E owns the lock",
+                    "CI owns the lock",
+                    "Foreign containers remain unchanged throughout Test 20",
+                    "CI cancellation / process death releases the lock",
+                    "CI cleanup never deletes foreign `agent-e2e-*`",
+                    "Same-inode independent nonblocking acquisition",
+                    "Two GitHub Integration jobs cannot become simultaneous",
+                ):
+                    if required not in p14:
+                        self.fail(
+                            "Platform_14 host-global runtime exclusion "
+                            f"acceptance missing {required!r}"
+                        )
+
     def validate(self) -> list[str]:
         self.errors = []
         constitutional = self.validate_constitutional_set()
@@ -2486,6 +2581,7 @@ class MotherReferenceValidator:
         self.validate_network_flow_source_reality_status()
         self.validate_dependency_activation_combine_operator()
         self.validate_agent_ingress_pending_reservation_safety()
+        self.validate_host_global_runtime_exclusion_contract()
         return self.errors
 
 

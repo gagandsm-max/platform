@@ -4598,6 +4598,116 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertTrue(validator.errors, "expected sFlow sequence contract failure")
             self.assertIn("sFlow v5 datagram sequence", joined)
 
+    def test_102_host_global_runtime_exclusion_contract(self) -> None:
+        """Shared-host Docker runtime exclusion must stay frozen across owners."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p13 = (
+            docs / "Platform_13_Engineering_Development_and_Docker_Standards.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p15 = (
+            docs / "Platform_15_CI_CD_Packaging_and_Distribution.md"
+        ).read_text(encoding="utf-8")
+
+        lock_path = (
+            "/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock"
+        )
+        for needle in (
+            "## 22. Host-global shared Docker runtime exclusion",
+            lock_path,
+            "flock",
+            "fcntl.flock",
+            "Kernel lock ownership is authoritative",
+            "Never unlink",
+            "runtime-busy",
+            "CODEX Desktop heavy E2E",
+            "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
+            "agent-e2e-*",
+        ):
+            self.assertIn(needle, p13, needle)
+
+        for needle in (
+            "### 3.8 Self-hosted host-global runtime exclusion",
+            "Integration, PostgreSQL, contract, security",
+            lock_path,
+            "before any Platform Docker mutation",
+            "owned cleanup",
+            "always()",
+            "runtime-busy",
+            "agent-e2e-*",
+        ):
+            self.assertIn(needle, p15, needle)
+
+        for needle in (
+            "### Host-global runtime exclusion acceptance",
+            "Persistence, Structured JSON Logs, and Workstation Isolation",
+            "not** an allowlist for `agent-e2e-*`",
+            "Local E2E owns the lock",
+            "CI owns the lock",
+            "Foreign containers remain unchanged throughout Test 20",
+            "CI cancellation / process death releases the lock",
+            "CI cleanup never deletes foreign `agent-e2e-*`",
+            "Same-inode independent nonblocking acquisition",
+            "Two GitHub Integration jobs cannot become simultaneous",
+        ):
+            self.assertIn(needle, p14, needle)
+
+        # Preserve prior P0 closures — these must not regress with this pin.
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sFlow v5", register)
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        self.assertIn("PARTIAL", row_042)
+        self.assertNotIn("Raw Counter64 exists", row_042)
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("### 7.1 Agent-ingress pending-reservation", p17)
+        self.assertIn("combine: ANY | ALL", p17)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_host_global_runtime_exclusion_contract()
+        self.assertEqual(validator.errors, [])
+
+    def test_102b_host_global_runtime_exclusion_regression_fails(self) -> None:
+        """Dropping the host-global lock owner section must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (tmp_docs / "Platform_13_Engineering_Development_and_Docker_Standards.md").write_text(
+                "# Platform 13\n\n## 14. Compose profiles\n\n"
+                "Docker Compose development without host exclusion.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_15_CI_CD_Packaging_and_Distribution.md").write_text(
+                "# Platform 15\n\n### 3.1 Pipeline stages\n\nCI/CD stages.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_14_Test_Performance_and_Release_Quality.md").write_text(
+                "# Platform 14\n\n### Current CI evidence boundary\n\n"
+                "Four jobs exist.\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_host_global_runtime_exclusion_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(
+                validator.errors,
+                "expected host-global runtime exclusion failures",
+            )
+            self.assertIn("host-global", joined.lower())
+
 
 if __name__ == "__main__":
     unittest.main()

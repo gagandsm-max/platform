@@ -52,6 +52,32 @@ Development → internal alpha → beta/pilot → release candidate → GA. Prom
 
 ORT/Syft/Trivy/ScanCode or approved equivalents run according to the OSS catalogue. RED dependencies fail the build; YELLOW requires explicit approval. Critical/high vulnerabilities are dispositioned before release.
 
+### 3.8 Self-hosted host-global runtime exclusion (Integration job)
+
+Canonical exclusion semantics, lock path and contention rules are owned by `Platform_13` §22. This subsection binds the current GitHub Actions heavy runtime job only; it does not restate the full contract.
+
+The job named **`Integration, PostgreSQL, contract, security`** (`integration-security` in `.github/workflows/platform-ci.yml`), when executed on `[self-hosted, Linux, X64, platform-ci]`, is a heavy runtime owner. It MUST acquire the same host-global OS advisory lock (`flock` / `fcntl.flock` on `/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock`) **before any Platform Docker mutation**, including preflight container/port checks that decide whether to proceed with Compose provisioning.
+
+It MUST retain ownership through:
+
+- preflight;
+- Platform Compose provisioning;
+- integration tests (including the 20-test suite);
+- PostgreSQL tests;
+- contract/security runtime tests;
+- diagnostics;
+- owned cleanup.
+
+It MUST release only after owned cleanup completes. An `always()` cleanup step SHALL:
+
+- clean only positively owned CI resources (exact run/attempt Compose project and labeled disposable volumes);
+- terminate the CI lock-holder process so the kernel lock releases;
+- independently verify the lock is free when this CI job was the owner.
+
+Never unlink/replace the lock inode as a release mechanism. On contention, the job MAY wait within its bounded timeout; it MUST NOT kill foreign workloads, delete foreign containers (including `agent-e2e-*`), stop another tool's Compose stack, clear unrelated volumes, reset the host, or bypass isolation checks. If the lock cannot be obtained safely, the job fails as **runtime-busy**.
+
+Static-contract, source-only and UI/unit jobs do **not** automatically require this lock unless they mutate shared Platform runtime resources. Acceptance fixtures proving mutual exclusion and Test 20 foreign-container integrity are owned by `Platform_14`.
+
 ## 4. Platform — Packaging & Distribution Master
 
 > Consolidated from `Platform_18_Packaging_and_Distribution.md` v3.1. Requirements in this section remain normative.
@@ -189,7 +215,7 @@ The pipeline stages above are normative release requirements, not a claim that e
 | Source/configuration paths first | Existing implementation / required release operation | Current boundary |
 |---|---|---|
 | `agent/linux/systemd/platform-agent.service`; `agent/linux/systemd/platform-agent.env.example` | Current source requires `/etc/platform/agent.env`, starts `/usr/local/bin/platform-agent-linux`, uses `/var/lib/platform/agent` state and writes stdout/stderr to journald as `platform-agent`. | Verified native source profile; it is a documented exception to the generic recommended `/opt/platform/<component>/` layout. Preserve it until a separately reviewed package migration. Source does not prove an installed host or package artifact. |
-| `.github/workflows/platform-ci.yml`; `Makefile`; `tests/` | Current static/unit/UI/integration/security operations. | Successful exact-head runs cover only their executed scope. Required release gates absent from those commands remain pending, not silently satisfied. |
+| `.github/workflows/platform-ci.yml`; `Makefile`; `tests/` | Current static/unit/UI/integration/security operations. The Integration job is a heavy runtime owner under Platform_13 §22 / §3.8 and must share the host-global `platform-dev-runner.lock` with local heavy runners. | Successful exact-head runs cover only their executed scope. Required release gates absent from those commands remain pending, not silently satisfied. Documentation of the lock contract is not proof the workflow already acquires it on the reviewed SHA. |
 | `agent/linux/ebpf/`; `agent/go.mod`; approved OSS-124 provenance | Bounded source loader/probe integration; future reproducible signed object/binary/native-package evidence. | Preserve exact admitted source/backports. Optional source implementation does not certify `.deb/.rpm`, kernel/architecture/Secure Boot/LSM matrices, offline installation, distribution rights or physical evidence delivery. The example object asset path above is a release layout proposal, not proof of a current installed file. |
 | BUILD-018/019/126/127/129/134 release artifacts and manifest | Signed Linux packages, Windows MSI/BAT wrappers for the approved mandatory Windows Phase-1/first-GA scope, SBOM/notices/provenance, offline bundle, install/upgrade/rollback and native recovery evidence. | Main source/runtime tests and operator-reported clean package worktree status cannot stand in for these artifacts or acceptance. A bounded Linux package certificate does not waive the Windows/full-product gate. Do not invent an installer invocation when no current accepted builder is present in the reviewed main. |
 
