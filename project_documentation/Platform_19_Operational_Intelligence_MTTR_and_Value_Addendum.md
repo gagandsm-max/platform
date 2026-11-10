@@ -277,9 +277,25 @@ Versioned `saas_service_observation`, `carrier_event` and `packet_evidence_metad
 - **DF-OIV-005 Value:** lifecycle/RCA/remediation/ITSM evidence -> normalized timestamps -> completeness -> metric version -> cohort matching -> comparison -> dashboard. Insufficient evidence => `INSUFFICIENT EVIDENCE`.
 - **DF-OIV-006 Packet evidence:** authorized trigger -> RBAC/scope -> Sensor resource check -> bounded capture -> auto-stop -> encrypted artifact/metadata/checksum -> manifest -> TTL/legal hold.
 
+### 7.1 SaaS collection profile — REQ-OIV-001
+
+Authorized SaaS connector/source configuration → capability/permission and tenant/service binding validation → bounded provider API/webhook/approved synthetic collection → source-specific normalization and freshness/quality → canonical SaaS service observation → existing ingestion/history/graph → service/incident/Investigation views. Provider status, tenant-observed experience and connector health remain separate evidence. A throttled, expired-credential, partial or unavailable source produces the appropriate monitoring-quality state and bounded retry; it does not prove SaaS DOWN. Preserve provider event identity/time, deduplication and source provenance. This profile reuses the governed API/Integration Pack path in `Platform_06` DF-056/DF-076/DF-ECR-001; DF-OIV-001 covers only external-change evidence where supplied, not all SaaS monitoring.
+
+### 7.2 Runtime dependency profile — REQ-OIV-003
+
+Authorized cloud/Kubernetes/service/endpoint observation → canonical tenant-scoped entity resolution → observed/declarative/inferred relationship with source, confidence, event time and validity → existing temporal graph → incident-time dependency/impact query → UI evidence and deterministic RCA. Missing, contradictory or expired relationships remain explicit; traffic adjacency is not automatically failure-cause direction. Phase-1 OTel context follows DF-ACP-001; Phase-1.5 bounded span-derived relationships follow DF-ACP-002 only after the relevant certification. Flight Recorder and Similar Incident consume the graph through DF-OIV-002/003; they are not its discovery implementation. No second graph store or new trace backend is implied.
+
+### 7.3 Carrier/ISP profile — REQ-OIV-005
+
+Authorized carrier connector/source → provider/circuit/service and customer-binding validation → bounded event/status/performance collection → canonical carrier evidence with provider IDs, timestamps and quality → existing Integration/ingestion history → circuit/SLA/incident context. Correlate with permitted independent path, availability and service evidence; a carrier status message alone does not establish customer impact or recovery. Duplicates, late updates, source outages, unsupported fields and rate limits retain their evidence/quality meaning. Use DF-OIV-001 only for the external-change portion and `Platform_06` DF-SLA-001 for governed measurement/reporting. These source profiles specify required behavior; they do not claim an implemented or certified vendor adapter.
+
 ---
 
 ## 8. UI/UX requirements
+
+Bindings use the existing 98-screen catalogue and contextual subviews. SaaS service detail extends UI-005 Business Service Health with SaaS-specific source/tenant context, rather than relabelling every SaaS capability as a synthetic test. Carrier evidence extends UI-007/UI-012/UI-072; runtime dependencies extend UI-004/UI-005/UI-048 and UI-058; connector quality remains UI-080. Incident evidence, recorder, similarity and permitted action proposals belong in UI-057/UI-058, with review/export through UI-096. Platform Value uses UI-001 and the applicable UI-090/UI-096 contextual views; it does not allocate UI-099 or a second value/incident authority. The existing source routes are preserved through `Platform_09` §4.12.
+
+Every value view binds metric version, tenant/cohort, baseline/comparison period, completeness, sample-count policy and assumptions to its query contract. Missing or noncomparable evidence shows the specified insufficiency state without a fabricated improvement percentage or financial value. Read-only evidence access does not grant remediation permission. Domain fields, actions and state examples must satisfy `Platform_09` §3.6/§4 before the corresponding manifest is frozen; source/UI implementation remains independently evidenced.
 
 Incident workspace adds **Evidence / Flight Recorder**, **Similar Incidents**, **Changes**, **Remediation**, and **Value / Contribution** panels/tabs.
 
@@ -327,11 +343,11 @@ Add runbooks for Flight Recorder partial/failure, stale similarity, connector la
 
 | Requirement ID | PRD ID | Capability | Product | Arch | HLD | LLD/Data | Dataflow | UI | Security | Quality |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `REQ-OIV-001` | `PRD-OIV-001` | First-class SaaS monitoring | §3.1 | §4 | §5 | §6 | DF-OIV-001 | §8 | §10 | §12 |
+| `REQ-OIV-001` | `PRD-OIV-001` | First-class SaaS monitoring | §3.1 | §4 | §5 | §6 | §7.1 SaaS collection profile | §8 | §10 | §12 |
 | `REQ-OIV-002` | `PRD-OIV-002` | Triggered packet evidence | §3.2 | §4 | §5 | §6 | DF-OIV-006 | §8 | §10 | §12 |
-| `REQ-OIV-003` | `PRD-OIV-003` | Cloud-native dependency discovery | §3.3 | §4 | §5 | §6 | DF-OIV-002/003 | §8 | §10 | §12 |
+| `REQ-OIV-003` | `PRD-OIV-003` | Cloud-native dependency discovery | §3.3 | §4 | §5 | §6 | §7.2 Runtime dependency profile | §8 | §10 | §12 |
 | `REQ-OIV-004` | `PRD-OIV-004` | External change/deployment telemetry | §3.4 | §4 | §5 | §6 | DF-OIV-001 | §8 | §10 | §12 |
-| `REQ-OIV-005` | `PRD-OIV-005` | Carrier/ISP integration | §3.5 | §4 | §5 | §6 | DF-OIV-001 | §8 | §10 | §12 |
+| `REQ-OIV-005` | `PRD-OIV-005` | Carrier/ISP integration | §3.5 | §4 | §5 | §6 | §7.3 Carrier/ISP profile | §8 | §10 | §12 |
 | `REQ-OIV-006` | `PRD-OIV-006` | Incident Flight Recorder | §3.6 | §4 | §5 | §6 | DF-OIV-002 | §8 | §10 | §12 |
 | `REQ-OIV-007` | `PRD-OIV-007` | Similar Incident Memory | §3.7 | §4 | §5 | §6 | DF-OIV-003 | §8 | §10 | §12 |
 | `REQ-OIV-008` | `PRD-OIV-008` | Cross-domain Change Intelligence | §3.8 | §4 | §5 | §6 | DF-OIV-001/002 | §8 | §10 | §12 |

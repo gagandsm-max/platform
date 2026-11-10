@@ -104,7 +104,7 @@ For interfaces, `ifIndex` is a protocol observation/index and may change. Canoni
 
 ### 4.3 Schema migration
 
-Migrations are versioned, automated, tested from supported upgrade origins and idempotent where practical. Destructive migrations require backup/rollback plan and explicit approval.
+Migrations are versioned, automated, tested from supported upgrade origins and idempotent where practical. Every applied migration is immutable; fixes use new forward-only migrations. Destructive migrations require backup/rollback plan and explicit approval. The current ordered PostgreSQL source authority is `core/src/main/resources/db/migrations/manifest.txt` (V001–V018 at `36e1513f`); §4.7 maps existing physical artifacts. This manifest does not itself certify any upgrade origin or authorize a new migration number.
 
 ### 4.4 Retention classes
 
@@ -122,7 +122,7 @@ SNMP integrity additionally requires exact Counter64 preservation before derivat
 
 ### 4.6 Endpoint Diagnostic Snapshot contracts — v3.2.2 reconciliation
 
-**EDS is a specialized diagnostic type/profile of the existing Diagnostic Job architecture**, not a second diagnostics framework, registry, scheduler, authorization system, investigation state machine or evidence store. Product-facing language may continue to use **Endpoint Diagnostic Snapshot (EDS)**; the authoritative API/event/data identity remains the Diagnostic Job contract in §1 with:
+**EDS is a specialized diagnostic type/profile of the existing Diagnostic Job architecture**, not a second diagnostics framework, registry, scheduler, authorization system, investigation state machine or evidence store. Product-facing language may continue to use **Endpoint Diagnostic Snapshot (EDS)**; the authoritative API/event/data identity remains the Diagnostic Job contract in §3.2.1 with:
 
 ```text
 diagnostic_type / profile = ENDPOINT_DIAGNOSTIC_SNAPSHOT
@@ -241,6 +241,46 @@ Replayed duplicate requests/results are idempotently recognized and do not creat
 EDS evidence may contain deterministic indicators but not an authoritative root-cause declaration. Core RCA references Diagnostic Job / Live Evidence IDs for EDS captures alongside topology, telemetry, changes, dependency and contradiction evidence. AI/LLM narrative output is a separate derived artifact with its own provenance and cannot mutate EDS facts.
 
 
+### 4.7 Current physical contract artifact map — source `36e1513f`
+
+This bounded source inventory binds existing implementation, not the complete product roadmap. Controller annotations establish source routes, not authentication success, feature activation, UI wiring, deployment or certification. Exact method/subpath/body/error/authorization behavior remains in each listed controller and its DTO/service/validator/test sources; future logical API examples elsewhere in this document are not automatically implemented endpoints. No generated OpenAPI artifact or new DDL is invented by this map.
+
+| Current controller base path | Exact source authority |
+|---|---|
+| `/api/v1/tenants/{tenantId}/capability-packs` | `core/src/main/java/com/platform/core/api/CapabilityPackController.java` |
+| `/api/v1/tenants/{tenantId}/discovery` | `core/src/main/java/com/platform/core/api/DiscoveryController.java` |
+| `/api/v1/tenants/{tenantId}/entities` | `core/src/main/java/com/platform/core/api/EntityController.java` |
+| `/api/v1/tenants/{tenantId}/entities/{entityId}/management-endpoints` | `core/src/main/java/com/platform/core/api/EntityManagementEndpointController.java` |
+| `/api/v1/tenants/{tenantId}/entities/{entityId}/metric-observations` | `core/src/main/java/com/platform/core/api/EntityMetricObservationController.java` |
+| `/api/v1/tenants/{tenantId}/groups` | `core/src/main/java/com/platform/core/api/GroupController.java` |
+| `/api/v1/tenants/{tenantId}/sites` | `core/src/main/java/com/platform/core/api/SiteController.java` |
+| `/api/v1/tenants/{tenantId}/tags` | `core/src/main/java/com/platform/core/api/TagController.java` |
+| `/api/v1/tenants` | `core/src/main/java/com/platform/core/api/TenantController.java` |
+| `/api/v1/sensor/agent-authority` | `core/src/main/java/com/platform/core/controller/SensorAgentAuthorityController.java` |
+| `/api/v1/sensor/capability-packs` | `core/src/main/java/com/platform/core/controller/SensorCapabilityPackController.java` |
+| `/api/v1/sensor/control` | `core/src/main/java/com/platform/core/controller/SensorControlDesiredStateController.java` |
+| `/api/v1` | `core/src/main/java/com/platform/core/controller/SensorIngestionController.java` |
+| `/api/v1` | `core/src/main/java/com/platform/core/controller/VersionController.java` |
+| `/api/v1` | `core/src/main/java/com/platform/core/ingestion/agentingress/SensorAgentIngestionController.java` |
+
+| Surface | Schema/configuration/physical authority | Evidence boundary |
+|---|---|---|
+| Agent↔Sensor and Sensor↔Core telemetry, ACK, error, heartbeat and desired/applied control | `schemas/edge/` and `schemas/edge/tools/validate.mjs`; exact runtime validators/DTOs in `core/src/main/java/com/platform/core/ingestion/` and `core/src/main/java/com/platform/core/controller/`; Agent/Sensor boundaries in `agent/common/client/https.go` and `sensor/internal/agentreceiver/validator.go` | §10 reconciles current behavior. Schema fixture validation alone does not prove runtime durability. |
+| Internal numeric/exact-counter telemetry publication | `core/src/main/resources/application.yml`: `platform.ingestion.kafka.topic`, environment `TELEMETRY_NUMERIC_TOPIC`, default `telemetry.numeric.v1`; `core/src/main/java/com/platform/core/ingestion/KafkaTelemetryProducer.java` | Current producer serializes canonical observations as JSON within a Kafka transaction. Apicurio/Avro/Protobuf remain approved target technologies; new physical families are BUILD-063 decisions. |
+| PostgreSQL control and replay schema | `core/src/main/resources/db/migrations/manifest.txt` and the adjacent listed `V001`–`V018` SQL files | Exact ordered migration authority; logical table names elsewhere are not substitute DDL. All applied migrations remain immutable; supported-origin upgrades require evidence. |
+| Current ClickHouse initialization and writer/reader contracts | `deploy/docker/clickhouse/init.sql`; `core/src/main/java/com/platform/core/ingestion/ClickHouseClient.java` | Existing initialization/source contract; not a certification of all retention, rollup, HA or upgrade scenarios. Future process-network/path DDL remains BUILD-064-owned. |
+| Presentation definitions | `schemas/presentation/` and `schemas/presentation/tools/validate.mjs` | Definition/fixture contract; does not prove backend query or UI integration. |
+| Provisioning import/readiness/connectivity definitions | `schemas/provisioning/` and `schemas/provisioning/tools/validate.mjs` | Definition/fixture contract; does not prove complete enrollment/install flow. |
+| Runtime supportability definitions | `schemas/supportability/` and `schemas/supportability/tools/validate.mjs` | Health/log/evidence shape; does not certify every deployment probe or recovery path. |
+
+Relevant source tests include `core/src/test/java/com/platform/core/ingestion/agentingress/AgentIngestionServiceTest.java`, `AgentIngestionValidatorTest.java` in the same directory, `core/src/test/java/com/platform/core/controller/SensorControlDesiredStateControllerTest.java` and `core/src/test/java/com/platform/core/security/http/SecurityDirectoryConfigurationTest.java`. Their existence is not a new passing-test claim. Exact-head execution records and active compatibility/upgrade matrices remain required before certification.
+
+Shared six-area acceptance and unresolved-gate disposition remain `Platform_00` §10.1, `Platform_08` §4.1–4.3 and `Platform_12` §29; this artifact map is supporting evidence rather than a competing acceptance checklist. For a capability to authorize implementation, its existing 83-field contract (`Platform_00` §8 / `AGENTS.md`) MUST bind required UI/API/event/data objects, authority/failure semantics, physical artifacts where selected, version/upgrade behavior and test/BUILD owners. A not-yet-selected essential physical contract stays an explicit technical gate under its existing owner; logical examples must not be copied into a fabricated migration or advertised route.
+
+### 4.8 Storage assurance contract binding — accepted Issue #292
+
+Capacity/retention assessment is a logical extension of existing Storage Lifecycle, Platform Operations and Notification Center/ITSM/email ownership. Exact arithmetic, physical-volume provenance, uncertainty/UNKNOWN, protected/reclaimable accounting, simulation and delivery lifecycle are normative in `Platform_11` §9 and `Platform_05` §37.6–37.7/§38. This document allocates no new route, schema file, migration number or service; the responsible BUILD-061/064/074/086/094/097/130 contract gates must bind concrete API/schema/test artifacts before implementation claims.
+
 ## 5. Display timezone and calendar-query contracts — v3.2.2 handoff baseline
 
 Authoritative source timestamps in public/internal APIs, Kafka events and datastore facts remain absolute UTC-capable RFC3339/ISO-8601 instants. Clients MUST NOT treat a rendered wall-clock string as source truth.
@@ -274,12 +314,13 @@ Canonical Sensor→Core telemetry durability remains:
 ```text
 validate complete source batch
 → PostgreSQL durable pending reservation
-→ Kafka transactional publication
-→ PostgreSQL finalize accepted watermark
+→ claim bounded PostgreSQL publisher lease (owner/epoch)
+→ Kafka transactional publication and commit
+→ PostgreSQL finalize accepted watermark for matching reservation/owner/epoch
 → Sensor ACK
 ```
 
-Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. Concurrent exact HTTP retries while a reservation is `RETRY_PENDING` may amplify republish volume; that is a recorded **P1** hardening concern under the normal serialized Sensor uploader path. No distributed publisher lease/service is introduced by this documentation baseline.
+Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication of the same stable logical observation identity is tolerated; canonical ClickHouse reads must not expose duplicate logical numeric observations. **Current source reconciliation (`36e1513f`):** `SensorIngestionService` and `AgentIngestionService` now claim a bounded PostgreSQL publisher lease with owner/epoch after reservation, publish transactionally and require the matching fence for finalization (V012). This bounds concurrent publisher ownership; it does not make Kafka/PostgreSQL one XA transaction, eliminate the commit/finalize replay window or solve HA fencing. Both Core ingress paths use reservation/lease/commit/finalize before ACK. Physical consumer/read deduplication and durability certification remain separate gates.
 
 **Deletion-authorizing ACK durability (Issue #200 — shared contract shape, envelope-specific matrices):**
 
@@ -513,29 +554,27 @@ Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificat
 
 ## 10. BUILD-000 edge/control contract freeze (Issue #110)
 
-> **Bounded subsection.** This section freezes the edge transport contract against exact base SHA `315a20980e89683666a64362f0ed3827bf613d4a` and machine-readable schemas under `schemas/edge/`. The remainder of Platform_17 remains **TRANSITIONAL_LEGACY** pending later normalization. Where older prose above is vaguer or uses illustrative naming (`boot_epoch`, uniform casing), **this section + `schemas/edge/` + Platform_05 §7.0 prevail for edge wire truth**.
+> **Bounded subsection.** BUILD-000 froze the edge contract against historical base SHA `315a20980e89683666a64362f0ed3827bf613d4a`. The B000 decisions and exact ACK spelling remain; implementation statements below are reconciled to source `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`. Historical `CURRENT_IMPLEMENTED_V1` and BUILD target labels do not imply that later completed hardening is still absent. Machine-readable authority remains `schemas/edge/`; where older prose uses illustrative naming (`boot_epoch`, uniform casing), **this section + `schemas/edge/` + Platform_05 §7.0 prevail for edge wire truth**. Source implementation is not certification or deployment.
 
 ### 10.1 Maturity labels
 
 `CURRENT_IMPLEMENTED_V1` · `FROZEN_BUILD_000_INVARIANT` · `BUILD_002_TARGET` · `BUILD_003_TARGET` · `BUILD_004_TARGET`
 
-`SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED`.
+`SPECIFIED != IMPLEMENTED != TESTED != CERTIFIED`. The five labels above describe the original freeze/ownership; current source status is stated explicitly below and must be rechecked at a later source revision.
 
 ### 10.2 Sequence / Counter64
 
 - **FROZEN_BUILD_000_INVARIANT:** JSON-carried delivery/replay sequence maximum = `9007199254740991` (`2^53−1`); sequences ∈ `[1, MAX_SAFE_SEQUENCE]`; no wrap; fail closed on exhaustion. Schemas/edge validator encode this ceiling now.
 - **FROZEN_BUILD_000_INVARIANT:** Counter64 metric values remain full unsigned 64-bit exact-counter domain (not sequences).
-- **CURRENT_IMPLEMENTED_V1:** Agent/Sensor/Core use Go `uint64` / Java `long` / SQL `BIGINT` and current positive/range behavior. Explicit enforcement of `9007199254740991` at all hops is **not** yet present in runtime.
-- **BUILD_002_TARGET:** Agent→Sensor runtime ceiling enforcement.
-- **BUILD_003_TARGET:** Sensor→Core runtime ceiling enforcement.
+- **Current source (`36e1513f`):** implemented transport/control paths enforce the JSON-safe ceiling through Agent queue ceiling guards and delivery-worker ACK range binding, Sensor Agent-receiver validation, Core `TransportSequenceLimits`/validators and the V012/V013 constraints. Historical BUILD-002/003 enforcement targets are no longer accurate absence claims for these paths. Future typed-envelope/control extensions MUST preserve the same ceiling and receive their own conformance evidence.
 
 ### 10.3 Exact v1 ACK naming (do not “normalize” casing)
 
 | Path | ACK fields (exact) | Durability |
 |---|---|---|
 | Agent→Sensor | `status`, `accepted_through_sequence`, `agent_id`, `batch_id`, `correlation_id` | Durable Sensor Agent spool accept |
-| Sensor→Core telemetry | `status`, `accepted_through_sequence`, `sensor_identity` | PG reserve → Kafka txn → PG finalize → ACK; CH async |
-| Sensor→Core agent-ingress | `status`, `sensorId`, `batchId`, `acceptedThroughIngressSequence`, `correlationId` | **at-least-once** (Kafka + PG watermark); **BUILD_003_TARGET** reservation parity |
+| Sensor→Core telemetry | `status`, `accepted_through_sequence`, `sensor_identity` | PG reserve → fenced publisher lease → Kafka txn commit → fenced PG finalize → ACK; CH async; at-least-once |
+| Sensor→Core agent-ingress | `status`, `sensorId`, `batchId`, `acceptedThroughIngressSequence`, `correlationId` | Current source: PG reserve → fenced publisher lease → Kafka txn commit → fenced PG finalize → ACK; **at-least-once**, not structured-evidence or HA certification |
 
 ### 10.4 bootEpoch
 
@@ -547,7 +586,7 @@ Stable Core endpoint contracts may use DNS or IP/VIP only with normal certificat
 
 **Compatibility:** current Sensor client models additional desired-state fields and ignores unknown Core fields (`tenant_id` / `received_at`) via `doJSON` strict-decode fallback — heartbeat is not currently broken. Desired-state response cleanup/versioning is **BUILD_004_TARGET**.
 
-Older §3.3 “versioned desired configuration/assignment” language is **CORRECT_BUT_UNIMPLEMENTED / BUILD_004_TARGET** for heartbeat authority. Do not read Sensor optional request version fields as Core-applied truth.
+Heartbeat remains liveness/connectivity authority only; do not read optional request version fields as Core-applied truth. Separately, current `SensorControlDesiredStateController` implements `GET /api/v1/sensor/control/desired-state` and `PUT /api/v1/sensor/control/applied-state` with V014 persistence and versioned schemas. That bounded desired-state/observation path does not establish complete production scheduler wiring or make heartbeat fields authoritative.
 
 ### 10.6 Entity authority
 
@@ -555,9 +594,9 @@ Agent `hostId` is evidence. Agent-supplied `entityId` is not authoritative. Core
 
 ### 10.7 Agent stream generation
 
-**CURRENT V1 LIMITATION:** Sensor Agent replay keyed by `tenantId+agentId`; lineage restart fails closed.
+**B000-D015 / legacy schemaVersion 1 limitation:** replay without a stream generation cannot safely accept the same Agent identity restarting delivery sequences after durable queue loss.
 
-**BUILD_002_TARGET:** durable `agentStreamId` (working name) on versioned Agent→Sensor contract (B000-D015). Not implemented in BUILD-000.
+**Current source (`36e1513f`):** schemaVersion 2 Agent→Sensor batches carry durable `agentStreamId` matching `^stream-[0-9a-f]{32}$`; v1 batches must omit it. Queue metadata migration preserves watermarks and a bounded legacy cutover, and batches must not span that cutover. The stream survives process restart, changes only with governed durable-lineage recreation, and sequence exhaustion fails closed. Current Sensor→Core Agent-ingress uses schemaVersion 2 and `sensorAgentSpoolStreamId`; these are distinct Agent and Sensor spool identities. See actual schemas and `schemas/edge/README.md`; no ACK field is renamed.
 
 ### 10.8 Monitoring correctness
 
@@ -571,9 +610,9 @@ Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `A
 
 | Older Platform_17 wording | Classification |
 |---|---|
-| §3.3 desired config ACK via control channel | BUILD_004_TARGET / not heartbeat v1 |
+| §3.3 desired config ACK via control channel | Bounded desired-state/applied-state endpoint implemented; not heartbeat v1 and not full scheduler certification |
 | §3.2.1 OpenAPI frozen before GA | FUTURE |
-| §7 telemetry ACK pipeline | CURRENT_IMPLEMENTED_V1 for main telemetry; agent-ingress weaker (BUILD_003_TARGET) |
+| §7 telemetry ACK pipeline | Current reservation/lease/transaction/finalize on both Core ingress paths; at-least-once; structured evidence and HA certification remain separate |
 | Uniform identifier casing assumptions | STALE vs frozen dual naming |
 | Illustrative `boot_epoch` naming | Alias of wire `bootEpoch` stream id |
 
@@ -583,7 +622,7 @@ Wire `{status, code, message}` remains. Semantic classes: `INVALID_CONTRACT`, `A
 
 ### 11.1 Purpose and architectural constraints
 
-This section supplements `Platform_17` with authoritative wire schemas, event families, and logical data model contracts for:
+This section supplements `Platform_17` with logical evidence contracts and target event families. Physical wire/storage bindings remain gated by BUILD-016/062/063/064; this section does not assert current end-to-end transport for:
 1. **Linux Agent eBPF process-to-network telemetry**: local aggregation around `process/service + remote endpoint + protocol/port + time bucket`, transported via existing durable Agent queue → Sensor spool → Core ingestion → ClickHouse, with zero separate eBPF datastore or service.
 2. **Active path hop-by-hop telemetry and change events**: Sensor-executed multi-vantage path probing, hop metrics, path fingerprinting, and divergence events.
 3. **Distributed trace reference contract**: `trace_id` / `span_id` as future-compatible reference attributes across logs, events, alerts, and investigations, without Phase-1 trace storage or APM backend.
@@ -592,7 +631,7 @@ This section supplements `Platform_17` with authoritative wire schemas, event fa
 
 #### 11.2.1 Transport envelope and identity
 
-Process-network facts are produced by the Linux Agent eBPF collector, aggregated locally, and delivered over the existing versioned Agent→Sensor HTTPS/gRPC mTLS transport. The assigned Sensor buffers records in its durable spool and forwards batches to the Core via the canonical route `POST /api/v1/sensor/agent-telemetry` (handled by `SensorAgentIngestionController`).
+**Logical target, not current structured delivery:** process-network facts are collected/aggregated in the Linux Agent source, but the structured evidence sink is not wired into the implemented scalar transport at `36e1513f`. BUILD-016/062 must bind the typed family to the existing versioned Agent→Sensor mTLS path and Sensor spool → Core route `POST /api/v1/sensor/agent-telemetry` (`SensorAgentIngestionController`) without weakening authority or durability. The existing route currently extracts supported numeric observations; its presence does not prove acceptance or persistence of `ProcessNetworkEvidence`.
 
 **Authority and Identity Model:**
 - **Sensor Certificate Authority:** Core authenticates the Sensor mTLS certificate. `AgentIngestionValidator.resolveAuthority(clientCert)` derives authoritative `SensorScope` (tenant and sensor). Core then validates incoming Agent records against that authority.
@@ -603,7 +642,7 @@ Process-network facts are produced by the Linux Agent eBPF collector, aggregated
 - **Transport Inheritance:** Authority, assignment, replay and delivery provenance are inherited from and validated by the enclosing Agent/Sensor transport envelope (including authenticated sensor scope, `sensor_id`, `accepting_sensor_id`, `agent_id`, `assignment_generation`, agent stream identity, sensor ingress sequence, agent sequence, batch/idempotency identity, and correlation identity) before process-network evidence is canonicalized or persisted.
 - **Workload Aggregation Identity Invariant:** Every single-valued workload/local identity attribute emitted on an aggregated `ProcessNetworkEvidence` record must be common to every event represented by that record. If multiple processes or workloads are deliberately merged (e.g. across worker processes under a service or container scope), workload-specific attributes (such as `pid` or specific local socket ports) must not pretend to identify one member; such fields must be omitted or null, or represented through explicitly aggregated dimensions, and the record must expose aggregate scope/quality appropriately. Applicable identity dimensions may include executable/process identity, service identity, container identity, cgroup identity, network namespace, and local endpoint scope. PID remains an ephemeral runtime observation only and must NEVER become durable entity authority. Exact implementation and cardinality balance are owned by BUILD-011 and certified by BUILD-019 / BUILD-130 without freezing premature cardinality constants.
 
-Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
+Future extension and versioning of the physical envelope belongs to BUILD-016 / BUILD-062 and must preserve authority, idempotency, ACK, and durability contracts. The `uint64` logical fields below do not select a JSON number encoding; their exact physical representation and end-to-end precision/overflow tests MUST be frozen at that contract gate before transport implementation. `MAX_SAFE_SEQUENCE` remains a transport/control sequence bound, not a blanket conversion rule for raw measurement values. Ingestion validation and envelope acceptance are owned by BUILD-062, physical Kafka streaming (topic naming, partitions, serialization) is owned by BUILD-063, and physical ClickHouse storage (table DDL, engine selection, TTL) is owned by BUILD-064.
 
 ```text
 ProcessNetworkEvidence:
@@ -624,8 +663,8 @@ ProcessNetworkEvidence:
     cgroup_path:            string (nullable bounded string, e.g. "/system.slice/nginx.service")
     network_namespace:      uint64 (nullable netns inode number)
   endpoint_pair:
-    local_ip:               string (IPv4 or IPv6 canonical string)
-    local_port:             uint16
+    local_ip:               string (nullable/optional canonical IPv4 or IPv6; absent when not common to all represented events)
+    local_port:             uint16 (nullable/optional; absent when not common to all represented events)
     remote_ip:              string (IPv4 or IPv6 canonical string)
     remote_port:            uint16
     remote_entity_id:       UUID (nullable, Core-resolved canonical target entity)
@@ -755,7 +794,7 @@ PathChangeEvidence:
 - **Incomplete Path != Target Down:** An unresponsive intermediate hop or incomplete traceroute (e.g. intermediate ICMP suppression, CoPP or timeouts) MUST NOT assert target entity DOWN when corroborating ICMP echo, TCP port check, or SNMP polling indicates reachability.
 - **Ambiguous / unpinned path quality (machine-readable):** Flow-stable probing is an evaluation technique under BUILD-040 ownership; it does not guarantee identical physical paths. When ECMP/per-packet balancing, NAT/middleboxes, MPLS, IPv6 Flow Label behaviour, ICMP CoPP or return-path asymmetry prevent a pinned observation, emit `path_identity_quality` of `AMBIGUOUS` / `UNPINNED` / `INSUFFICIENT` / `UNQUALIFIED` as applicable and set `comparison_eligible = false` (or omit it). A `path_fingerprint` may describe the observed candidate path but MUST NOT be used to assert topology or latency/loss change, and MUST NOT produce false `PATH_DIVERGENCE`, `RTT_SHIFT`, `LOSS_ANOMALY` or `DEVICE_DOWN`. Existing `schema_version` `"1.0"` and mandatory field requirements are preserved; optional quality/eligibility fields are additive. Mixed-version safety is conservative: absent optional metadata ⇒ not comparison-eligible; fingerprint-only change emitters are not safe.
 - **PathChangeEvidence dual-qualification gate:** Emit only when **both** baseline and current observations are qualified and comparable. Otherwise retain quality/uncertainty evidence on the observations themselves.
-- **Multi-Vantage Contradiction Preservation:** Divergence between probes from different Sensors (e.g. Sensor-A sees 100% loss at transit hop 4, Sensor-B reaches target normally) represents an upstream routing or peering anomaly, not target failure. Contradictions must be preserved and surfaced to RCA as evidence.
+- **Multi-Vantage Contradiction Preservation:** Divergence between Sensors is evidence to investigate, not proof of upstream routing/peering failure or target failure. A silent transit hop can reflect ICMP filtering/rate-limiting even when forwarding succeeds. Preserve source/vantage, protocol/target, time/freshness, collector health, path identity/comparison quality and each destination result; independently test plausible path, policy, source and endpoint alternatives. Only qualified corroborating evidence may support a fault-domain hypothesis; otherwise retain contradiction/uncertainty and `INCONCLUSIVE` under the owning RCA contract.
 
 ### 11.4 Distributed trace reference contract
 
@@ -1004,7 +1043,7 @@ Normalized accepted log/evidence records retain trusted tenant/Sensor/profile/so
 
 Existing scalar `HostCollector → Sample → Observation → CollectionBatch` is **current** and not overloaded with inventory/process tables. BUILD-016 may introduce additive versioned typed evidence families (software inventory snapshots, ProcessNetworkEvidence and EDS references) with size/item/source bounds and provenance. An evidence-kind discriminator, fragmentation/assembly and physical encoding are **TBD implementation choices** under normal schema review; there is no mandated new polymorphic union, Valkey/PG staging table or replacement of frozen wire. If fragmented, fragments share a stable capture identity and are retry/replay-idempotent; only an integrity-checked, fully assembled, complete authoritative FULL snapshot may authorize general absence/removal. Older/partial/truncated/failed/TARGETED snapshots remain non-destructive evidence.
 
-Keep exact existing Platform_17 §10.3 ACK fields and tiers: Agent→Sensor local durability; Sensor→Core telemetry stronger reserve/txn/finalize; Sensor→Core agent-ingress currently Kafka + PG watermark at-least-once with BUILD_003 reservation parity **not implemented**. No document or status API may claim otherwise before verified physical certification.
+Keep exact existing Platform_17 §10.3 ACK fields and boundaries: Agent→Sensor local durable spool; current Sensor→Core telemetry and Agent-ingress both reserve/claim fenced publisher lease/commit Kafka transaction/finalize PostgreSQL before ACK. Both remain at-least-once. This source-bound parity does not implement typed structured evidence or certify physical storage, runtime deployment or HA; those claims require their own exact-head evidence.
 
 ### OTLP series admission and SIEM export accounting
 

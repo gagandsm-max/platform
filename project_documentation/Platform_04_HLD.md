@@ -275,11 +275,11 @@ Creates/ingests structured audit records, protects scope/access, exports to SIEM
 
 ### 4.20 Storage Lifecycle Service
 
-Owns retention policies, rollup status, archive, storage forecasting, 80% watermark actions, legal holds and audit of deletion/reclamation.
+Owns retention policies, rollup status, archive, storage forecasting, 80% watermark actions, legal holds and audit of deletion/reclamation. Under accepted Issue #292, it MUST assess each physical volume separately using the provenance, minimum 20% uncertainty uplift and adjustable 70% initial planning target in `Platform_11` §9. It owns policy-change capacity simulation, eligible-versus-protected reclaim accounting and an explicit `CRITICAL` capacity dead end when protected retention prevents safe reclamation; no silent retention reduction is permitted. This extends the existing service responsibility, not the deployed implementation claim.
 
 ### 4.21 Platform Operations Service
 
-Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards.
+Owns Core/Sensor/data-service health, support bundle orchestration, backup/restore status, upgrades, certificates, licence warnings and internal housekeeping dashboards. Storage assurance projects per-volume measured usage, growth, uncertainty, forecast shortfall and expansion deadline from Storage Lifecycle authority. Existing Notification Center/ITSM/email integration owns authorized recipient routing, deduplicated capacity cases, actual delivery/retry outcomes, acknowledgement, reopen/close and maintenance behavior. Procurement lead times are configurable; unknown measurements never produce a fabricated forecast date. Contract details remain `Platform_05` §37.6–37.7 and `Platform_11` §9.
 
 ---
 
@@ -458,7 +458,7 @@ Primary schemas/domains:
 
 Active Core hosts PostgreSQL primary. Standby Core maintains streaming replica. Promotion is controlled by Platform HA and must not occur independently from Core authority transition.
 
-Synchronous vs asynchronous commit policy is an engineering benchmark/availability decision. The chosen policy must document expected data-loss window and fit final DR/HA requirements.
+The physical replication/commit and fencing policy remains an engineering design gate. For **Phase 1.5 HA**, no synchronous/asynchronous choice may weaken `ACKED-FOR-DELETION TELEMETRY RPO = 0` for the certified permanent single-Core failure matrix (`Platform_17` §7). Other control-state and site/DR loss windows MUST be stated separately and justified. Phase 1 standalone has its own recoverable-failure and backup/restore envelope; this HA subsection does not require a second Core for Phase 1.
 
 ---
 
@@ -927,7 +927,7 @@ Outbound actions use durable queue and idempotency key such as `tenant + inciden
 
 ## 26. Security HLD
 
-**Maturity / Issue #92:** Persistent IAM/RBAC production authority remains unimplemented; Discovery authorization integration remains incomplete/fail-closed; secret-startup hardening and certificate rotation/concurrency gaps remain open where applicable.
+**Implementation truth (`36e1513f`):** opt-in JDBC `IdentityDirectory` / `PermissionGrantDirectory` persistence and V016 are implemented, with `platform.security.directories.persistence-enabled=false` by default. Disabled, unavailable or unauthorized identity/grant paths remain fail-closed. This is not complete IAM/SSO, runtime activation or production certification. See `Platform_03` §29 for source authority; separate secret-startup and certificate-rotation/concurrency gates require their own evidence.
 
 
 ### 26.1 Identity
@@ -986,7 +986,7 @@ The ≤2,500 profile is the mandatory optimization target under SNWP-2500-v1. Hi
 
 ### 28.2 Sensor baseline
 
-Network Sensor safe planning baseline: 4C/16G/150GB ~800 normal devices. Engineering target: 8C/16G ~2,000–2,500 normal devices where workload permits.
+Network Sensor safe planning baseline: 4C/16G/150GB ~800 normal devices. Engineering target: 8C/32G ~2,000–2,500 normal devices where workload permits, **not certified**. The 4 GB/vCPU ratio is an internal recommended sizing/benchmark ratio under Issue #206, not a customer-install rejection gate; warnings and authorized-operator proceed remain required. No 8C/32G disk tier is inferred.
 
 Infrastructure initial planning targets from prior design:
 
@@ -1022,7 +1022,7 @@ Exact primary/DR node count, synchronous/asynchronous replication, RPO/RTO and a
 
 ## 30. Upgrade HLD
 
-Core upgrade:
+Core upgrade MUST select the certified deployment profile. **Phase 1 standalone:** preflight, restore point and compatibility checks precede the controlled single-node upgrade/migration; restart and data/health checks follow within the declared maintenance/downtime envelope. There is no standby or automatic failover claim. **Phase 1.5 HA:** the sequence below applies only after the HA design and upgrade matrix is certified; standby-first must not bypass fencing or schema compatibility.
 
 1. Readiness/preflight.
 2. Backup/restore point.
@@ -1064,7 +1064,7 @@ Engineering design review shall not approve HLD implementation plans unless they
 
 - clear ownership of each persistent state domain;
 - no direct Sensor database coupling across WAN;
-- safe Core failover path;
+- Phase 1 standalone recoverable-failure/backup-restore path, and the additional safe fenced Core failover path for Phase 1.5 HA;
 - Sensor spool/replay contract;
 - typed canonical telemetry/events;
 - centralized policy with Sensor config version tracking;
@@ -1190,7 +1190,7 @@ Exact detail owned elsewhere must not be re-litigated here:
 | Core application | Java 21 + Spring Boot | Modular Core process(es); avoid microservice sprawl at small sizes |
 | AuthN federation | Keycloak | Separate logical authentication service; Platform authorization remains in Core |
 | Policy expressions | CEL Java | compiled/validated expressions, cost-bounded |
-| Ingestion/event bus | Kafka + Apicurio + Avro/Protobuf | internal only; Core Ingestion is WAN-facing mTLS boundary |
+| Ingestion/event bus | Kafka; current JSON telemetry contract; approved Apicurio + Avro/Protobuf targets | Internal only; Core Ingestion is WAN-facing mTLS boundary. OSS-004/005/006 remain `APPROVED_NOT_IMPLEMENTED` per Platform_07; BUILD-063 owns physical-contract admission/compatibility. |
 | Control state | PostgreSQL | authoritative transactional state |
 | Telemetry | ClickHouse | high-volume analytical state |
 | Cache | Valkey | reconstructable/ephemeral state only |
@@ -1392,7 +1392,7 @@ The Linux Agent integrates eBPF collection within its existing Go runtime:
 ### 47.2 Network Sensor active path probing subsystem
 
 The Network Sensor integrates active path probing within its existing runtime:
-- **Active Path Probing Engine:** Probes configured targets using flow-stable, multipath/ECMP-aware probing techniques (evaluating flow-stable techniques such as Paris-traceroute-style methods in BUILD-040) to discover intermediate hops, latencies, and loss while preventing false path fluttering.
+- **Active Path Probing Engine:** Probes configured targets using flow-stable, multipath/ECMP-aware probing techniques (evaluating flow-stable techniques such as Paris-traceroute-style methods in BUILD-040) to discover intermediate hops, latencies, and loss while qualifying comparison eligibility and reducing false path-change artifacts; identical physical paths are not guaranteed.
 - **Hop & Path Analysis:** Computes hop and destination latency/loss/jitter where reliable; parses ICMP extensions/MPLS labels where present; tracks stable path fingerprints and divergence; records incomplete hop uncertainty; and emits `PathChangeEvidence` records.
 - **Durable Delivery:** Spools records into existing Sensor durable queue; delivers batches to Core Ingestion via existing transport.
 - **Zero Standalone Daemon:** No separate probing service is deployed.
@@ -1404,7 +1404,7 @@ Core processes ingest and correlate observability telemetry without introducing 
 - **ClickHouse Storage (BUILD-064):** Analytics workers persist typed records into ClickHouse analytics tables (physical schema, table layout, engine selection, ordering keys, codecs, and TTL owned by BUILD-064).
 - **Temporal Operational Graph:** Dynamically updates communication edges between process entities and remote services with observed latency and throughput.
 - **Deterministic RCA Engine:** Correlates socket timeouts, retransmission bursts, and path divergence events with alert symptoms, while preserving `INCONCLUSIVE` outcomes.
-- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 supports bounded customer-provided trace/dependency summaries only). PostgreSQL, ClickHouse, Kafka, and Valkey remain the sole authoritative datastores.
+- **Architectural Boundary:** No separate eBPF database, no dedicated traceroute store, no APM backend, and no full distributed trace span store without explicit change control (Phase 1 supports OTLP metrics/logs; Phase 1.5 may add bounded sampled operational span history/search/waterfall and dependency evidence under PRD §58.3 and Platform_17 §13 economics/security/sampling/retention/query certification gates). PostgreSQL remains transactional/control authority, ClickHouse historical fact storage, Kafka internal durable transport, and Valkey reconstructable cache/ephemeral state; Kafka retains committed-event custody for ingestion/replay; Valkey is not sole durable authority, and neither replaces PostgreSQL control authority or ClickHouse historical fact authority.
 
 ---
 

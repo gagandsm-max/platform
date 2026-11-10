@@ -499,6 +499,8 @@ Coverage metrics MUST remain distinct:
 - Certification Coverage %
 - Integration Coverage %
 
+Every reported coverage percentage MUST identify the versioned product/family/version/dimension universe, numerator, denominator, evidence/maturity level and explicit exclusions. Undefined scope or unverified membership is `UNKNOWN`, not zero, 100% or an invented weighted score. Discovery coverage, implemented coverage and certified coverage cannot share an unlabeled numerator.
+
 Never report a generic statement such as "95% supported" when only architecture/specification exists.
 
 Specified ≠ implemented. Implemented ≠ tested. Tested ≠ certified. Certified ≠ deployed.
@@ -588,13 +590,15 @@ This PR performs **EMC-0** only.
 
 ## 25. Explicit deferrals and exclusions
 
+The APM/profiling/instrumentation exclusions below apply to the initial Phase-1 monitoring envelope; they do not cancel the explicitly governed later P2.5 Deep Observability/RCA roadmap in the “Issue #272 — enterprise partial-closure contract and Phase 2.5 Deep Observability” supplement. Later-phase scope requires its own approved contracts and implementation/certification gates and is not a current support claim. The prohibitions on uncontrolled NCM, core forks and competing frameworks remain applicable.
+
 | Item | Disposition |
 |---|---|
 | Always-on full DPI | Deferred |
 | Unrestricted SIEM replacement | Excluded |
-| Full bytecode APM | Excluded; integrate instead |
-| Continuous profiling / flame graphs | Excluded |
-| Method-level code instrumentation | Excluded |
+| Full bytecode APM | Excluded from Phase 1; use governed integration. Later P2.5 scope remains gated by the Issue #272 supplement. |
+| Continuous profiling / flame graphs | Excluded from Phase 1; later P2.5 scope remains gated by the Issue #272 supplement. |
+| Method-level code instrumentation | Excluded from Phase 1; later P2.5 scope remains gated by the Issue #272 supplement. |
 | Broad BMS/DCIM | Deferred |
 | Broad FinOps | Deferred |
 | EUC/VDI | Optional / lower priority |
@@ -612,7 +616,7 @@ Founder-reserved decisions remain pricing, licensing, commercial SKUs, contractu
 
 ChatGPT / Platform technical authority governs product architecture, HA topology, databases, services, APIs, security architecture, deployment architecture, technical sequencing, and implementation and release engineering.
 
-The v1 exactly-two-Core Active/Standby topology remains a current fixed Mother Reference decision. It is not casually changed or reopened. Changes to that technical topology are governed by deliberate Mother Reference architecture change control and technical evidence. Founder escalation is required only if a proposed topology change materially changes Founder-reserved business intent, commercial commitments, contractual promises, material spending/vendor commitments, or external commitments.
+Phase 1 remains one authoritative standalone Core. The **Phase 1.5** exactly-two-Core Active/Standby topology remains a current fixed Mother Reference decision. It is not casually changed or reopened. Changes to that technical topology are governed by deliberate Mother Reference architecture change control and technical evidence. Founder escalation is required only if a proposed topology change materially changes Founder-reserved business intent, commercial commitments, contractual promises, material spending/vendor commitments, or external commitments.
 
 ---
 
@@ -699,7 +703,7 @@ The broader §6 Capability Pack declaration remains authoritative; this list def
 
 ### 29.3 Dimensional certification
 
-At minimum expose independent states for **Discovery, L1, L2, L3/routing where applicable, Topology, Diagnostics, NCM, Security and supported product/version**. A vendor/family may be certified in some dimensions and unsupported/experimental in others. UI/API/documentation support matrices are generated from the same machine-readable compatibility authority; independent marketing tables are prohibited.
+At minimum expose independent states for **Discovery, L1 Availability, L2 Performance, L3 Predictive Intelligence, Topology, Diagnostics, NCM, Security and supported product/version**. Routing/OSI Layer-3 capability, where applicable, is a separate declared capability/dimension and MUST NOT be conflated with the L3 maturity level in §5. A vendor/family may be certified in some dimensions and unsupported/experimental in others. UI/API/documentation support matrices are generated from the same machine-readable compatibility authority; independent marketing tables are prohibited.
 
 ### 29.4 Phase-1.5 second-wave certification roadmap
 
