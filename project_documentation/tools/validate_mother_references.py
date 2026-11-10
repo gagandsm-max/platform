@@ -2317,8 +2317,19 @@ class MotherReferenceValidator:
             "SensorAcceptanceEvidenceV1",
             "PendingCanonicalBindingV1",
             "raw `acceptedAt` alone is insufficient",
-            "clock_max_error_ms <= 5000",
-            "clock_sync_age_ms <= 300000",
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
+            "checked duration arithmetic",
+            "No wrapping, saturation or silent coercion",
             "ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE",
             "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
             "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
@@ -2376,6 +2387,116 @@ class MotherReferenceValidator:
                     f"contract text: {needle!r}"
                 )
 
+        # SensorAcceptanceEvidenceV1 clock-range / uncertainty regressions.
+        # Upper-bound-only text without nonnegative floors is insufficient and
+        # would silently permit negative clock errors (more permissive than
+        # missing evidence).
+        clock_section_match = re.search(
+            r"##### 7\.1\.11\.2 Phase-1 clock qualification\n(.*?)(?=\n##### 7\.1\.11\.3 |\n#### 7\.1\.12 )",
+            p17,
+            re.DOTALL,
+        )
+        if not clock_section_match:
+            self.fail(
+                "Platform_17 must own ##### 7.1.11.2 Phase-1 clock qualification"
+            )
+        else:
+            clock_section = clock_section_match.group(1)
+            if "0 <= clock_max_error_ms <= 5000" not in clock_section:
+                self.fail(
+                    "SensorAcceptanceEvidenceV1 must require "
+                    "0 <= clock_max_error_ms <= 5000 (nonnegative floor)"
+                )
+            if "0 <= clock_sync_age_ms <= 300000" not in clock_section:
+                self.fail(
+                    "SensorAcceptanceEvidenceV1 must require "
+                    "0 <= clock_sync_age_ms <= 300000 (nonnegative floor)"
+                )
+            # Reject upper-bound-only forms that omit the nonnegative floor.
+            if re.search(
+                r"(?<!0 <= )clock_max_error_ms <= 5000", clock_section
+            ) and "0 <= clock_max_error_ms <= 5000" not in clock_section:
+                self.fail(
+                    "clock_max_error_ms upper-bound-only form without "
+                    "nonnegative floor is forbidden"
+                )
+            if re.search(
+                r"(?<!0 <= )clock_sync_age_ms <= 300000", clock_section
+            ) and "0 <= clock_sync_age_ms <= 300000" not in clock_section:
+                self.fail(
+                    "clock_sync_age_ms upper-bound-only form without "
+                    "nonnegative floor is forbidden"
+                )
+            for ordering in (
+                "acceptance_lower <= accepted_at_utc",
+                "accepted_at_utc <= acceptance_upper",
+                "acceptance_lower <= acceptance_upper",
+            ):
+                if ordering not in clock_section:
+                    self.fail(
+                        "SensorAcceptanceEvidenceV1 checked uncertainty "
+                        f"ordering missing: {ordering!r}"
+                    )
+            if (
+                "acceptance_upper == revoked_at" not in clock_section
+                or "NOT** authorized" not in clock_section
+            ):
+                self.fail(
+                    "revocation-boundary equality must remain NOT authorized"
+                )
+            if (
+                "MUST NEVER become more permissive than missing clock evidence"
+                not in clock_section
+            ):
+                self.fail(
+                    "malformed clock evidence must never be more permissive "
+                    "than missing clock evidence"
+                )
+            if "No transition to `AUTHORITY_VALIDATED`" not in clock_section:
+                self.fail(
+                    "malformed clock evidence must not transition to "
+                    "AUTHORITY_VALIDATED"
+                )
+            # Negative values must be explicitly rejected, never authorized.
+            for reject_needle in (
+                "clock_max_error_ms = -1",
+                "clock_sync_age_ms = -1",
+                "negative values",
+            ):
+                if reject_needle not in clock_section:
+                    self.fail(
+                        "SensorAcceptanceEvidenceV1 must reject negative "
+                        f"clock fields ({reject_needle!r})"
+                    )
+            # Forbid prose that authorizes negative clock errors.
+            if re.search(
+                r"negative\s+clock_max_error_ms\s+(?:is\s+)?(?:valid|authorized|accepted|permitted)",
+                clock_section,
+                re.IGNORECASE,
+            ):
+                self.fail(
+                    "negative clock_max_error_ms must not be authorized"
+                )
+            # Equality at revoked_at must remain explicitly NOT authorized.
+            for match in re.finditer(
+                r"acceptance_upper\s*==\s*revoked_at[^\n]{0,160}",
+                clock_section,
+                re.IGNORECASE,
+            ):
+                window = match.group(0)
+                if re.search(
+                    r"(?:authorized|valid|accepted|permitted)",
+                    window,
+                    re.IGNORECASE,
+                ) and not re.search(
+                    r"(?:NOT|not|never)",
+                    window,
+                ):
+                    self.fail(
+                        "acceptance_upper == revoked_at must not become "
+                        "authorized"
+                    )
+
         # Processing-order steps must remain ahead of mutable validation.
         order_markers = (
             "Authenticate Sensor",
@@ -2423,8 +2544,20 @@ class MotherReferenceValidator:
                 "U5B",
                 "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
                 "raw `acceptedAt` alone is insufficient",
+                "0 <= clock_max_error_ms <= 5000",
+                "0 <= clock_sync_age_ms <= 300000",
+                "clock_max_error_ms = -1",
+                "clock_sync_age_ms = -1",
                 "clock_max_error_ms > 5000",
                 "clock_sync_age_ms > 300000",
+                "acceptance_lower <= accepted_at_utc",
+                "accepted_at_utc <= acceptance_upper",
+                "acceptance_lower <= acceptance_upper",
+                "acceptance_upper == revoked_at",
+                "UNQUALIFIED / INVALID",
+                "MUST NEVER become more permissive than missing clock evidence",
+                "MUST NOT transition to `AUTHORITY_VALIDATED`",
+                "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
             ):
                 if needle not in p14:
                     self.fail(
@@ -2444,6 +2577,11 @@ class MotherReferenceValidator:
                 "U5B",
                 "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
                 "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "0 <= clock_max_error_ms <= 5000",
+                "0 <= clock_sync_age_ms <= 300000",
+                "acceptance_lower <= accepted_at_utc <= acceptance_upper",
+                "MUST NEVER be more permissive than missing clock evidence",
+                "UNQUALIFIED / INVALID",
             ):
                 if needle not in p12:
                     self.fail(

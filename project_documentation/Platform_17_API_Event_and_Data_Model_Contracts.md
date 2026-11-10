@@ -860,24 +860,75 @@ SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
 
 ##### 7.1.11.2 Phase-1 clock qualification
 
-For V1, historical temporal authority requires:
+For V1, historical temporal authority requires `clock_quality = QUALIFIED` **and** typed clock-field validation below. Upper bounds alone are insufficient: unsigned/nonnegative semantics and a valid ordered uncertainty interval are mandatory.
+
+###### Typed field validation (`SensorAcceptanceEvidenceV1`)
+
+`clock_max_error_ms` MUST be:
+
+- present when `clock_quality = QUALIFIED`;
+- an integer;
+- `0 <= clock_max_error_ms <= 5000`.
+
+`clock_sync_age_ms` MUST be:
+
+- present when `clock_quality = QUALIFIED`;
+- an integer;
+- `0 <= clock_sync_age_ms <= 300000`.
 
 ```text
 clock_quality = QUALIFIED
-clock_max_error_ms <= 5000
-clock_sync_age_ms <= 300000
+0 <= clock_max_error_ms <= 5000
+0 <= clock_sync_age_ms <= 300000
 ```
+
+Reject (evidence becomes `UNQUALIFIED / INVALID`; historical authority MUST NOT be established):
+
+- negative values;
+- floating-point values;
+- NaN/infinity representations;
+- values above the bound;
+- malformed numeric strings;
+- integer overflow/underflow;
+- null/missing values when `QUALIFIED`.
+
+A value of exactly `0` is valid for either clock field when all other evidence is valid.
+
+###### Acceptance timestamp
+
+`accepted_at_utc` MUST:
+
+- be present;
+- parse as a valid UTC instant;
+- use the existing canonical timestamp format (absolute UTC-capable RFC3339/ISO-8601);
+- be representable for checked duration arithmetic.
+
+Malformed or out-of-range timestamps fail validation.
 
 The Sensor obtains clock quality from the host's disciplined system-clock state; unsynchronised/unknown clock state is `UNQUALIFIED`.
 
 Do **not** silently substitute raw wall-clock time when clock qualification is missing.
 
-Define the Core-time acceptance uncertainty interval:
+###### Checked uncertainty arithmetic
+
+Calculate using checked duration arithmetic:
 
 ```text
-acceptance_lower = accepted_at_utc - clock_max_error
-acceptance_upper = accepted_at_utc + clock_max_error
+acceptance_lower = accepted_at_utc - clock_max_error_ms
+acceptance_upper = accepted_at_utc + clock_max_error_ms
 ```
+
+The implementation contract MUST explicitly require:
+
+```text
+acceptance_lower <= accepted_at_utc
+accepted_at_utc <= acceptance_upper
+acceptance_lower <= acceptance_upper
+```
+
+Arithmetic overflow or underflow MUST fail closed as invalid acceptance evidence. No wrapping, saturation or silent coercion.
+
+###### Historical assignment ordering
 
 Historical assignment interval is `[assignment.created_at, assignment.revoked_at)` for revoked assignments.
 
@@ -888,17 +939,52 @@ acceptance_lower >= created_at
 acceptance_upper < revoked_at
 ```
 
-For an assignment with no `revoked_at`, `acceptance_lower >= created_at` remains required.
+Exact equality `acceptance_upper == revoked_at` is **NOT** authorized.
+
+If the uncertainty interval overlaps the revocation boundary, return `ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN` (or repository-canonical equivalent).
+
+For an assignment with no `revoked_at`, `acceptance_lower >= created_at` remains mandatory.
 
 Boundary behavior is fail-closed. If the acceptance uncertainty interval overlaps `revoked_at`, authority ordering is `UNKNOWN`. Exact equality with the revocation boundary is **not** historically authorized.
 
-Negatives (mandatory):
+###### Security invariant
+
+Malformed clock evidence MUST NEVER become more permissive than missing clock evidence.
+
+Any malformed, negative, overflowing or otherwise invalid clock field causes `SensorAcceptanceEvidenceV1` to be `UNQUALIFIED / INVALID` and MUST NOT establish historical authority. In particular this attack MUST fail closed:
+
+- actual `accepted_at_utc` is after revocation;
+- caller supplies negative `clock_max_error_ms`;
+- calculated upper bound would otherwise move backward before revocation.
+
+Result: historical authority DENIED. No transition to `AUTHORITY_VALIDATED`.
+
+###### Required negative / boundary fixtures
+
+Mandatory documentation/runtime acceptance fixtures (at least):
+
+1. `clock_max_error_ms = -1` → reject.
+2. `clock_sync_age_ms = -1` → reject.
+3. `clock_max_error_ms = 5001` → reject.
+4. `clock_sync_age_ms = 300001` → reject.
+5. `clock_max_error_ms = 0` → valid where all other evidence is valid.
+6. `clock_sync_age_ms = 0` → valid.
+7. malformed non-integer clock error → reject.
+8. malformed non-integer sync age → reject.
+9. uncertainty interval exact upper boundary = `revoked_at` → not authorized.
+10. interval overlaps `revoked_at` by 1 ms → not authorized.
+11. `accepted_at` after `revoked_at` + negative error attack → reject before interval authority evaluation.
+12. timestamp arithmetic overflow/underflow → reject.
+13. valid interval wholly before `revoked_at` → historical authority remains valid.
+14. `accepted_at` before assignment `created_at`, even with otherwise qualified clock → reject.
+15. missing `QUALIFIED` clock fields → reject.
+
+Additional negatives (mandatory):
 
 - raw `acceptedAt` alone is insufficient;
 - `clock_max_error_ms > 5000` fails qualification;
 - `clock_sync_age_ms > 300000` fails qualification;
 - uncertainty overlapping revocation fails historical authority.
-
 ##### 7.1.11.3 Legacy V020 raw acceptedAt rule
 
 Legacy requests that contain only raw `acceptedAt` but do **not** contain qualified `SensorAcceptanceEvidenceV1` MUST NOT be automatically accepted merely because their raw timestamp appears earlier than `revoked_at`.

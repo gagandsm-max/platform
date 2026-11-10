@@ -4381,8 +4381,16 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN`",
             "authority checkpoint cannot authorize new sequences",
             "raw `acceptedAt` alone is insufficient",
-            "clock_max_error_ms <= 5000",
-            "clock_sync_age_ms <= 300000",
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
             "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
             "replay uses persisted Entity A",
             "does **not** resolve to Entity B",
@@ -4458,11 +4466,35 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "raw acceptedAt must not remain the sole historical authority input",
         )
 
-        # Clock qualification negatives.
-        self.assertIn("clock_max_error_ms <= 5000", p17)
-        self.assertIn("clock_sync_age_ms <= 300000", p17)
+        # Clock qualification negatives (unsigned/nonnegative + ordered interval).
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p17)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p17)
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p14)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p14)
+        self.assertIn("clock_max_error_ms = -1", p17)
+        self.assertIn("clock_sync_age_ms = -1", p17)
+        self.assertIn("clock_max_error_ms = -1", p14)
+        self.assertIn("clock_sync_age_ms = -1", p14)
         self.assertIn("clock_max_error_ms > 5000", p14)
         self.assertIn("clock_sync_age_ms > 300000", p14)
+        self.assertIn("clock_max_error_ms = 0", p17)
+        self.assertIn("clock_sync_age_ms = 0", p17)
+        self.assertIn("acceptance_lower <= accepted_at_utc", p17)
+        self.assertIn("accepted_at_utc <= acceptance_upper", p17)
+        self.assertIn("acceptance_lower <= acceptance_upper", p17)
+        self.assertIn("acceptance_lower <= accepted_at_utc", p14)
+        self.assertIn("accepted_at_utc <= acceptance_upper", p14)
+        self.assertIn("acceptance_lower <= acceptance_upper", p14)
+        self.assertIn("UNQUALIFIED / INVALID", p17)
+        self.assertIn(
+            "MUST NEVER become more permissive than missing clock evidence",
+            p17,
+        )
+        self.assertIn("No transition to `AUTHORITY_VALIDATED`", p17)
+        self.assertIn(
+            "MUST NOT transition to `AUTHORITY_VALIDATED`",
+            p14,
+        )
         self.assertIn(
             "uncertainty overlapping revocation fails historical authority",
             p17,
@@ -4471,6 +4503,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "Exact equality with the revocation boundary is **not** historically authorized",
             p17,
         )
+        self.assertIn("acceptance_upper == revoked_at", p17)
+        self.assertIn("acceptance_upper == revoked_at", p14)
+        self.assertIn("ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN", p14)
 
         # UNVALIDATED qualified historical retry can become AUTHORITY_VALIDATED.
         self.assertIn("UNVALIDATED → AUTHORITY_VALIDATED", p17)
@@ -4632,6 +4667,234 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 or "J8_UNVALIDATED" in joined
                 or "U5A" in joined
                 or "U5B" in joined,
+                joined,
+            )
+
+    def test_99k_sensor_acceptance_clock_range_evidence_regressions(self) -> None:
+        """P1: nonnegative clock bounds, ordered interval, malformed fail-closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_path = docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        p14_path = docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        p12_path = docs / "Platform_12_Decision_Source_Register.md"
+        p17 = p17_path.read_text(encoding="utf-8")
+        p14 = p14_path.read_text(encoding="utf-8")
+        p12 = p12_path.read_text(encoding="utf-8")
+
+        # Positive contract presence.
+        for needle in (
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "clock_max_error_ms = 5001",
+            "clock_sync_age_ms = 300001",
+            "clock_max_error_ms = 0",
+            "clock_sync_age_ms = 0",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
+            "No wrapping, saturation or silent coercion",
+            "checked duration arithmetic",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "MUST NOT transition to `AUTHORITY_VALIDATED`",
+        ):
+            self.assertIn(needle, p14, needle)
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p12)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p12)
+        self.assertIn(
+            "MUST NEVER be more permissive than missing clock evidence",
+            p12,
+        )
+
+        # Maturity honesty preserved.
+        self.assertIn(
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            p17,
+        )
+        self.assertIn(
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+        # Regression: drop nonnegative floors / interval ordering / security text.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            weakened = (
+                p17.replace("0 <= clock_max_error_ms <= 5000", "clock_max_error_ms <= 5000")
+                .replace("0 <= clock_sync_age_ms <= 300000", "clock_sync_age_ms <= 300000")
+                .replace("clock_max_error_ms = -1", "REMOVED_NEG_ERROR")
+                .replace("clock_sync_age_ms = -1", "REMOVED_NEG_AGE")
+                .replace(
+                    "acceptance_lower <= accepted_at_utc",
+                    "REMOVED_LOWER_ORDER",
+                )
+                .replace(
+                    "accepted_at_utc <= acceptance_upper",
+                    "REMOVED_UPPER_ORDER",
+                )
+                .replace(
+                    "acceptance_lower <= acceptance_upper",
+                    "REMOVED_INTERVAL_ORDER",
+                )
+                .replace(
+                    "MUST NEVER become more permissive than missing clock evidence",
+                    "REMOVED_SECURITY_INVARIANT",
+                )
+                .replace(
+                    "No transition to `AUTHORITY_VALIDATED`",
+                    "malformed evidence MAY transition to AUTHORITY_VALIDATED",
+                )
+                .replace(
+                    "Exact equality `acceptance_upper == revoked_at` is **NOT** authorized.",
+                    "Exact equality `acceptance_upper == revoked_at` is authorized.",
+                )
+            )
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(weakened, encoding="utf-8")
+            # Minimal companions so earlier required-doc checks do not dominate.
+            for name, body in (
+                (
+                    "Platform_05_LLD.md",
+                    "# LLD\nPlatform_17` §7.1\n"
+                    "A deterministic pre-publication non-terminal rejection MUST NOT "
+                    "leave an unpublished durable pending reservation blocking continuity.\n"
+                    "ERR_AGENT_IDENTITY_CONFLICT\nSensorAcceptanceEvidenceV1\n"
+                    "PendingCanonicalBindingV1\nJ8_UNVALIDATED_CRASH_THEN_REVOCATION\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n",
+                ),
+                (
+                    "Platform_06_Dataflow.md",
+                    "# Dataflow\nPlatform_17` §7.1\n"
+                    "A deterministic pre-publication non-terminal rejection MUST NOT "
+                    "leave an unpublished durable pending reservation blocking continuity.\n"
+                    "### 119.21 Upgrade / rollback\n"
+                    "active Agent-ingress publisher/writer ownership = non-zero\n"
+                    "LEGACY_UNKNOWN\nSTAGE 1 drain mode\nSTAGE 2 hard cutover fence\n"
+                    "ERR_PLATFORM_UPGRADE_IN_PROGRESS\nAGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                    "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                    "No Core partial-schema state is valid\nAUTHORITY_CHECKPOINT_RECOVERY\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1\nPENDING_CANONICAL_BINDING_V1\n"
+                    "U5A\nU5B\n",
+                ),
+                (
+                    "Platform_14_Test_Performance_and_Release_Quality.md",
+                    "# Tests\n### 3.2 Agent-ingress authority-checkpoint\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "U5A\nU5B\nJ8_UNVALIDATED_CRASH_THEN_REVOCATION\n"
+                    "raw `acceptedAt` alone is insufficient\n"
+                    "0 <= clock_max_error_ms <= 5000\n0 <= clock_sync_age_ms <= 300000\n"
+                    "clock_max_error_ms = -1\nclock_sync_age_ms = -1\n"
+                    "clock_max_error_ms > 5000\nclock_sync_age_ms > 300000\n"
+                    "acceptance_lower <= accepted_at_utc\n"
+                    "accepted_at_utc <= acceptance_upper\n"
+                    "acceptance_lower <= acceptance_upper\n"
+                    "acceptance_upper == revoked_at\nUNQUALIFIED / INVALID\n"
+                    "MUST NEVER become more permissive than missing clock evidence\n"
+                    "MUST NOT transition to `AUTHORITY_VALIDATED`\n"
+                    "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN\n",
+                ),
+                (
+                    "Platform_12_Decision_Source_Register.md",
+                    "# Decisions\n### 29.10 Agent-ingress authority-checkpoint\n"
+                    "SensorAcceptanceEvidenceV1\nPendingCanonicalBindingV1\n"
+                    "J8_UNVALIDATED_CRASH_THEN_REVOCATION\nU5A\nU5B\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "0 <= clock_max_error_ms <= 5000\n0 <= clock_sync_age_ms <= 300000\n"
+                    "acceptance_lower <= accepted_at_utc <= acceptance_upper\n"
+                    "MUST NEVER be more permissive than missing clock evidence\n"
+                    "UNQUALIFIED / INVALID\n",
+                ),
+                (
+                    "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+                    "# Ops\n"
+                    "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                    "pending-reservation upgrade gate\n"
+                    "SUPERSEDED: zero-pending as mandatory migration blocker\n"
+                    "active Agent-ingress publisher/writer ownership = non-zero\n"
+                    "LEGACY_UNKNOWN\n"
+                    "MUST NOT delete pending Agent-ingress rows manually\n"
+                    "Verify no active Agent-ingress publisher leases remain\n"
+                    "Verify no in-flight Agent-ingress writers\n"
+                    "STAGE 1 — DRAIN MODE\nSTAGE 2 — HARD CUTOVER FENCE\n"
+                    "ERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                    "check-then-unlock-then-migrate gap is forbidden\n"
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                    "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                    "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW\n"
+                    "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                    "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "U5A\nU5B\n"
+                    "Do not introduce a third witness/coordinator\n",
+                ),
+            ):
+                (tmp_docs / name).write_text(body, encoding="utf-8")
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED | does **not** reopen this certified record |\n"
+                "| BUILD-043 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-044 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-051 | x | y | z | NOT_IMPLEMENTED | a |\n"
+                "| BUILD-062 | runtime pending | x | y | Significant partial | AUTHORITY_CHECKPOINT_RECOVERY SENSOR_ACCEPTANCE_EVIDENCE_V1 PENDING_CANONICAL_BINDING_V1 J8_UNVALIDATED_CRASH_THEN_REVOCATION ERR_PLATFORM_UPGRADE_IN_PROGRESS AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 crash after mutable-validation failure before pending release |\n"
+                "| BUILD-127 | LEGACY_UNKNOWN zero-pending-as-mandatory-migration-blocker hard cutover fence AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 CUTOVER-LOCK-1 | x | y | Incomplete | U1 |\n"
+                "| 127 | Upgrade | x | AUTHORITY_CHECKPOINT_RECOVERY | D | U1 clean migration U2 dormant legacy pending U4 active publisher manual pending deletion/reset is **not** accepted remediation | r | Incomplete |\n"
+                "Platform_17` §7.1\npending-reservation\nBUILD-024\n"
+                "SensorAcceptanceEvidenceV1\nPendingCanonicalBindingV1\n"
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION\nU5A\nU5B\n"
+                "supersedes zero-pending-as-mandatory-migration-blocker\n"
+                "CUTOVER-RACE-1\nCUTOVER-LOCK-1\nERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                "UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(
+                validator.errors,
+                "expected clock-range / uncertainty regression failures",
+            )
+            self.assertTrue(
+                "0 <= clock_max_error_ms <= 5000" in joined
+                or "nonnegative" in joined
+                or "acceptance_lower <= accepted_at_utc" in joined
+                or "more permissive" in joined
+                or "AUTHORITY_VALIDATED" in joined
+                or "revocation-boundary" in joined
+                or "NOT authorized" in joined
+                or "negative" in joined,
                 joined,
             )
 
