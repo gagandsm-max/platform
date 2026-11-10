@@ -809,7 +809,7 @@ Browser API never returns plaintext to a user lacking explicit `REVEAL`; normal 
 
 ## 12. SNMP LLD
 
-**Maturity / Issue #92:** Raw Counter64 acquisition path is IMPLEMENTED + TESTED only. Derived counter delta/rate/reset/wrap/discontinuity semantics remain unimplemented/uncertified.
+**Maturity / Issue #92 / PR #304:** Raw Counter64 acquisition path is IMPLEMENTED + TESTED (PR #84). Exact Counter32/Counter64 delta/rate/reset/wrap/discontinuity **leaf engine** is implemented and merged (`sensor/internal/protocol/snmp/counter/`; PR #304). Status: `PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending`. Not complete Network Sensor integration; no whole BUILD-042 / BUILD-048 certification; not deployed.
 
 
 ### 12.1 Session profile

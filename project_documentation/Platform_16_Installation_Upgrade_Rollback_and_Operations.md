@@ -110,16 +110,65 @@ Preflight → capacity/free-space check → package signature → state/config b
 
 `pending Agent-ingress = non-zero` is an upgrade blocker for migrations that change pending/replay semantics. A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch was never published, was publisher-claimed, was published to Kafka but not finalized, or is merely a stale-assignment orphan. Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous historical pending state.
 
-**Supported upgrade precondition (fail-closed):**
+**MASTER ARCHITECTURE DECISION — two-phase cutover.** A check-then-unlock-then-migrate gap is forbidden. Apparent pending=0 under ordinary quiesce/drain is not sufficient: an old-version exact retry MUST NOT create a new reservation after the final zero check and before migration commit. Persistence/migration correctness invariants and race fixtures live in `Platform_17` §7.1.9; application-flow transitions live in `Platform_06` §119.21. Runtime Agent-ingress fence behavior is BUILD-062; upgrade/cutover certification is BUILD-127.
 
-1. Quiesce new Agent-ingress admission.
-2. Run the old/current pre-upgrade Core runtime (old version remains the recovery authority).
-3. Allow exact retries / drain / reconciliation under that old runtime.
-4. Verify all Agent-ingress pending reservations are zero.
-5. Verify no active Agent-ingress publisher leases remain.
-6. Only then apply the schema migration that changes pending-release semantics.
+#### 5.1.1 STAGE 1 — DRAIN MODE (pre-upgrade Core)
 
-If any pending reservation remains:
+Under the pre-upgrade / old-version Core (recovery authority):
+
+1. Enter drain mode: reject creation of **NEW** Agent-ingress work/reservations.
+2. Permit only bounded reconciliation/retry necessary to resolve **already-existing** pending reservations.
+3. Allow existing publisher claim/finalize/release work to complete.
+4. Continue until pending approaches zero.
+
+A retry that would require creation of a brand-new reservation MUST NOT be admitted while in drain mode. If the current/previous GA pair cannot enforce this drain-mode fence, that upgrade origin is **NOT certified** and requires a compatible intermediate release. Do not pretend arbitrary historical releases support the fence.
+
+#### 5.1.2 STAGE 2 — HARD CUTOVER FENCE (final zero-pending interval)
+
+Before the final zero-pending check, and as one uninterrupted fenced cutover interval:
+
+1. Activate a hard Agent-ingress cutover fence.
+2. Reject **ALL** new Agent-ingress requests, including exact retries, with a stable retryable upgrade-in-progress outcome (`ERR_PLATFORM_UPGRADE_IN_PROGRESS` or repository-equivalent). Agent/Sensor retains custody. The outcome MUST create no reservation, no terminal disposition, no deletion authorization, and no watermark change. Do not invent a permanent rejection.
+3. Wait for all in-flight Agent-ingress request handlers/transactions to drain (commit or rollback).
+4. Wait for publisher-claim/finalize/release transactions to drain.
+5. Acquire the database-level migration/cutover exclusion mechanism (existing PostgreSQL advisory/exclusive migration lock or another proven database exclusion primitive — do not invent a new service). A per-Sensor lock alone does **not** fence all Agent-ingress writers. The implementation plan must name and prove the actual global cutover mechanism before certification.
+6. While that exclusion remains held:
+   - recheck pending reservations == 0;
+   - recheck publisher owners/leases == 0;
+   - recheck no Agent-ingress writer transaction is eligible to create state;
+7. Apply the schema migration;
+8. Commit migration;
+9. Release the database exclusion only after migration commit;
+10. Start/enable upgraded Agent ingress;
+11. Verify continuity/health.
+
+The final zero-state check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap.
+
+#### 5.1.3 Abort / failure path
+
+If final fenced verification sees a pending reservation, publisher owner, unresolved writer, or migration precondition failure:
+
+1. Abort migration;
+2. Preserve old schema/data;
+3. Release the cutover database fence;
+4. Return Core to old-version recovery/drain mode;
+5. Reconcile outstanding work;
+6. Retry cutover later.
+
+Manual database deletion of pending rows remains forbidden.
+
+#### 5.1.4 Operator surface (fail-closed summary)
+
+Supported upgrade precondition remains fail-closed:
+
+1. Enter STAGE 1 drain mode under the old/current pre-upgrade Core.
+2. Drain/reconcile already-existing pending work only.
+3. Enter STAGE 2 hard cutover fence.
+4. Verify all Agent-ingress pending reservations are zero **while fenced**.
+5. Verify no active Agent-ingress publisher leases remain **while fenced**.
+6. Only then apply/commit the schema migration that changes pending-release semantics under the held database exclusion.
+
+If any pending reservation remains (including a race that entered before hard fence):
 
 - the upgrade aborts at preflight/migration gate;
 - no migration partial-apply is valid;
@@ -130,9 +179,9 @@ If any pending reservation remains:
 
 **Operator prohibition.** The operator MUST NOT delete pending Agent-ingress rows manually to bypass this gate. Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure recorded under Platform Operations / BUILD-127 acceptance. No Core partial-schema state is a valid end state.
 
-Cross-reference: `Platform_17` §7.1 (pending-reservation safety and schema-migration precondition), `Platform_06` §119.21, BUILD-062 (runtime pending/replay) and BUILD-127 (upgrade/canary/rollback acceptance of the zero-pending preflight).
+Cross-reference: `Platform_17` §7.1 (pending-reservation safety and schema-migration precondition, including CUTOVER-RACE fixtures), `Platform_06` §119.21, BUILD-062 (runtime pending/replay and cutover fence admission) and BUILD-127 (upgrade/canary/rollback acceptance of the race-safe zero-pending cutover).
 
-**Phase 1.5 HA Core upgrades** are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active, with fencing/rejoin safety preserved. Exact data-service upgrade sequencing follows component version compatibility. The Agent-ingress zero-pending gate above remains mandatory for each Core before a pending-release semantics migration is applied on that node.
+**Phase 1.5 HA Core upgrades** are rolling where architecture permits: upgrade Standby, verify, controlled switchover, upgrade former Active, with fencing/rejoin safety preserved. Exact data-service upgrade sequencing follows component version compatibility. The Agent-ingress race-safe zero-pending cutover above remains mandatory for each Core before a pending-release semantics migration is applied on that node.
 
 ## 6. Rollback
 

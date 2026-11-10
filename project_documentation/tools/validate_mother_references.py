@@ -1914,6 +1914,104 @@ class MotherReferenceValidator:
                     )
 
         self.validate_sflow_v5_datagram_sequence_contract()
+        self.validate_build_042_counter_leaf_source_truth()
+
+    def validate_build_042_counter_leaf_source_truth(self) -> None:
+        """Pin BUILD-042 status after PR #304 counter derivation leaf merge.
+
+        Must not regress to obsolete ``Raw Counter64 exists`` alone, and must
+        not claim whole-BUILD / BUILD-048 / deployment certification. Skipped
+        when the programme register is absent (minimal fixture trees).
+        """
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not register_path.is_file():
+            return
+        text = register_path.read_text(encoding="utf-8")
+
+        required = (
+            "PARTIAL — exact raw Counter64 + counter derivation leaf "
+            "implemented; integration/benchmark/certification pending"
+        )
+        banned_exact = ("Raw Counter64 exists",)
+
+        summary = ""
+        ledger = ""
+        section = text
+        marker = "### BUILD-040..054"
+        if marker in text:
+            section = text[text.find(marker) :]
+            nxt = section.find("\n### BUILD-", 1)
+            if nxt != -1:
+                section = section[:nxt]
+        for line in text.splitlines():
+            if line.startswith("| BUILD-042 |"):
+                summary = line
+                break
+        for line in section.splitlines():
+            if line.startswith("| 042 |"):
+                ledger = line
+                break
+        if not summary:
+            self.fail("Build Register missing summary row for BUILD-042")
+            return
+        if not ledger:
+            self.fail(
+                "Build Register missing executable-plan ledger row for BUILD-042"
+            )
+            return
+
+        for label, row in (("summary", summary), ("ledger", ledger)):
+            if required not in row:
+                self.fail(
+                    f"Build Register {label} BUILD-042 must record "
+                    f"{required!r} after PR #304 leaf merge"
+                )
+            for bad in banned_exact:
+                # Allow historical discussion only if the required PARTIAL
+                # status is present; ban obsolete sole maturity cell.
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                maturity = ""
+                if cells and cells[0].startswith("BUILD-"):
+                    maturity = cells[4] if len(cells) > 4 else ""
+                else:
+                    maturity = cells[-1] if cells else ""
+                if maturity == bad:
+                    self.fail(
+                        f"Build Register {label} BUILD-042 must not regress to "
+                        f"obsolete maturity {bad!r}"
+                    )
+
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if p17_path.is_file():
+            p17 = p17_path.read_text(encoding="utf-8")
+            for needle in (
+                required,
+                "PR #304",
+                "sensor/internal/protocol/snmp/counter/",
+                "no whole BUILD-042 certification",
+                "no BUILD-048 Network Sensor certification",
+                "no deployment claim",
+            ):
+                if needle not in p17:
+                    self.fail(
+                        "Platform_17 §6 must reconcile BUILD-042 leaf source "
+                        f"truth (missing {needle!r})"
+                    )
+            # Stale sole claim that derivation remains unimplemented.
+            stale = (
+                "That derived Counter32/Counter64 reset/wrap/discontinuity/"
+                "rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**"
+            )
+            if stale in p17:
+                self.fail(
+                    "Platform_17 §6 must not retain obsolete "
+                    "SPECIFIED-but-NOT-IMPLEMENTED derivation claim after PR #304"
+                )
 
     def validate_sflow_v5_datagram_sequence_contract(self) -> None:
         """Pin BUILD-051 S5 sFlow datagram sequence / discontinuity contract.
@@ -2189,6 +2287,16 @@ class MotherReferenceValidator:
             "zero-pending",
             "Crash after mutable validation failure, before pending release",
             "Manual pending deletion/reset is **not** accepted remediation",
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap",
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+            "database-level migration/cutover exclusion",
+            "per-Sensor lock alone does **not** fence",
         )
         for needle in required_p17:
             if needle not in p17:
@@ -2234,7 +2342,9 @@ class MotherReferenceValidator:
                 frozen,
                 "### 119.21 Upgrade / rollback",
                 "pending Agent-ingress = non-zero",
-                "quiesce Agent-ingress admission",
+                "STAGE 1 drain mode",
+                "STAGE 2 hard cutover fence",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
                 "No Core partial-schema state is valid",
             ):
                 if needle not in p06:
@@ -2256,6 +2366,11 @@ class MotherReferenceValidator:
                 "MUST NOT delete pending Agent-ingress rows manually",
                 "Verify all Agent-ingress pending reservations are zero",
                 "Verify no active Agent-ingress publisher leases remain",
+                "STAGE 1 — DRAIN MODE",
+                "STAGE 2 — HARD CUTOVER FENCE",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "check-then-unlock-then-migrate gap is forbidden",
+                "database-level migration/cutover exclusion",
             ):
                 if needle not in p16:
                     self.fail(
@@ -2276,6 +2391,9 @@ class MotherReferenceValidator:
                 "BUILD-127",
                 "zero-pending",
                 "crash after mutable-validation failure before pending release",
+                "CUTOVER-RACE-1",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "hard cutover fence",
             ):
                 if needle not in register:
                     self.fail(
@@ -2312,6 +2430,15 @@ class MotherReferenceValidator:
                 self.fail(
                     "BUILD-127 must own zero-pending Agent-ingress migration "
                     "preflight acceptance"
+                )
+            if summary_127 and "hard cutover fence" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own race-safe hard cutover fence acceptance"
+                )
+            if summary_062 and "ERR_PLATFORM_UPGRADE_IN_PROGRESS" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own hard-cutover fence admission "
+                    "(ERR_PLATFORM_UPGRADE_IN_PROGRESS)"
                 )
             # Preserve prior Network/Flow status truth closures.
             for build_id, required in (

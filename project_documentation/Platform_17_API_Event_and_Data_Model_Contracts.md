@@ -293,7 +293,7 @@ Where calendar bucketing depends on local day/week/month/business-day boundaries
 
 Logical user preference field `display_timezone` (nullable IANA identifier) is an implementation requirement on the existing user preference/profile surface. This documentation baseline does **not** allocate a PostgreSQL migration number. Existing `tenant.timezone` remains the tenant fallback. Host OS timezone is non-authoritative.
 
-## 6. Counter64 / exact-counter implementation truth — v3.2.2 current main after PR #84
+## 6. Counter64 / exact-counter implementation truth — current main after PR #84 + PR #304 (BUILD-042)
 
 Architecture requires exact Counter64 end-to-end. Current merged implementation truth:
 
@@ -303,9 +303,20 @@ Architecture requires exact Counter64 end-to-end. Current merged implementation 
 - Kafka serializes raw Counter64 without JSON/JavaScript Number semantics;
 - ClickHouse persists raw exact values in a dedicated `UInt64` path and exposes replay-safe canonical reads;
 - tests cover values around `2^53`, the Java signed-long boundary and through `18446744073709551615` (`2^64-1`), plus restart/replay/idempotent migration behavior;
-- therefore the **raw exact Counter64 transport/persistence path is IMPLEMENTED and TESTED**, but remains **NOT BENCHMARKED / NOT CERTIFIED / NOT DEPLOYED**.
+- therefore the **raw exact Counter64 transport/persistence path is IMPLEMENTED and TESTED** (PR #84), but remains **NOT BENCHMARKED / NOT CERTIFIED / NOT DEPLOYED**.
 
-The ordinary numeric measurement path may remain floating-point because it is semantically separate from the authoritative raw counter family. Derived delta/rate/utilization may use floating-point only AFTER exact delta/reset/discontinuity processing. That derived Counter32/Counter64 reset/wrap/discontinuity/rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
+After PR #304 (`main` `e207be47372236aadade3d452167bc03f4e5025e`), the BUILD-042 **exact Counter32/Counter64 delta/rate/reset/wrap/discontinuity leaf engine** is implemented and merged under `sensor/internal/protocol/snmp/counter/` (identity-complete derivation, continuity-aware wrap/reset, elapsed-time rate). Bounded source-truth status:
+
+`PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending`
+
+Non-claims (mandatory):
+
+- leaf engine is **not** yet complete Network Sensor integration;
+- no whole BUILD-042 certification;
+- no BUILD-048 Network Sensor certification;
+- no deployment claim.
+
+The ordinary numeric measurement path may remain floating-point because it is semantically separate from the authoritative raw counter family. Derived delta/rate/utilization may use floating-point only AFTER exact delta/reset/discontinuity processing. A decrease is not automatically a wrap; discontinuity/reboot/source evidence is evaluated first.
 
 ## 7. Telemetry durability / ACK contract note — PR #81 canonical
 
@@ -450,7 +461,7 @@ These tests are documentation-acceptance obligations for implementation closure;
 
 #### 7.1.9 Schema migration / release-guard upgrade precondition
 
-**Authority.** This subsection freezes upgrade/schema-migration safety for Agent-ingress pending-release semantics. Runtime pending/replay behavior remains BUILD-062; upgrade/canary/rollback acceptance of the zero-pending preflight remains BUILD-127. Operations preflight lives in `Platform_16` §5.1 and the upgrade journey in `Platform_06` §119.21.
+**Authority.** This subsection freezes upgrade/schema-migration safety for Agent-ingress pending-release semantics. Runtime pending/replay and cutover-fence admission behavior remain BUILD-062; upgrade/canary/rollback acceptance of the race-safe zero-pending cutover remains BUILD-127. Operations sequence lives in `Platform_16` §5.1; application-flow transitions live in `Platform_06` §119.21.
 
 **Root problem.** A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch:
 
@@ -461,31 +472,62 @@ These tests are documentation-acceptance obligations for implementation closure;
 
 Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous historical pending state. Historical pending publication state is **not inferable** from schema alone. Migration MUST NOT label an unknown pending row as safe-to-release.
 
-**FROZEN precondition.** Any Agent-ingress schema migration that introduces or changes pending-release / pending-replay semantics (a release-guard schema transition; cross-reference the current V021-equivalent Flyway migration when present in the catalogue, without treating that filename as eternal product terminology) MUST require a verified **zero-pending** Agent-ingress precondition before applying the transition:
+**Race class (forbidden).** A sequence that only (1) quiesces/drains, (2) observes pending=0, (3) leaves a window where an old-version exact retry creates a new reservation, then (4) commits migration, is forbidden. Apparent pending=0 before hard fence is not a migration authorization.
 
-1. Quiesce new Agent-ingress admission.
-2. Run the old/current pre-upgrade runtime as recovery authority.
-3. Allow exact retries / drain / reconciliation.
-4. Verify Agent-ingress pending reservations are zero.
-5. Verify no active Agent-ingress publisher leases remain.
-6. Only then apply the schema migration.
+**FROZEN two-phase cutover precondition.** Any Agent-ingress schema migration that introduces or changes pending-release / pending-replay semantics (a release-guard schema transition; cross-reference the current V021-equivalent Flyway migration when present in the catalogue, without treating that filename as eternal product terminology) MUST apply the race-safe two-phase protocol:
+
+**STAGE 1 — DRAIN MODE** under the pre-upgrade Core:
+
+- reject creation of NEW Agent-ingress work/reservations;
+- permit only bounded reconciliation/retry necessary to resolve ALREADY-EXISTING pending reservations;
+- allow existing publisher/finalize/release work to complete;
+- continue until pending approaches zero;
+- a retry that would create a brand-new reservation MUST NOT be admitted;
+- if the current/previous GA pair cannot enforce drain mode, that upgrade origin is NOT certified and requires a compatible intermediate release.
+
+**STAGE 2 — HARD CUTOVER FENCE** before the final zero-pending check:
+
+1. Activate a hard Agent-ingress cutover fence.
+2. Reject ALL new Agent-ingress requests, including exact retries, with retryable `ERR_PLATFORM_UPGRADE_IN_PROGRESS` (or repository-equivalent). Agent/Sensor retains custody. MUST create no reservation, no terminal disposition, no deletion authorization, and no watermark change.
+3. Wait for all in-flight Agent-ingress request handlers/transactions to drain.
+4. Wait for publisher-claim/finalize/release transactions to drain.
+5. Acquire the database-level migration/cutover exclusion mechanism (existing PostgreSQL advisory/exclusive migration lock or another proven database exclusion primitive; do not invent a new service). A per-Sensor lock alone does **not** fence all Agent-ingress writers. The implementation plan MUST name and prove the actual global cutover mechanism before certification.
+6. While that exclusion remains held: recheck pending reservations == 0; recheck publisher owners/leases == 0; recheck no Agent-ingress writer transaction is eligible to create state.
+7. Apply the schema migration.
+8. Commit migration.
+9. Release the database exclusion only after migration commit.
+10. Start/enable upgraded Agent ingress.
+11. Verify continuity/health.
+
+The final zero-state check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap.
 
 **Fail-closed migration behavior.**
 
 - If the zero-pending precondition is violated, migration MUST abort; no partial-apply is valid.
 - Migration apply MUST be transactional such that failure leaves the prior schema and data authoritative.
+- If final fenced verification sees a pending reservation, publisher owner, unresolved writer, or migration precondition failure: abort migration; preserve old schema/data; release the cutover database fence; return Core to old-version recovery/drain mode; reconcile outstanding work; retry cutover later.
 - No direct DB delete/reset of pending rows is an accepted remediation path for the gate.
 - No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted.
 - Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1).
 - Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure under BUILD-127.
 
-Finite acceptance owned across BUILD-062 (runtime) and BUILD-127 (upgrade gate):
+Finite acceptance owned across BUILD-062 (runtime fence/admission) and BUILD-127 (upgrade/cutover certification):
 
-1. V020-equivalent (pre-release-guard) zero-pending → migration succeeds.
+1. V020-equivalent (pre-release-guard) zero-pending → migration succeeds under hard fence.
 2. One pre-existing pending row → migration aborts with old schema/data intact.
-3. After old-version drain to pending=0 → migration succeeds.
+3. After old-version drain to pending=0 and hard fence → migration succeeds.
 4. Manual pending deletion/reset is **not** accepted remediation.
 5. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
+
+Mandatory race fixtures (BUILD-127 acceptance; BUILD-062 runtime proof points):
+
+**CUTOVER-RACE-1 — exact retry at cutover transition.** Setup: preflight/drain reaches apparent pending=0; exact retry races at the transition into hard cutover. Prove either (A) retry enters before hard fence and becomes visible pending work, causing final fenced zero check to fail and migration to abort; OR (B) hard fence wins first and retry receives retryable `ERR_PLATFORM_UPGRADE_IN_PROGRESS` without creating a reservation. Forbidden: migration commits while the retry creates or owns Agent-ingress pending state.
+
+**CUTOVER-RACE-2 — in-flight writer.** An Agent-ingress writer is already active when hard fence begins. Prove: cutover waits for it to terminate/commit/rollback; final zero check occurs afterward; migration does not race the writer.
+
+**CUTOVER-RACE-3 — publisher lease.** Publisher lease exists at cutover. Migration must not proceed.
+
+**CUTOVER-RACE-4 — post-commit resume.** After migration commit and fence release: exact retained Sensor request retries normally under the upgraded runtime; no duplicate deletion-authorizing ACK or false sequence gap.
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 

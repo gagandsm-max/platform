@@ -3640,12 +3640,21 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         for build_id, needle in (
             ("BUILD-040", "Partial"),
             ("BUILD-041", "Partial"),
-            ("BUILD-042", "Raw Counter64 exists"),
+            (
+                "BUILD-042",
+                "PARTIAL — exact raw Counter64 + counter derivation leaf "
+                "implemented; integration/benchmark/certification pending",
+            ),
             ("BUILD-046", "Partial"),
             ("BUILD-047", "Partial code"),
             ("BUILD-050", "Partial"),
         ):
             self.assertIn(needle, summary_maturity(build_id), build_id)
+        self.assertNotEqual(
+            summary_maturity("BUILD-042"),
+            "Raw Counter64 exists",
+            "BUILD-042 must not regress to obsolete sole raw-path maturity",
+        )
 
         validator = MotherReferenceValidator(docs, repo_root=root)
         validator.errors = []
@@ -3741,11 +3750,27 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertIn("pending-reservation", register)
         self.assertIn("does **not** reopen this certified record", register)
 
-        # Zero-pending upgrade gate + ownership split.
+        # Zero-pending upgrade gate + ownership split + race-safe cutover.
         self.assertIn("pending Agent-ingress = non-zero", p16)
         self.assertIn("MUST NOT delete pending Agent-ingress rows manually", p16)
+        self.assertIn("STAGE 1 — DRAIN MODE", p16)
+        self.assertIn("STAGE 2 — HARD CUTOVER FENCE", p16)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p16)
+        self.assertIn("check-then-unlock-then-migrate gap is forbidden", p16)
         self.assertIn("pending Agent-ingress = non-zero", p06)
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
         self.assertIn("No Core partial-schema state is valid", p06)
+        for race in (
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+        ):
+            self.assertIn(race, p17, race)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p17)
+        self.assertIn("STAGE 1 — DRAIN MODE", p17)
+        self.assertIn("STAGE 2 — HARD CUTOVER FENCE", p17)
         row_062 = next(
             line
             for line in register.splitlines()
@@ -3855,10 +3880,12 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         for needle in (
             "If the zero-pending precondition is violated, migration MUST abort",
             "Migration apply MUST be transactional",
-            "V020-equivalent (pre-release-guard) zero-pending → migration succeeds",
+            "V020-equivalent (pre-release-guard) zero-pending → migration succeeds under hard fence",
             "One pre-existing pending row → migration aborts with old schema/data intact",
-            "After old-version drain to pending=0 → migration succeeds",
+            "After old-version drain to pending=0 and hard fence → migration succeeds",
             "Failure is observable/audited",
+            "CUTOVER-RACE-1",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
         ):
             self.assertIn(needle, p17, needle)
 
@@ -3879,27 +3906,38 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         )
         self.assertIn("exact retry reconciles/releases unpublished pending", ledger_062)
 
-        # BUILD-127 owns the upgrade gate; BUILD-062 owns runtime.
-        self.assertIn("zero-pending migration preflight", register)
+        # BUILD-127 owns the upgrade/cutover gate; BUILD-062 owns runtime fence.
+        self.assertIn("zero-pending cutover", register)
         row_127 = next(
             line
             for line in register.splitlines()
             if line.startswith("| BUILD-127 |")
         )
-        self.assertIn("zero-pending migration preflight", row_127)
+        self.assertIn("zero-pending cutover", row_127)
+        self.assertIn("hard cutover fence", row_127)
+        self.assertIn("CUTOVER-RACE-1", register)
         row_062 = next(
             line
             for line in register.splitlines()
             if line.startswith("| BUILD-062 |")
         )
-        self.assertIn("Zero-pending **upgrade/migration preflight acceptance**", row_062)
+        self.assertIn(
+            "Zero-pending **upgrade/migration cutover certification**",
+            row_062,
+        )
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
         self.assertIn("BUILD-127", row_062)
 
-        # Platform_16 / §119.21 preflight surface.
-        self.assertIn("Quiesce new Agent-ingress admission", p16)
+        # Platform_16 / §119.21 preflight surface + hard cutover fence.
+        self.assertIn("Enter STAGE 1 drain mode", p16)
+        self.assertIn("Enter STAGE 2 hard cutover fence", p16)
         self.assertIn("upgrade aborts at preflight/migration gate", p16)
-        self.assertIn("quiesce Agent-ingress admission", p06)
-        self.assertIn("publisher ownership/leases drained", p06)
+        self.assertIn("STAGE 1 drain mode", p06)
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("publisher leases=0", p06)
+        self.assertIn("CUTOVER-RACE-1", register)
+        self.assertIn("hard cutover fence", row_127)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
 
         # No regression of sFlow + status truth.
         self.assertIn("sFlow v5", register)
@@ -3981,6 +4019,245 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 "7.1.9" in joined
                 or "zero-pending" in joined.lower()
                 or "BUILD-127" in joined,
+                joined,
+            )
+
+    def test_99e_agent_ingress_hard_cutover_fence_and_races(self) -> None:
+        """Hard cutover fence, fenced zero-check, and CUTOVER-RACE-1..4."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap",
+            "database-level migration/cutover exclusion",
+            "per-Sensor lock alone does **not** fence",
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+            "final zero-state check and migration MUST share one uninterrupted",
+            "create no reservation",
+            "no terminal disposition",
+            "no deletion authorization",
+            "no watermark change",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        # CUTOVER-RACE-1: either abort on visible pending OR fence reject.
+        self.assertIn(
+            "retry enters before hard fence and becomes visible pending work",
+            p17,
+        )
+        self.assertIn(
+            "hard fence wins first and retry receives retryable",
+            p17,
+        )
+        self.assertIn(
+            "Forbidden: migration commits while the retry creates or owns",
+            p17,
+        )
+        # CUTOVER-RACE-2 in-flight writer drain.
+        self.assertIn(
+            "cutover waits for it to terminate/commit/rollback",
+            p17,
+        )
+        # CUTOVER-RACE-3 publisher lease block.
+        self.assertIn("Publisher lease exists at cutover", p17)
+        self.assertIn("Migration must not proceed", p17)
+        # CUTOVER-RACE-4 post-commit resume.
+        self.assertIn(
+            "exact retained Sensor request retries normally under the upgraded runtime",
+            p17,
+        )
+        self.assertIn(
+            "no duplicate deletion-authorizing ACK or false sequence gap",
+            p17,
+        )
+
+        for needle in (
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap is forbidden",
+            "while fenced",
+        ):
+            self.assertIn(needle, p16, needle)
+
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
+        self.assertIn("CUTOVER-RACE abort", p06)
+
+        self.assertIn("CUTOVER-RACE-1", register)
+        self.assertIn("hard cutover fence", register)
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("hard cutover fence", row_127)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
+
+        # Prior P0 closures must remain intact.
+        self.assertIn("sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99f_agent_ingress_hard_cutover_regression_fails(self) -> None:
+        """Dropping hard-cutover fence / race fixtures must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        stripped = (
+            p17_full.replace("STAGE 2 — HARD CUTOVER FENCE", "STAGE 2 REMOVED")
+            .replace("CUTOVER-RACE-1", "RACE-REMOVED-1")
+            .replace("ERR_PLATFORM_UPGRADE_IN_PROGRESS", "ERR_REMOVED")
+        )
+        self.assertNotIn("STAGE 2 — HARD CUTOVER FENCE", stripped)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(
+                (
+                    root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+                ).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected hard-cutover failures")
+            self.assertTrue(
+                "HARD CUTOVER" in joined
+                or "CUTOVER-RACE" in joined
+                or "ERR_PLATFORM_UPGRADE_IN_PROGRESS" in joined,
+                joined,
+            )
+
+    def test_99g_build_042_counter_leaf_source_truth(self) -> None:
+        """BUILD-042 must reflect PR #304 leaf without certification claims."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+
+        required = (
+            "PARTIAL — exact raw Counter64 + counter derivation leaf "
+            "implemented; integration/benchmark/certification pending"
+        )
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        ledger_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 042 |")
+        )
+        self.assertIn(required, row_042)
+        self.assertIn(required, ledger_042)
+        self.assertNotEqual(
+            [c.strip() for c in row_042.strip().strip("|").split("|")][4],
+            "Raw Counter64 exists",
+        )
+        self.assertIn(required, p17)
+        self.assertIn("PR #304", p17)
+        self.assertIn("sensor/internal/protocol/snmp/counter/", p17)
+        self.assertIn("no whole BUILD-042 certification", p17)
+        self.assertIn("no BUILD-048 Network Sensor certification", p17)
+        self.assertIn("no deployment claim", p17)
+        self.assertNotIn(
+            "That derived Counter32/Counter64 reset/wrap/discontinuity/"
+            "rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_build_042_counter_leaf_source_truth()
+        self.assertEqual(validator.errors, [])
+
+    def test_99h_build_042_obsolete_raw_only_status_fails(self) -> None:
+        """Regressing BUILD-042 to Raw Counter64 exists must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-042 | SNMP counters | counters | 041 | Raw Counter64 exists | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 042 | SNMP counters | Core | delta | D | exit | n/a | Raw Counter64 exists |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_build_042_counter_leaf_source_truth()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected BUILD-042 failures")
+            self.assertIn("BUILD-042", joined)
+            self.assertTrue(
+                "Raw Counter64 exists" in joined
+                or "PARTIAL — exact raw Counter64" in joined,
                 joined,
             )
 
