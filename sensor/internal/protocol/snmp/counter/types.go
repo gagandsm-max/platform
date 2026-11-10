@@ -16,6 +16,11 @@ const (
 	Width64 Width = 64
 )
 
+// DefaultContextID is the explicit canonical SNMP context identifier callers
+// must supply for SNMPv1/v2c and the SNMPv3 default context. Empty is never a
+// valid counter-stream identity.
+const DefaultContextID = "DEFAULT"
+
 // Continuity is an explicit assessment of whether the counter stream remained
 // continuous between two observations. Callers supply this from reboot,
 // discontinuity-marker, sysUpTime or equivalent evidence; the engine does not
@@ -33,24 +38,36 @@ const (
 type Quality string
 
 const (
-	QualityValid             Quality = "VALID"
-	QualityResetOrReboot     Quality = "RESET_OR_REBOOT"
-	QualityDiscontinuity     Quality = "DISCONTINUITY"
-	QualityAmbiguousDecrease Quality = "AMBIGUOUS_DECREASE"
-	QualityUnknownContinuity Quality = "UNKNOWN_CONTINUITY"
-	QualityIdentityMismatch  Quality = "IDENTITY_MISMATCH"
-	QualityWidthMismatch     Quality = "WIDTH_MISMATCH"
-	QualityOutOfDomain       Quality = "OUT_OF_DOMAIN"
-	QualityInvalidWidth      Quality = "INVALID_WIDTH"
-	QualityInvalidTime       Quality = "INVALID_TIME"
-	QualityInvalidContinuity Quality = "INVALID_CONTINUITY"
+	QualityValid                   Quality = "VALID"
+	QualityResetOrReboot           Quality = "RESET_OR_REBOOT"
+	QualityDiscontinuity           Quality = "DISCONTINUITY"
+	QualityAmbiguousDecrease       Quality = "AMBIGUOUS_DECREASE"
+	QualityUnknownContinuity       Quality = "UNKNOWN_CONTINUITY"
+	QualityIdentityMismatch        Quality = "IDENTITY_MISMATCH"
+	QualityInvalidIdentity         Quality = "INVALID_IDENTITY"
+	QualityWidthMismatch           Quality = "WIDTH_MISMATCH"
+	QualityOutOfDomain             Quality = "OUT_OF_DOMAIN"
+	QualityInvalidWidth            Quality = "INVALID_WIDTH"
+	QualityInvalidTime             Quality = "INVALID_TIME"
+	QualityTimeIntervalOutOfRange  Quality = "TIME_INTERVAL_OUT_OF_RANGE"
+	QualityInvalidContinuity       Quality = "INVALID_CONTINUITY"
 )
 
 // Identity binds a counter observation to the series it belongs to. A delta
-// must not be computed across incompatible identities.
+// must not be computed across incompatible or incomplete identities.
+//
+// Minimum complete canonical counter-stream identity:
+//   - SourceEntity (non-empty)
+//   - MetricOID (non-empty)
+//   - ContextID (non-empty; use DefaultContextID for default SNMP context)
+//
+// InterfaceID is optional only when MetricOID fully identifies a scalar
+// stream; when present on either sample it must match exactly.
+// ObservationGeneration, when present on either sample, must match exactly.
 type Identity struct {
 	MetricOID             string
 	SourceEntity          string
+	ContextID             string
 	InterfaceID           string
 	Width                 Width
 	ObservationGeneration string
@@ -72,7 +89,8 @@ type Result struct {
 	// Delta is the exact unsigned increment when derivation succeeded.
 	Delta *uint64
 	// RatePerSecond is derived only after a valid exact Delta and a strictly
-	// increasing observation timestamp pair. It may use floating-point.
+	// increasing observation timestamp pair whose elapsed interval is
+	// representable by this package's rate contract. It may use floating-point.
 	RatePerSecond *float64
 	Continuity    Continuity
 	Quality       Quality

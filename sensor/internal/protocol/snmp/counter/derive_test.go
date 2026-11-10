@@ -10,6 +10,7 @@ func baseIdentity(width Width) Identity {
 	return Identity{
 		MetricOID:    "1.3.6.1.2.1.31.1.1.1.6.1",
 		SourceEntity: "entity-1",
+		ContextID:    DefaultContextID,
 		InterfaceID:  "if-1",
 		Width:        width,
 	}
@@ -91,6 +92,36 @@ func TestCounter64NearMaxUint64Precision(t *testing.T) {
 	}
 }
 
+func TestCounter64ExactBoundaryRemainGreen(t *testing.T) {
+	id := baseIdentity(Width64)
+	t0 := time.Unix(1000, 0).UTC()
+	t1 := time.Unix(1010, 0).UTC()
+
+	cases := []struct {
+		name     string
+		prev     uint64
+		curr     uint64
+		want     uint64
+		wantWrap bool
+	}{
+		{name: "max_to_zero", prev: math.MaxUint64, curr: 0, want: 1, wantWrap: true},
+		{name: "max_minus_one_to_one", prev: math.MaxUint64 - 1, curr: 1, want: 3, wantWrap: true},
+		{name: "near_2_53_monotonic", prev: (1 << 53) - 10, curr: (1 << 53) + 10, want: 20},
+		{name: "exact_2_53_step", prev: 1 << 53, curr: (1 << 53) + 7, want: 7},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Derive(sample(id, tc.prev, t0), sample(id, tc.curr, t1), ContinuityContinuous)
+			if got.Quality != QualityValid || got.Delta == nil || *got.Delta != tc.want || got.Wrapped != tc.wantWrap {
+				t.Fatalf("result=%+v delta=%v want=%d wrap=%v", got, got.Delta, tc.want, tc.wantWrap)
+			}
+			if got.PreviousRaw != tc.prev || got.CurrentRaw != tc.curr {
+				t.Fatalf("raw source inputs changed")
+			}
+		})
+	}
+}
+
 func TestExplicitRebootNoDelta(t *testing.T) {
 	id := baseIdentity(Width64)
 	prev := sample(id, 9000, time.Unix(1000, 0).UTC())
@@ -147,6 +178,87 @@ func TestWidthChangeNoDelta(t *testing.T) {
 	}
 }
 
+func TestEmptySourceIdentityRejected(t *testing.T) {
+	id := baseIdentity(Width64)
+	id.SourceEntity = ""
+	prev := sample(id, 100, time.Unix(1000, 0).UTC())
+	curr := sample(id, 200, time.Unix(1010, 0).UTC())
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityInvalidIdentity || got.Delta != nil || got.RatePerSecond != nil {
+		t.Fatalf("empty source identity must be INVALID_IDENTITY with no delta/rate: %+v", got)
+	}
+	if CompatibleIdentity(id, id) {
+		t.Fatal("incomplete identities must not compare as compatible")
+	}
+}
+
+func TestEmptyMetricOIDIdentityRejected(t *testing.T) {
+	id := baseIdentity(Width32)
+	id.MetricOID = ""
+	prev := sample(id, 100, time.Unix(1000, 0).UTC())
+	curr := sample(id, 200, time.Unix(1010, 0).UTC())
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityInvalidIdentity || got.Delta != nil || got.RatePerSecond != nil {
+		t.Fatalf("empty metric/OID identity must be INVALID_IDENTITY with no delta/rate: %+v", got)
+	}
+}
+
+func TestEmptyContextIdentityRejected(t *testing.T) {
+	id := baseIdentity(Width64)
+	id.ContextID = ""
+	prev := sample(id, 100, time.Unix(1000, 0).UTC())
+	curr := sample(id, 200, time.Unix(1010, 0).UTC())
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityInvalidIdentity || got.Delta != nil || got.RatePerSecond != nil {
+		t.Fatalf("empty context identity must be INVALID_IDENTITY with no delta/rate: %+v", got)
+	}
+}
+
+func TestMismatchedContextRejected(t *testing.T) {
+	prevID := baseIdentity(Width64)
+	currID := baseIdentity(Width64)
+	currID.ContextID = "vpn-a"
+	prev := sample(prevID, 100, time.Unix(1000, 0).UTC())
+	curr := sample(currID, 200, time.Unix(1010, 0).UTC())
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityIdentityMismatch || got.Delta != nil {
+		t.Fatalf("mismatched context must refuse delta: %+v", got)
+	}
+}
+
+func TestExplicitDefaultContextWorks(t *testing.T) {
+	id := baseIdentity(Width64)
+	if id.ContextID != DefaultContextID {
+		t.Fatalf("fixture context=%q want %q", id.ContextID, DefaultContextID)
+	}
+	prev := sample(id, 100, time.Unix(1000, 0).UTC())
+	curr := sample(id, 125, time.Unix(1005, 0).UTC())
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityValid || got.Delta == nil || *got.Delta != 25 {
+		t.Fatalf("explicit default context must derive: %+v", got)
+	}
+	if got.RatePerSecond == nil || math.Abs(*got.RatePerSecond-5) > 1e-9 {
+		t.Fatalf("rate=%v want 5", got.RatePerSecond)
+	}
+}
+
+func TestBothEmptyIdentitiesNotCompatible(t *testing.T) {
+	a := Identity{Width: Width64}
+	b := Identity{Width: Width64}
+	if IdentityComplete(a) || CompatibleIdentity(a, b) {
+		t.Fatal("anonymous empty identities must not be complete or compatible")
+	}
+	got := Derive(sample(a, 1, time.Unix(1, 0).UTC()), sample(b, 2, time.Unix(2, 0).UTC()), ContinuityContinuous)
+	if got.Quality != QualityInvalidIdentity || got.Delta != nil {
+		t.Fatalf("anonymous streams must not yield delta: %+v", got)
+	}
+}
+
 func TestZeroDeltaIsValid(t *testing.T) {
 	id := baseIdentity(Width64)
 	prev := sample(id, 77, time.Unix(1000, 0).UTC())
@@ -172,6 +284,49 @@ func TestNonIncreasingTimestampNoRate(t *testing.T) {
 	}
 	if got.RatePerSecond != nil || got.Quality != QualityInvalidTime {
 		t.Fatalf("non-increasing time must suppress rate: %+v", got)
+	}
+}
+
+func TestRepresentableElapsedIntervalWorks(t *testing.T) {
+	id := baseIdentity(Width64)
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	maxNsecRem := int64(math.MaxInt64 % int64(time.Second))
+	prev := sample(id, 10, time.Unix(0, 0).UTC())
+	curr := sample(id, 20, time.Unix(maxSec, maxNsecRem).UTC())
+
+	elapsed, ok := Elapsed(prev, curr)
+	if !ok || elapsed != time.Duration(math.MaxInt64) {
+		t.Fatalf("largest representable elapsed got=%v ok=%v", elapsed, ok)
+	}
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Quality != QualityValid || got.Delta == nil || *got.Delta != 10 || got.RatePerSecond == nil {
+		t.Fatalf("representable max interval must yield delta+rate: %+v", got)
+	}
+	if got.PreviousRaw != 10 || got.CurrentRaw != 20 {
+		t.Fatalf("raw source inputs changed")
+	}
+}
+
+func TestOutOfRangeElapsedIntervalSuppressesRate(t *testing.T) {
+	id := baseIdentity(Width64)
+	maxSec := int64(math.MaxInt64 / int64(time.Second))
+	prev := sample(id, 10, time.Unix(0, 0).UTC())
+	curr := sample(id, 20, time.Unix(maxSec+1, 0).UTC())
+
+	if elapsed, ok := Elapsed(prev, curr); ok {
+		t.Fatalf("out-of-range elapsed must be rejected, got %v", elapsed)
+	}
+
+	got := Derive(prev, curr, ContinuityContinuous)
+	if got.Delta == nil || *got.Delta != 10 {
+		t.Fatalf("exact delta must remain: %+v", got)
+	}
+	if got.RatePerSecond != nil || got.Quality != QualityTimeIntervalOutOfRange {
+		t.Fatalf("out-of-range elapsed must suppress rate: %+v", got)
+	}
+	if got.PreviousRaw != 10 || got.CurrentRaw != 20 {
+		t.Fatalf("raw source inputs changed")
 	}
 }
 
@@ -260,16 +415,36 @@ func TestTableDrivenBoundaries(t *testing.T) {
 			wantQuality: QualityOutOfDomain,
 		},
 		{
-			name:        "metric_oid_change",
-			prev:        sample(id64, 1, t0),
-			curr:        sample(Identity{MetricOID: "9.9.9", SourceEntity: "entity-1", InterfaceID: "if-1", Width: Width64}, 2, t1),
+			name: "metric_oid_change",
+			prev: sample(id64, 1, t0),
+			curr: sample(Identity{
+				MetricOID:    "9.9.9",
+				SourceEntity: "entity-1",
+				ContextID:    DefaultContextID,
+				InterfaceID:  "if-1",
+				Width:        Width64,
+			}, 2, t1),
 			continuity:  ContinuityContinuous,
 			wantQuality: QualityIdentityMismatch,
 		},
 		{
-			name:        "observation_generation_change",
-			prev:        sample(Identity{MetricOID: id64.MetricOID, SourceEntity: id64.SourceEntity, InterfaceID: id64.InterfaceID, Width: Width64, ObservationGeneration: "g1"}, 1, t0),
-			curr:        sample(Identity{MetricOID: id64.MetricOID, SourceEntity: id64.SourceEntity, InterfaceID: id64.InterfaceID, Width: Width64, ObservationGeneration: "g2"}, 2, t1),
+			name: "observation_generation_change",
+			prev: sample(Identity{
+				MetricOID:             id64.MetricOID,
+				SourceEntity:          id64.SourceEntity,
+				ContextID:             DefaultContextID,
+				InterfaceID:           id64.InterfaceID,
+				Width:                 Width64,
+				ObservationGeneration: "g1",
+			}, 1, t0),
+			curr: sample(Identity{
+				MetricOID:             id64.MetricOID,
+				SourceEntity:          id64.SourceEntity,
+				ContextID:             DefaultContextID,
+				InterfaceID:           id64.InterfaceID,
+				Width:                 Width64,
+				ObservationGeneration: "g2",
+			}, 2, t1),
 			continuity:  ContinuityContinuous,
 			wantQuality: QualityIdentityMismatch,
 		},
@@ -281,9 +456,19 @@ func TestTableDrivenBoundaries(t *testing.T) {
 			wantQuality: QualityUnknownContinuity,
 		},
 		{
-			name:        "invalid_width",
-			prev:        sample(Identity{MetricOID: "1.2.3", SourceEntity: "e", Width: 16}, 1, t0),
-			curr:        sample(Identity{MetricOID: "1.2.3", SourceEntity: "e", Width: 16}, 2, t1),
+			name: "invalid_width",
+			prev: sample(Identity{
+				MetricOID:    "1.2.3",
+				SourceEntity: "e",
+				ContextID:    DefaultContextID,
+				Width:        16,
+			}, 1, t0),
+			curr: sample(Identity{
+				MetricOID:    "1.2.3",
+				SourceEntity: "e",
+				ContextID:    DefaultContextID,
+				Width:        16,
+			}, 2, t1),
 			continuity:  ContinuityContinuous,
 			wantQuality: QualityInvalidWidth,
 		},
@@ -323,7 +508,7 @@ func TestTableDrivenBoundaries(t *testing.T) {
 	}
 }
 
-func TestAssessSysUpTimeContinuousAndAmbiguous(t *testing.T) {
+func TestAssessSysUpTimeOrdinaryIncreaseContinuous(t *testing.T) {
 	prevWall := time.Unix(1000, 0).UTC()
 	currWall := prevWall.Add(10 * time.Second)
 
@@ -337,20 +522,31 @@ func TestAssessSysUpTimeContinuousAndAmbiguous(t *testing.T) {
 	if cont != ContinuityContinuous {
 		t.Fatalf("continuity=%s reason=%s", cont, reason)
 	}
+}
 
-	// Decrease that looks like a TimeTicks wrap matching wall elapsed.
-	wrapCont, _ := AssessSysUpTime(SysUpTimeInput{
+func TestAssessSysUpTimeDecreaseModularAgreementIsUnknown(t *testing.T) {
+	// Audit counterexample: previous TimeTicks near MaxUint32, current small,
+	// modular progression matches wall-clock elapsed. That pair is consistent
+	// with natural wrap AND with reboot; TimeTicks alone must not authorize CONTINUOUS.
+	prevWall := time.Unix(1000, 0).UTC()
+	currWall := prevWall.Add(10 * time.Second)
+
+	cont, reason := AssessSysUpTime(SysUpTimeInput{
 		PreviousTicks: math.MaxUint32 - 50,
 		CurrentTicks:  949, // modular advance = 1000 ticks = 10s
 		PreviousWall:  prevWall,
 		CurrentWall:   currWall,
 		Tolerance:     100 * time.Millisecond,
 	})
-	if wrapCont != ContinuityContinuous {
-		t.Fatalf("uptime wrap should remain continuous, got %s", wrapCont)
+	if cont != ContinuityUnknown {
+		t.Fatalf("audit counterexample must be UNKNOWN without external corroboration, got %s reason=%s", cont, reason)
 	}
+}
 
-	// Decrease that does not match wall elapsed must stay UNKNOWN (not reboot).
+func TestAssessSysUpTimeDecreaseMismatchRemainsUnknown(t *testing.T) {
+	prevWall := time.Unix(1000, 0).UTC()
+	currWall := prevWall.Add(10 * time.Second)
+
 	unknown, _ := AssessSysUpTime(SysUpTimeInput{
 		PreviousTicks: 500000,
 		CurrentTicks:  10,
@@ -372,5 +568,10 @@ func TestCompatibleIdentity(t *testing.T) {
 	b.SourceEntity = "other"
 	if CompatibleIdentity(a, b) {
 		t.Fatal("source entity change must not match")
+	}
+	b = a
+	b.ContextID = "other-context"
+	if CompatibleIdentity(a, b) {
+		t.Fatal("context change must not match")
 	}
 }
