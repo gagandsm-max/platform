@@ -331,6 +331,122 @@ Semantics are **at-least-once**, not exactly-once. Duplicate Kafka publication o
 
 Conceptual lifecycle: Sensor durable spool → Core acceptance → certified durability barrier for the active envelope (standalone matrix or HA matrix) → deletion-authorizing ACK → Sensor may delete acknowledged segment. Physical HA mechanisms remain unselected; closure belongs to `HA_DURABILITY_DESIGN_GATE` / BUILD-120–124. Tenant-aware identity on the ACK path remains mandatory in Phase 1; MSP/shared-tenant adversarial isolation certification remains Phase 1.5.
 
+### 7.1 Agent-ingress pending-reservation and pre-publication rejection safety
+
+**Authority.** This subsection is the authoritative normative contract for Agent-ingress (and the shared Sensor→Core ingress durability shape where the same reserve/publish/finalize machinery applies). LLD/Dataflow/Build Register bind and reference it; they MUST NOT restate a competing complete contract.
+
+**FROZEN invariant.** A deterministic pre-publication non-terminal rejection MUST NOT leave an unpublished durable pending reservation blocking continuity.
+
+Observed production defect class (documentation prohibition; not an implementation claim of current main closure): reserving before mutable assignment validation, then rejecting with `ERR_AGENT_ASSIGNMENT_UNKNOWN` (or equivalent stale/unknown/revoked/fenced assignment authority), can leave `pending_first_sequence` set while `settled_through_sequence` / accepted continuity remains behind that pending range — permanently wedging the Agent-ingress stream. Mother Reference wording MUST prohibit that outcome.
+
+#### 7.1.1 Disposition classes
+
+For Agent-ingress durable disposition semantics:
+
+| Disposition | Meaning | Continuity effect |
+|---|---|---|
+| `ACCEPTED` | Exact range/checksum was durably accepted after successful publication/finalize (or exact prior ACCEPTED replay) | Accepted watermark may advance; Sensor deletion-authorizing ACK only after verified durable acceptance |
+| `TERMINALLY_REJECTED` | Exact range/checksum was durably settled as a governed terminal rejection | Settled continuity advances; accepted watermark MUST NOT falsely advance; no customer telemetry publication |
+| Non-terminal deterministic rejection | Pre-publication semantic/authority rejection that is not a governed terminal disposition | No ACCEPTED; no TERMINALLY_REJECTED unless explicitly governed; no watermark advance; no publication; no lingering unpublished pending reservation after safe rejection completion |
+| Retryable failure | Infrastructure/publication/contention/crash ambiguity | MAY retain pending/publisher state required for at-least-once retry; MUST NOT authorize Sensor deletion |
+
+Current governed terminal rejection case remains `ERR_AGENT_IDENTITY_CONFLICT` only. Do not generalize every validation error into terminal settlement.
+
+#### 7.1.2 Normative processing order (historical replay preserved)
+
+Logical ordering for authenticated Agent-ingress admission:
+
+1. Authenticate Sensor.
+2. Derive server-authoritative tenant and Sensor identity.
+3. Validate immutable request structure, stream identity, sequence range and checksum/body identity.
+4. Perform exact durable prior-disposition / replay lookup for the request identity.
+5. If an exact previous `ACCEPTED` or `TERMINALLY_REJECTED` disposition exists, return that exact durable result. Current mutable state MUST NOT rewrite historical durable outcomes.
+6. For genuinely new/unsettled work only, perform mutable assignment / entity / binding validation (including current assignment generation, Sensor binding, revocation/fencing and entity resolution).
+7. Proceed to publication and finalize (`ACCEPTED`), governed terminal settlement (`TERMINALLY_REJECTED` where explicitly authorized), or deterministic non-terminal rejection with pending-reservation safety below.
+
+Do **not** move historical disposition lookup behind mutable current-identity validation. Cross-tenant or unauthorized callers MUST fail before they can learn disposition state.
+
+#### 7.1.3 Stale / unknown / revoked / fenced assignment authority
+
+When mutable assignment authority is stale, unknown, revoked or fenced for a genuinely new/unsettled request, Core MUST produce a deterministic pre-publication non-terminal rejection unless a separately governed terminal disposition applies. After that rejection has safely completed:
+
+- no `ACCEPTED` disposition;
+- no `TERMINALLY_REJECTED` disposition merely because assignment authority failed;
+- no accepted-watermark advance;
+- no settled-watermark advance;
+- no Kafka publication;
+- no customer telemetry publication;
+- no lingering publisher lease;
+- no lingering unpublished durable pending reservation.
+
+A corrected/current authorized retry of the **same unsettled sequence** remains eligible. The rejection MUST NOT create a sequence-gap wedge that blocks later valid authority for that sequence.
+
+#### 7.1.4 Pending reservation safety and conditional release
+
+If an implementation reserves before mutable semantic validation, then every deterministic pre-publication rejection that occurs after reservation MUST conditionally release that unpublished pending reservation before returning a definitive non-terminal rejection.
+
+Pending release is allowed **only** when the authoritative database proves the pending reservation still belongs to this exact request and is unpublished/unfinalized. The conditional identity MUST include the applicable fields among:
+
+- tenant;
+- Sensor;
+- stream;
+- first/last sequence;
+- checksum;
+- batch identity;
+- request digest / correlation identity where persisted;
+- reservation / publisher state (unpublished, not publisher-owned for an in-flight publish, not finalized/settled).
+
+A release MUST NOT remove:
+
+- another request's pending reservation;
+- another batch;
+- accepted / finalized state;
+- terminally settled state;
+- a publisher-owned reservation;
+- a reservation where Kafka publication may already have occurred.
+
+Use transactional / row-lock semantics as required by the implementation. Do not prescribe an unnecessary new service. Prefer validating mutable authority before reservation when that preserves historical replay order above; conditional release is the mandatory safety valve when reserve-before-mutable-validation remains in the implementation path.
+
+#### 7.1.5 Retryable infrastructure / publication failure (distinct)
+
+Retryable failures include Kafka unavailable, temporary database failure, process crash, publisher-lease contention (`ERR_BATCH_PUBLICATION_IN_PROGRESS` / HTTP 429) and post-commit / pre-finalize ambiguity. A retryable failure MAY retain pending state where required for at-least-once semantics. Do **not** require pending deletion for all failures. Retryable failure MUST NOT authorize Sensor spool deletion.
+
+#### 7.1.6 Cleanup failure
+
+If a deterministic rejection requires pending release but the system cannot prove safe release succeeded:
+
+- the operation becomes retryable;
+- no false definitive rejection/ACK may authorize Sensor deletion;
+- Sensor retains custody of the unsettled segment;
+- no accepted or settled watermark advance;
+- state remains observable and reconcilable.
+
+#### 7.1.7 Terminal disposition remains distinct — `ERR_AGENT_IDENTITY_CONFLICT`
+
+`ERR_AGENT_IDENTITY_CONFLICT` remains the governed terminal rejection case for Agent-ingress identity conflict. Its semantics remain:
+
+- immutable `TERMINALLY_REJECTED` disposition for the exact request identity;
+- settled continuity advances;
+- accepted watermark does not falsely advance;
+- no customer telemetry publication;
+- durable typed response;
+- Sensor durable quarantine of the terminally rejected segment;
+- active-spool deletion only after exact disposition verification.
+
+Do not treat stale/unknown assignment, ordinary contract validation failures or retryable infrastructure errors as terminal settlement by implication.
+
+#### 7.1.8 Mandatory acceptance tests / fixtures
+
+Applicable Agent / shared-ingress BUILD owners (principally BUILD-062 ingestion gateway with BUILD-024 Sensor Agent-gateway custody; additive to historical BUILD-003 transport certification without rewriting that certified record) MUST provide fixtures proving:
+
+1. **Stale assignment rejection.** Submit sequence `N` under stale/unknown/fenced assignment authority. Prove deterministic non-terminal rejection; accepted watermark unchanged; settled watermark unchanged; no terminal disposition; no Kafka/customer telemetry; `pending_first_sequence IS NULL`; no active publisher lease.
+2. **Corrected authority, same sequence.** Then submit the same `N` under current valid authority. Prove normal reservation; no sequence-gap wedge; normal `ACCEPTED` succeeds.
+3. **Repeated stale request.** Repeated stale rejection does not create a pending wedge.
+4. **Cleanup race.** Conditional cleanup cannot delete publisher-owned, finalized or settled state.
+5. **Cleanup failure.** Cleanup failure remains retryable, preserves Sensor custody and advances neither accepted nor settled watermarks.
+
+These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them.
+
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 
 The existing Incident/Graph/RCA authority remains singular. Domain-specific rules normalize into the same contracts; they do not create separate network/storage/infrastructure RCA truth stores.

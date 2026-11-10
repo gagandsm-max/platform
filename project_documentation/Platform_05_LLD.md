@@ -593,6 +593,8 @@ ClickHouse insertion is asynchronous and **must not** gate the Sensor ACK. CURRE
 
 **Current source truth (`92f0fb37`; path unchanged since historical reconciliation at `36e1513f`), Sensor→Core agent-ingress:** `AgentIngestionService` and `PostgresAgentIngressWatermarkStore` implement pending reservation → bounded publisher lease with owner/epoch → Kafka transaction commit → fenced PostgreSQL finalize → `acceptedThroughIngressSequence` ACK. V012 supplies the Agent-ingress reservation/stream and publisher-lease schema. Both Core ingest paths remain **at-least-once**: PostgreSQL/Kafka are not one XA transaction, and a Kafka-commit/PG-finalize crash can require replay. This source correction does not certify structured Agent evidence, physical ClickHouse deduplication or HA durability. Exact wire and version bounds remain `Platform_17` §10 and `schemas/edge/`.
 
+**Pending-reservation safety binding (`Platform_17` §7.1):** A deterministic pre-publication non-terminal rejection MUST NOT leave an unpublished durable pending reservation blocking continuity. Historical durable disposition/replay lookup remains ahead of mutable assignment/entity validation; stale/unknown/revoked/fenced assignment authority is non-terminal unless explicitly governed as terminal (`ERR_AGENT_IDENTITY_CONFLICT`). If reservation precedes mutable validation, conditional identity-matched unpublished pending release is mandatory; cleanup failure is retryable and preserves Sensor custody. LLD does not restate the full §7.1 contract.
+
 **CURRENT_IMPLEMENTED_V1 Agent→Sensor:** ACK means authz + contract validation + durable Sensor Agent spool accept + durable replay accounting. Agent advances/deletes only after batch-bound application ACK.
 
 Duplicate replay is tolerated using exact range+checksum identity. No component may acknowledge and then silently lose data without a documented replay source.
@@ -3477,7 +3479,7 @@ Both Sensor telemetry and Agent-ingress paths at `92f0fb37`:
 5. PostgreSQL finalize for matching reservation/owner/epoch;
 6. ACK (`accepted_through_sequence` / `acceptedThroughIngressSequence`).
 
-Semantics remain **at-least-once** (not XA). Publisher-lease contention returns HTTP **429** with error code `ERR_BATCH_PUBLICATION_IN_PROGRESS` (`PublisherClaimResult.busy()`); Sensors/Agents MUST retry with bounded backoff and must not treat 429 as durable ACK. Exact wire/version bounds remain `Platform_17` §10 and `schemas/edge/`.
+Semantics remain **at-least-once** (not XA). Publisher-lease contention returns HTTP **429** with error code `ERR_BATCH_PUBLICATION_IN_PROGRESS` (`PublisherClaimResult.busy()`); Sensors/Agents MUST retry with bounded backoff and must not treat 429 as durable ACK. Exact wire/version bounds remain `Platform_17` §10 and `schemas/edge/`. Agent-ingress pending-reservation / pre-publication rejection / terminal-disposition safety is owned by `Platform_17` §7.1 (including conditional unpublished pending release and mandatory stale-assignment wedge fixtures); this subsection does not weaken or replace that contract.
 
 ### 97.7 Linux eBPF privilege boundary
 

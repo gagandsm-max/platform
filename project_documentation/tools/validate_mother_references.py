@@ -1882,6 +1882,149 @@ class MotherReferenceValidator:
             if "NOT DISPATCHABLE" not in row:
                 self.fail("BUILD-045 must retain NOT DISPATCHABLE until gate PASS")
 
+    def validate_agent_ingress_pending_reservation_safety(self) -> None:
+        """Pin Platform_17 §7.1 Agent-ingress pending-reservation invariant.
+
+        A deterministic pre-publication non-terminal rejection must not leave an
+        unpublished durable pending reservation blocking continuity. Bindings in
+        Platform_05/06 and BUILD-062/024 must reference §7.1 without dropping the
+        frozen invariant phrase. Skipped when Platform_17 is absent.
+        """
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if not p17_path.is_file():
+            return
+        p17 = p17_path.read_text(encoding="utf-8")
+
+        # Minimal fixture trees often stub Platform_17 without the PR #81
+        # durability note. Enforce only when that contract surface is present.
+        has_durability = "## 7. Telemetry durability" in p17
+        has_section_71 = "### 7.1 Agent-ingress pending-reservation" in p17
+        if not has_durability and not has_section_71:
+            return
+
+        frozen = (
+            "A deterministic pre-publication non-terminal rejection MUST NOT "
+            "leave an unpublished durable pending reservation blocking continuity."
+        )
+        if frozen not in p17:
+            self.fail(
+                "Platform_17 must freeze Agent-ingress pending-reservation "
+                f"invariant: {frozen!r}"
+            )
+
+        # Prefer the dedicated §7.1 owner; fail if the frozen phrase exists only
+        # as a dangling cross-reference without the section heading.
+        if not has_section_71:
+            self.fail(
+                "Platform_17 must own pending-reservation safety under "
+                "### 7.1 Agent-ingress pending-reservation …"
+            )
+
+        required_p17 = (
+            "### 7.1.1 Disposition classes",
+            "### 7.1.2 Normative processing order",
+            "### 7.1.3 Stale / unknown / revoked / fenced assignment authority",
+            "### 7.1.4 Pending reservation safety and conditional release",
+            "### 7.1.5 Retryable infrastructure / publication failure",
+            "### 7.1.6 Cleanup failure",
+            "### 7.1.7 Terminal disposition remains distinct",
+            "### 7.1.8 Mandatory acceptance tests / fixtures",
+            "TERMINALLY_REJECTED",
+            "ERR_AGENT_IDENTITY_CONFLICT",
+            "ERR_AGENT_ASSIGNMENT_UNKNOWN",
+            "pending_first_sequence IS NULL",
+            "historical disposition lookup",
+            "mutable assignment",
+            "conditional release",
+            "publisher-owned",
+            "Sensor retains custody",
+            "same unsettled sequence",
+        )
+        for needle in required_p17:
+            if needle not in p17:
+                self.fail(
+                    f"Platform_17 §7.1 missing required pending-reservation "
+                    f"contract text: {needle!r}"
+                )
+
+        # Processing-order steps must remain ahead of mutable validation.
+        order_markers = (
+            "Authenticate Sensor",
+            "Derive server-authoritative tenant and Sensor identity",
+            "Validate immutable request structure",
+            "exact durable prior-disposition",
+            "mutable assignment / entity / binding validation",
+        )
+        for needle in order_markers:
+            if needle not in p17:
+                self.fail(
+                    f"Platform_17 §7.1 processing order missing step text: "
+                    f"{needle!r}"
+                )
+
+        p05_path = self.docs_root / "Platform_05_LLD.md"
+        if p05_path.is_file():
+            p05 = p05_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                frozen,
+                "ERR_AGENT_IDENTITY_CONFLICT",
+            ):
+                if needle not in p05:
+                    self.fail(
+                        f"Platform_05 must bind Platform_17 §7.1 "
+                        f"(missing {needle!r})"
+                    )
+
+        p06_path = self.docs_root / "Platform_06_Dataflow.md"
+        if p06_path.is_file():
+            p06 = p06_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                frozen,
+            ):
+                if needle not in p06:
+                    self.fail(
+                        f"Platform_06 must bind Platform_17 §7.1 "
+                        f"(missing {needle!r})"
+                    )
+
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if register_path.is_file():
+            register = register_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                "pending-reservation",
+                "BUILD-062",
+                "BUILD-024",
+            ):
+                if needle not in register:
+                    self.fail(
+                        "Build Register must bind Platform_17 §7.1 "
+                        f"pending-reservation safety (missing {needle!r})"
+                    )
+            # Ownership must stay on 062/024; do not reopen BUILD-003 CERTIFIED.
+            summary_003 = ""
+            for line in register.splitlines():
+                if line.startswith("| BUILD-003 |"):
+                    summary_003 = line
+                    break
+            if summary_003 and "CERTIFIED" not in summary_003:
+                self.fail(
+                    "BUILD-003 historical CERTIFIED status must remain intact "
+                    "when binding §7.1 pending-reservation safety"
+                )
+            if summary_003 and "does **not** reopen this certified record" not in summary_003:
+                self.fail(
+                    "BUILD-003 summary must state §7.1 does not reopen the "
+                    "certified record"
+                )
+
     def validate(self) -> list[str]:
         self.errors = []
         constitutional = self.validate_constitutional_set()
@@ -1909,6 +2052,7 @@ class MotherReferenceValidator:
         self.validate_normalized_rtm_licence_grace(paths)
         self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)
         self.validate_network_flow_source_reality_status()
+        self.validate_agent_ingress_pending_reservation_safety()
         return self.errors
 
 

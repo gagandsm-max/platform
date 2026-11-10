@@ -3678,6 +3678,107 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertIn("Partial", joined)
             self.assertIn("Not production", joined)
 
+    def test_99_agent_ingress_pending_reservation_invariant(self) -> None:
+        """Platform_17 §7.1 pending-reservation safety must remain frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p05 = (docs / "Platform_05_LLD.md").read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        frozen = (
+            "A deterministic pre-publication non-terminal rejection MUST NOT "
+            "leave an unpublished durable pending reservation blocking continuity."
+        )
+        self.assertIn(frozen, p17)
+        self.assertIn("### 7.1 Agent-ingress pending-reservation", p17)
+        for needle in (
+            "TERMINALLY_REJECTED",
+            "ERR_AGENT_IDENTITY_CONFLICT",
+            "ERR_AGENT_ASSIGNMENT_UNKNOWN",
+            "pending_first_sequence IS NULL",
+            "Authenticate Sensor",
+            "exact durable prior-disposition",
+            "mutable assignment / entity / binding validation",
+            "conditional release",
+            "publisher-owned",
+            "Sensor retains custody",
+            "same unsettled sequence",
+            "### 7.1.8 Mandatory acceptance tests / fixtures",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        self.assertIn(frozen, p05)
+        self.assertIn("`Platform_17` §7.1", p05)
+        self.assertIn(frozen, p06)
+        self.assertIn("`Platform_17` §7.1", p06)
+        self.assertIn("`Platform_17` §7.1", register)
+        self.assertIn("pending-reservation", register)
+        self.assertIn("does **not** reopen this certified record", register)
+
+        # Just-corrected Network/Flow status truth must remain intact.
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+        row_045 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-045 |")
+        )
+        self.assertIn("NOT DISPATCHABLE", row_045)
+        self.assertIn("NOT_IMPLEMENTED", row_045)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99b_agent_ingress_pending_reservation_regression_fails(self) -> None:
+        """Removing the frozen pending-reservation invariant must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            # Minimal Platform_17 without the frozen invariant / §7.1 owner.
+            (tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md").write_text(
+                "# Platform 17\n\n## 7. Telemetry durability\n\n"
+                "reserve then publish then finalize.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_05_LLD.md").write_text(
+                "# LLD\n\nNo pending-reservation binding.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_06_Dataflow.md").write_text(
+                "# Dataflow\n\nNo pending-reservation binding.\n",
+                encoding="utf-8",
+            )
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n\n| BUILD-003 | transport | x | y | CERTIFIED | z |\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected pending-reservation failures")
+            self.assertIn("pending-reservation", joined.lower())
+            self.assertIn("MUST NOT", joined)
+
 
 if __name__ == "__main__":
     unittest.main()
