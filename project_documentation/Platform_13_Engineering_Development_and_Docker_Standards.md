@@ -6,19 +6,19 @@
 **Product:** Platform
 **Consolidation rule:** This v3.2.1 document preserves the normative content of the listed v3.1 source documents (via v3.2). Consolidation reduces file count only; it does not relax, remove or downgrade any requirement.
 
-## 1. Purpose
+## Purpose
 
 Defines the mandatory engineering execution model and the Docker Compose development/test environment.
 It governs repository structure, modularity, coding discipline, OSS dependency use, performance rules, logging,
 developer-laptop isolation, reboot-safe local state, Compose profiles, secrets, networks, volumes and the Windows
 Agent certification exception.
 
-## 2. Source-document provenance
+## Source-document provenance
 
 - `Platform_13_Engineering_Execution_Standards.md` (v3.1) — fully incorporated below.
 - `Platform_14_Docker_Development_Environment.md` (v3.1) — fully incorporated below.
 
-## 3. Platform — Engineering Execution Standards
+## Platform — Engineering Execution Standards
 
 > Consolidated from `Platform_13_Engineering_Execution_Standards.md` v3.1. Requirements in this section remain normative.
 
@@ -83,19 +83,19 @@ A change cannot merge until relevant tests pass, architecture/OSS/security impac
 
 "Done" means code + tests + observability + upgrade/migration behavior + documentation + acceptance evidence. A compile-success or passing happy-path test is not completion.
 
-## 4. Platform — Docker Development & Test Environment
+## Platform — Docker Development & Test Environment
 
 > Consolidated from `Platform_14_Docker_Development_Environment.md` v3.1. Requirements in this section remain normative.
 
-## 1. Decision
+## 11. Docker decision
 
 Platform local development and routine automated testing standardize on **Docker Compose**. Podman compatibility is not required for v1. The goal is deterministic isolation from other projects on the developer laptop and reproducibility across engineers/coding agents.
 
-## 2. Host prerequisites
+## 12. Host prerequisites
 
 The host should require only Docker Engine/Moby-compatible runtime with Compose plugin, Git, an editor/IDE and normal OS tooling. Project-specific JDK, Go, Python, Node.js, Kafka, PostgreSQL, ClickHouse and Valkey installations on the host are prohibited as development prerequisites.
 
-## 3. Reboot requirement
+## 13. Reboot requirement
 
 The laptop is frequently shut down/rebooted. Development must therefore be restart-safe:
 
@@ -109,7 +109,7 @@ The laptop is frequently shut down/rebooted. Development must therefore be resta
 
 `dev-reset` must be explicit/destructive and must not silently delete unrelated Docker assets or intentional named volumes.
 
-## 4. Compose profiles
+## 14. Compose profiles
 
 Required profiles: `dev`, `test`, `ha`, `scale`, `security`, `dr`. Optional module-specific profiles may exist.
 
@@ -131,33 +131,102 @@ Negative auth/TLS/protocol cases, dependency scans and security regression suite
 ### `dr`
 Backup/export, site-loss simulation, restore and data-integrity verification.
 
-## 5. Network isolation
+## 15. Network isolation
 
 Use named Docker networks. Expose only ports needed by the developer. Avoid globally common host ports where collisions are likely; allow `.env`/profile port overrides without changing source. Production protocol defaults must not be confused with local host mappings.
 
-## 6. Secrets
+## 16. Secrets
 
 No real customer credentials in Compose files or repository. Use local secret files ignored by Git, test-only generated credentials or secret injection. Example `.env` files contain placeholders only.
 
-## 7. Volumes
+## 17. Volumes
 
 Separate durable service state from generated caches/build artifacts. Named volumes require documented ownership and backup/reset behavior. Test profiles use disposable unique volumes.
 
-## 8. Build caching
+## 18. Build caching
 
 Use multi-stage images and BuildKit cache appropriately, while maintaining reproducible lockfiles and pinned base images/digests for CI certification.
 
-## 9. Laptop resource control
+## 19. Laptop resource control
 
 The default `dev` profile must be usable without starting all scale/HA services. Heavy data services start only when required. Resource limits/reservations should prevent runaway local workloads. Synthetic scale tests may require dedicated CI hardware rather than the laptop.
 
-## 10. Logs
+## 20. Docker logs
 
 Container stdout/stderr must be structured and bounded by Docker logging settings. Stateful service logs must not grow without limit. Development logs remain searchable by component/correlation ID.
 
-## 11. Windows Agent exception
+## 21. Windows Agent exception
 
 Agent business logic and cross-compilation can run in Docker. Final Windows Service/SCM/MSI/reboot testing requires an isolated Windows VM/CI runner. This is required for correctness; Linux containers cannot certify Windows service semantics.
+
+## 22. Host-global shared Docker runtime exclusion
+
+The self-hosted AmrudAi development/CI host shares one Docker daemon across local heavy runners and GitHub Actions jobs labeled `[self-hosted, Linux, X64, platform-ci]`. Concurrent Compose/runtime mutation on that host is prohibited.
+
+### 22.1 Frozen invariant
+
+Any workload that creates, removes, restarts, pauses or mutates shared Docker runtime resources on that host MUST participate in the **same** host-global runtime exclusion mechanism. Project-scoped Compose names, unique CI volume prefixes and foreign-container isolation checks do **not** replace host-global exclusion.
+
+### 22.2 Canonical lock
+
+Canonical lock path (stable):
+
+`/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock`
+
+Acquisition MUST use an OS advisory lock compatible with existing local execution: `flock` / `fcntl.flock`. Do **not** invent a second unrelated lock file, lock service or soft-mutex. Kernel lock ownership is authoritative for exclusion. Human-readable Issue #211 ACQUIRED/RELEASED records may supplement provenance but do **not** replace the OS exclusion primitive. Never unlink, truncate-replace or recreate the lock inode as a release mechanism.
+
+Ownership metadata written while holding the lock SHOULD identify:
+
+- owner type (for example `ci-integration`, `codex-desktop-e2e`, `codex-cli`, `antigravity-runtime`, `cursor-heavy`, `manual-integration`);
+- GitHub run ID / attempt, or local session identity;
+- repository SHA under test;
+- acquisition time (UTC);
+- responsible process PID where applicable.
+
+### 22.3 Mandatory participants
+
+Workloads that MUST acquire the same lock before shared Docker mutation include, where applicable:
+
+- CODEX Desktop heavy E2E;
+- Codex CLI heavy runtime;
+- Antigravity runtime testing;
+- Cursor heavy runtime;
+- manually launched Platform integration/E2E tests that mutate Compose/containers/volumes/networks;
+- GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]` that execute Platform integration/runtime/Compose tests.
+
+Static-contract, source-only and UI/unit jobs do **not** automatically require this lock unless they mutate shared Platform runtime resources. CI job ownership and hold duration are governed by `Platform_15`; acceptance fixtures are owned by `Platform_14`.
+
+### 22.4 Contention behavior
+
+When another owner holds the lock, a contending workload MUST NOT:
+
+- kill the foreign workload;
+- delete foreign containers (including `agent-e2e-*`);
+- stop another tool's Compose stack;
+- clear volumes;
+- reset the environment to seize the host;
+- bypass workstation/foreign-container isolation checks.
+
+It MAY wait within its bounded job/session timeout. If it cannot obtain the lock safely, it MUST fail visibly as **runtime-busy** rather than mutating another workload.
+
+### 22.5 Crash / cancellation
+
+Lock ownership MUST be process-bound so process or job death releases the kernel lock automatically. Cleanup that runs after cancellation MUST clean only positively owned resources, terminate the caller's lock-holder process when this workload was the owner, and independently verify the lock is free afterwards. Foreign resources remain untouched.
+
+### 22.6 Source maturity (CI workflow) — FROZEN contract / PENDING implementation
+
+```text
+SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION
+```
+
+- The host-global runtime-exclusion **contract** in this section (and the Platform_15 §3.8 / Platform_14 acceptance bindings) is **FROZEN**.
+- Current workflow source path: `.github/workflows/platform-ci.yml`.
+- Current workflow state: **`PENDING_IMPLEMENTATION`**.
+- Current canonical `main` does **not** yet acquire `/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock` in the self-hosted Integration job.
+- Do **not** describe the lock as currently active in GitHub Actions.
+- The eight Platform_14 acceptance fixtures are **SPECIFIED / NOT YET EXECUTED** against the workflow.
+- No certification claim exists from documentation of this contract alone.
+- The requirement is **not** weakened by pending workflow implementation.
 
 ---
 
@@ -172,3 +241,44 @@ Phase-2 enterprise breadth MUST NOT be implemented as customer-specific Core for
 Future Phase-2.5 implementation SHALL reuse existing identity/RBAC/tenancy/audit/graph/evidence contracts, avoid customer-specific forks, isolate high-volume trace/profile/packet workloads from control-plane correctness, add dependencies only through explicit admission, include deterministic fixtures for trace/RUM/profile/packet parsing, include privacy/redaction/security tests and preserve offline/air-gap build/test paths where the certified deployment profile requires them.
 
 Generated instrumentation/decoder code or third-party agents may not bypass repository quality/security gates.
+
+## P0 documentation and execution acceptance — 2026-11-06
+
+Founder priority for the current handoff is complete Mother Reference correction before product implementation dispatch. The subsequent product order remains Linux → Network+Flow → Infrastructure → Syslog, subject to real shared runtime, data, authority and security dependencies. This instruction supersedes earlier immediate dispatch wording; it does not rewrite historical certifications or release dates. Mother Reference set v3.3.0, existing BUILD IDs and the existing canonical owners remain in force.
+
+The governing acceptance crosswalk is Platform_00 §10.1, Platform_08 §§4.1–4.3 and Platform_12 §29, together with AGENTS. The implementation-plan requirements below operationalize that same gate; they do not create a second acceptance authority. Formal independent audit remains required; collaborative writer/subagent cross-review is supporting review, not its substitute.
+
+### One all-six-capability gate
+
+`DOC_P0_BLOCKED` is the aggregate documentation state until **all six** capabilities below pass independent semantic review of the exact candidate source. Partial coverage, a template, a requirement count, a structural validator PASS, or a successful CI run cannot clear it. Each review result records reviewer, candidate SHA/tree, exact owner sections, unresolved defects and disposition. Documentation acceptance is separate from implementation, runtime testing, production certification and deployment.
+
+| Gate | Required reviewable result | Existing owning references |
+|---|---|---|
+| TRD | Concrete technical requirements with inputs/outputs, authority, states/errors, budgets or explicitly blocked budget decisions, compatibility and finite acceptance. | Platform_02/03/04/05/10/11/17/18 and specialized owners; global index Platform_08. |
+| JOURNEYS | Complete normal, permission-denied, invalid/stale input, failure/retry/cancel, recovery and audit flows from user/system entry through persistence and visible outcome. | Platform_06, applicable Platform_02/09/17/20/21/22 sections. |
+| UI_UX | Implementation-level screen/workspace/component behavior, source/query/mutation, role/resource scope, form validation and loading/empty/no-data/error/denied/recovery states, plus accessibility/acceptance. | Platform_09/17 and Platform_14 UI quality gates. |
+| DATA_CONTRACTS | Exact applicable DB/API/event/schema ownership, tenant identity, validation, error/idempotency/replay semantics, migration/compatibility/rollback and security/failure tests. | Platform_05/17/18 plus current source and migration manifest. |
+| BUILD_PLAN | Existing BUILD IDs have phase/profile applicability, current evidence, design/implementation/certification predecessors, source allocation, sequencing and integration gates. | Root `Platform_Master_Build_Sequence_Register_v1.0.md`; Platform_12 decision provenance. |
+| MODULE_PLANS | Filled executable plan records for every in-scope module/slice, including source boundaries, contract, dependencies, acceptance, rollout/rollback and evidence; unclosed records remain explicit blockers. | Build Register execution-plan ledger and the owning design/contract sections. |
+
+### Executable module plan record
+
+Before a writer is dispatched, its existing BUILD/slice/profile record SHALL identify:
+
+1. Stable REQ/PRD and exact owning design, normal/failure flow, UI and DB/API/event sections; phase and OS/domain profile; accepted decision provenance.
+2. Actual source paths, bounded target-file/module allocation and exclusions; current source presence, default activation, runtime evidence and certified scope as separate fields.
+3. Concrete inputs, outputs, schemas/endpoints/events and authoritative state transitions; tenant/entity/credential/fencing authority; validation/error behavior; idempotency, replay/dedupe, retry/cancellation, time and resource bounds as applicable.
+4. Separate **design**, **implementation** and **certification** predecessors. A Linux slice may depend on an accepted shared Windows-compatible contract without requiring the Windows runtime to be finished; its certificate must then remain Linux-scoped. Whole cross-platform BUILD acceptance retains all required profiles.
+5. Finite positive, negative, failure, security/tenant, migration/upgrade, capacity/non-interference and UI acceptance definitions, reproducible fixture identities and existing test entry points. No numeric performance target or vendor behavior may be invented to fill a table.
+6. Configuration, monitoring/logs/support evidence, installation, rollout, rollback and runbook impact; destructive actions and recovery verification explicitly identified. Commands must exist and be applicable to the declared profile.
+7. Current exact source/tree/CI/artifact evidence and unresolved gates; independent reviewer scope; safe integration order and downstream impact. Source or test presence is not a passing test result.
+
+A family-level allocation or the thirty logical intelligence responsibilities in Platform_22 does not by itself meet this record. A design-blocked module must name the missing decision and its owner; it is not eligible for speculative implementation. No new BUILD ID or duplicate master is required to record the gap.
+
+### Structural checks and semantic proof
+
+`project_documentation/tools/validate_mother_references.py` explicitly provides structural protection. Its owner checks establish canonical filename, nonempty locator and formal-ID occurrence in the owner, not semantic completeness of that section. Keep the existing validator and existing documentation tests; this correction adds no validator, runner or CI code. Review must also trace requirement → design/journey/UI/contract → BUILD/source → acceptance definition → evidence status and test dependency counterexamples (standalone before HA; Linux before Windows; AI disabled; missing/partial telemetry; failed downstream dependency). The six-gate review in Platform_14 records the result.
+
+### Evidence and workspace discipline
+
+The 6 November operator terminal transcript establishes reported executable paths and Git states only. A clean status is not source review, test evidence, package signing or runtime health. Preserve untracked files, worktrees and stashes. Do not use environment resets, dependency installs or service operations to complete a documentation task. Current `Makefile` can create `.env` while parsing, and `scripts/generate-dev-certs.sh` rewrites development CA/key files; neither `make help` nor `make certs` is a preservation-safe read-only diagnostic. Use source inspection for this correction.

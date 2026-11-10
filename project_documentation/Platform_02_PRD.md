@@ -7,7 +7,7 @@
 **Depends on:** `Platform_01_BRD.md`
 **Companions:** `Platform_03_Architecture.md`, `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_06_Dataflow.md`, `Platform_08_Requirements_Traceability.md`, specialized masters `Platform_19`..`Platform_23`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-29 — Issue #268 Phase 1.5 Serverless/FaaS monitoring Mother Reference reconciliation (SPECIFIED only; retains v3.3.0). Prior Issue #200/#202/#206 Tranche A retained
+**Last reconciliation:** 2026-11-07 — Issue #300 P0-DOC-03 Phase-1 vs Phase-1.5 Integration Fabric/CMDB/ITSM baseline-vs-expansion wording (SPECIFIED only; retains v3.3.0). Prior Issue #268 / #269 / #200/#202/#206 Tranche A retained
 
 ---
 
@@ -212,9 +212,13 @@ Exact contractual/external RPO, RTO and automated/manual DR activation remain TB
 ### Native production packages and service continuity
 ### PRD-DEV-001 — Container-isolated engineering environment
 
+**Normative product requirement (`PRD-DEV-001`):** All routine local development and automated testing SHALL run in Docker Compose; project-specific host runtimes are prohibited.
+
 All normal development and automated test stacks shall run under Docker Compose. The repository shall provide a one-command startup path, health-aware startup, deterministic teardown and documented reset/recovery. Project services and databases shall not depend on host-native project runtimes.
 
 ### PRD-DEV-002 — Reboot-safe developer state
+
+**Normative product requirement (`PRD-DEV-002`):** Local developer state SHALL survive normal laptop reboot via named volumes, restart policy and health-aware recovery.
 
 The development environment shall distinguish durable named volumes from disposable test volumes. Normal laptop shutdown/reboot must not corrupt Platform state. After Docker daemon restart, services configured for development auto-resume must restart according to Compose policy and re-establish health without manual database repair.
 
@@ -250,18 +254,6 @@ The Administration and Platform Health workspaces shall expose service health, r
 
 ## 6. Sensor runtime, roles and local continuity
 
-**Feature contract (summary):**
-- **Purpose/outcome:** One Universal Sensor runtime with role-based collection near the estate
-- **Subfeatures:** NETWORK/INFRASTRUCTURE/FLOW/LOG; conditional SYNTHETIC/CLOUD_API; COMBINED lab; local spool; 80% protection
-- **Primary persona:** Platform / Tenant Admin; NOC
-- **Dependencies:** Core desired-state, credentials, capacity, mTLS
-- **Preconditions:** Sensor enrolled and healthy
-- **Primary workflow:** deploy Sensor → assign role → receive work → spool → upload
-- **Product behavior:** headless; continues during Core/WAN loss while capacity remains
-- **Failure/degraded behavior:** backpressure/reclaim under 80%; role isolation so Flow does not starve SNMP
-- **Acceptance outcome:** Sensor continues through Core failover; durable replay idempotent
-- **Maturity boundary:** SPECIFIED; production entrypoint may not yet wire full governed scheduler — Architecture states target vs gap
-
 
 ### Canonical Sensor role taxonomy (normative product)
 
@@ -275,6 +267,12 @@ The Administration and Platform Health workspaces shall expose service health, r
 
 ### 6.1 Universal runtime and roles
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-001`**: Platform SHALL enforce: Universal Sensor Runtime with Network, Infrastructure, Combined, Streaming/Event, Synthetic and Cloud/API roles.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 One Universal Sensor Runtime shall support selectable deployment roles. Product-facing production direction:
 
 **Standard production roles**
@@ -338,6 +336,15 @@ High-volume NetFlow/IPFIX/sFlow/J-Flow and high-rate log/event ingestion shall m
 
 ### 6.5 Sensor local continuity
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-006`**: Platform SHALL enforce: Distributed leases/fencing prevent duplicate polling.
+- **`REQ-S-007`**: Platform SHALL enforce: Local durable spool/store-and-forward.
+- **`REQ-S-008`**: Platform SHALL enforce: Sensor 80% disk protection and bounded junk/log cleanup.
+- **`REQ-S-009`**: Platform SHALL enforce: Sensor self-observability: CPU/RAM/disk/queue/poll latency/backlog/failures.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Sensors shall:
 
 - be headless for normal administration;
@@ -359,6 +366,12 @@ Sensors shall:
 ## 7. Sensor placement, pools and capacity
 ### 7.1 Placement modes
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-004`**: Platform SHALL enforce: Customer modes: Auto, Auto-with-approval, Manual, Sensor Pool.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 During provisioning customers shall be able to select:
 
 - **Automatic — Recommended**;
@@ -368,6 +381,13 @@ During provisioning customers shall be able to select:
 
 ### 7.2 Placement factors
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-002`**: Platform SHALL enforce: Sensor locality-aware placement close to devices.
+- **`REQ-S-003`**: Platform SHALL enforce: Capacity-aware placement; never overload Sensor for lower RTT.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The Sensor Placement Engine shall evaluate:
 
 - actual reachability;
@@ -390,6 +410,12 @@ Platform may recommend Sensor placement improvements from observed locality, cap
 
 ### 7.3 Sensor pools and redundancy
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-005`**: Platform SHALL enforce: Sensor pools support N+1/N+2/N+K/1:1/active-active capacity models.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Sensor Pools shall support:
 
 - no redundancy;
@@ -407,6 +433,15 @@ Platform shall monitor workload and may recommend or automatically rebalance wor
 
 ### 7.5 Capacity representation
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-S-010`**: Platform SHALL enforce: Initial planning baseline 4 vCPU/16GB/150GB ~800 normal network devices.
+- **`REQ-S-011`**: Platform SHALL enforce: Benchmark 8 vCPU/32GB high-density target ~2,000–2,500 normal network devices (NOT CERTIFIED).
+- **`REQ-S-012`**: Platform SHALL enforce: Agentless infrastructure target ~800 endpoints per 4C/16G Sensor.
+- **`REQ-S-013`**: Platform SHALL enforce: Agent-push target ~2,200 endpoints per 4C/16G ingestion capacity unit.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 UI shall show both:
 
 - approximate entity/device capacity;
@@ -420,6 +455,16 @@ Device count alone shall not be the sole enforcement model.
 **Maturity note:** logical Region/Site/Sensor Pool product model is required; physical persistence of pools/regions may be incomplete on current main (Architecture/#92). Do not treat UI/logical design as certified physical schema.
 
 ## 8. Agent requirements
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-002`**: Platform SHALL enforce: Windows/Linux Agents.
+- **`REQ-S-014`**: Platform SHALL enforce: Windows/Linux Agent supports host metrics and edge network tests.
+- **`REQ-S-015`**: Platform SHALL enforce: Branch→DC and DC→branch test support for asymmetric-path evidence.
+- **`REQ-S-016`**: Platform SHALL enforce: Agent enrolls with Core and Core assigns correct available Sensor.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 - Separate Windows and Linux Agent builds.
 - Initial Agent enrollment takes a stable Core endpoint.
 - Core authenticates/enrolls Agent and shall select an appropriate eligible Sensor during enrollment for a provisional authenticated Agent→Sensor control/transport association used for certificate/identity authority, onboarding/bootstrap validation, bounded health/bootstrap evidence and candidate reconciliation.
@@ -590,6 +635,15 @@ Canonical entity identity shall use tenant-aware combinations of stable signals 
 
 
 ## 10. Credential and security protocol requirements
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-GOV-004`**: Platform SHALL enforce: Credentials USE vs VIEW separated.
+- **`REQ-NET-005`**: Platform SHALL enforce: NETCONF/RESTCONF/gNMI/gRPC/streaming.
+- **`REQ-NET-006`**: Platform SHALL enforce: SSH/CLI; Telnet legacy disabled by default and audited.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Credential Profiles shall be centrally managed, encrypted and scoped by tenant/site/group/Sensor policy.
 
 Network/device provisioning must support the following protocol/security categories as certified by device/library compatibility:
@@ -617,7 +671,23 @@ Credential permissions shall distinguish **USE** from **REVEAL**.
 
 
 ## 11. Network monitoring requirements
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-011`**: Platform SHALL enforce: DNS/DHCP/NTP operational monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 11.1 SNMP
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-001`**: Platform SHALL enforce: SNMP v1/v2c/v3 with customer-configurable auth/privacy/security protocols.
+- **`REQ-NET-003`**: Platform SHALL enforce: SNMP traps/informs and syslog; durable log routing/forwarding health, redaction and SIEM-outage isolation from base monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
 
 Platform shall support:
 
@@ -633,43 +703,61 @@ Platform shall support:
 
 #### 11.1.1 Enterprise SNMP correctness and usability requirements
 
-| PRD ID | Requirement |
-|---|---|
-| `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
-| `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`; it is not yet benchmarked/certified/deployed. Derived delta/rate/reset/wrap/discontinuity remains SPECIFIED but NOT IMPLEMENTED/CERTIFIED — remaining P0. |
-| `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
-| `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
-| `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
-| `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
-| `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
-| `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
-| `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
-| `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
-| `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
-| `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
-| `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
-| `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
-| `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
-| `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
-| `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
-| `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
-| `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
-| `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
-| `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
-| `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
-| `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
+| Requirement ID | PRD ID | Requirement |
+|---|---|---|
+| `REQ-SNMP-001` | `PRD-SNMP-001` | SNMP collection shall normalize into typed canonical evidence classes including numeric metrics, exact counters, state metrics, inventory facts, topology facts/events and collection-quality outcomes rather than forcing all varbinds into one numeric shape. |
+| `REQ-SNMP-002` | `PRD-SNMP-002` | Raw Counter32/Counter64 values shall preserve exact integer semantics. Counter64 shall not be rejected or rounded merely because it exceeds IEEE-754 exact-integer range; derived rates may use floating-point after exact delta calculation. **Implementation truth (current main after PR #84 + PR #304):** the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path is IMPLEMENTED+TESTED using a dedicated exact canonical representation and ClickHouse `UInt64`, with coverage through `2^64-1`. The BUILD-042 Counter32/Counter64 delta/rate/reset/wrap/discontinuity leaf engine is IMPLEMENTED (`sensor/internal/protocol/snmp/counter/`). Bounded status: `PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending` — not Network Sensor-integrated, not BUILD-042/048 certified, not deployed. |
+| `REQ-SNMP-003` | `PRD-SNMP-003` | Counter processing shall handle wrap, reboot/reset, discontinuity and actual elapsed sample time. `sysUpTime` and `ifCounterDiscontinuityTime` or equivalent evidence shall be used where available; missed polls shall not fabricate nominal-interval rates. |
+| `REQ-SNMP-004` | `PRD-SNMP-004` | High-capacity interface monitoring shall prefer applicable 64-bit interface counters and shall expose counter discontinuity/quality when rate derivation is invalid or uncertain. |
+| `REQ-SNMP-005` | `PRD-SNMP-005` | Canonical interface identity shall not depend on `ifIndex` alone. Platform shall reconcile interface identity from stable evidence such as ifName/ifDescr/ifAlias/MAC/physical slot-port/entity data and retain history when ifIndex changes. |
+| `REQ-SNMP-006` | `PRD-SNMP-006` | Production scheduled SNMP polling shall execute through the governed Sensor runtime/scheduler, assignment fencing, bounded worker pools and durable observation path; protocol-library unit success alone is not production readiness. |
+| `REQ-SNMP-007` | `PRD-SNMP-007` | Monitoring jobs shall reference governed Credential Profiles. Reusable communities/auth/privacy secrets shall not be exposed to UI, ordinary logs, telemetry, audit payloads or durable generic job history. |
+| `REQ-SNMP-008` | `PRD-SNMP-008` | SNMPv3 AuthPriv with modern SHA-2/AES combinations is the preferred secure posture where device compatibility permits. v1/v2c, MD5, SHA-1 and DES remain explicit legacy compatibility choices with visible warning/audit. |
+| `REQ-SNMP-009` | `PRD-SNMP-009` | A capability-aware Poll Planner shall choose GET/GETNEXT/GETBULK/WALK grouping, bulk repetitions, table/scalar strategy, timeout/retry and safe fallback according to Device Pack compatibility, response size, RTT/error evidence and Sensor budget. |
+| `REQ-SNMP-010` | `PRD-SNMP-010` | Scheduled polling shall use deterministic spreading across the configured interval and bounded per-device/per-worker concurrency so fleet polling, retries and adaptive collection do not create synchronized minute-boundary storms, uncontrolled self-overlap, or starvation of other certified workloads. Restart or Sensor reassignment must not intentionally reshape the entire estate into a burst. |
+| `REQ-SNMP-011` | `PRD-SNMP-011` | Adaptive SNMP polling shall have explicit minimum interval, duration, cooldown, target-count and Sensor-capacity limits; a broad incident shall not automatically accelerate an unbounded population. |
+| `REQ-SNMP-012` | `PRD-SNMP-012` | SNMP trap/inform ingestion shall preserve source/security/version/OID/time/provenance, decode through MIB/Capability Pack semantics, apply storm/dedup controls, and feed evidence qualification rather than automatically creating operational alerts. |
+| `REQ-SNMP-013` | `PRD-SNMP-013` | Trap delivery and Inform acknowledgement semantics shall remain explicit. SNMP Trap is unacknowledged. Successful Inform ACK requires durable local receiver acceptance/accounting after bounded protocol parse, configured security validation and sufficient source/tenant attribution; MIB/Pack enrichment, Core/Kafka/ClickHouse completion and alert/incident creation are not ACK prerequisites. v1/v2c trap source identity is weak evidence; SNMPv3 notification security shall be validated where configured. |
+| `REQ-SNMP-014` | `PRD-SNMP-014` | MIB Studio shall support upload, dependency/import resolution, validation/compile, OID tree, textual conventions, enums, tables/indexes, notifications, test/walk, provenance/licensing and generation/update of Capability/Device Pack mappings. Numeric OID monitoring shall remain possible without a MIB when an authorized semantic mapping is supplied. |
+| `REQ-SNMP-015` | `PRD-SNMP-015` | Capability/Device Packs shall declaratively define SNMP identity, poll definitions, table/index semantics, enum/bit mappings, counter/rate semantics, units, inventory/topology mappings, trap rules, diagnostics and compatibility hints. No pack may contain secrets. |
+| `REQ-SNMP-016` | `PRD-SNMP-016` | Discovery/preflight shall use the selected Sensor and governed Credential Profile to retrieve identity evidence such as sysDescr/sysObjectID/sysName and SNMPv3 engine identity where available; no default community fallback is permitted. |
+| `REQ-SNMP-017` | `PRD-SNMP-017` | The product shall provide an in-context SNMP Test workflow showing Sensor/vantage, target/port/version/profile identity, connectivity/authentication/authorization result, response latency/retries, identity OIDs, GET/Walk/Bulk-Walk results, raw OID, MIB-resolved name, decoded value, stable error code and remediation without revealing secrets. |
+| `REQ-SNMP-018` | `PRD-SNMP-018` | Per-device/profile SNMP data quality shall expose poll success, duration, attempted/successful OIDs, retries, timeout/auth/authz/tooBig/noSuch counts, freshness/staleness, expected-vs-received samples and last success. Collection failure shall map to monitoring degradation/unknown semantics rather than device-down by itself. |
+| `REQ-SNMP-019` | `PRD-SNMP-019` | Routine monitoring shall remain read-only. SNMP SET, if supported, shall execute only through privileged NCM/remediation controls with capability declaration, RBAC, reason/ticket/approval as applicable, pre-read, post-read verification, blast-radius limits and audit. |
+| `REQ-SNMP-020` | `PRD-SNMP-020` | SNMP storage/API/event contracts shall support exact counters plus typed state/inventory/topology/quality records using the existing PostgreSQL/ClickHouse/Kafka architecture; no new database is selected by this requirement. A logical exact-counter family is required; a dedicated Kafka topic is an implementation option when an equivalently typed contract is proven. |
+| `REQ-SNMP-021` | `PRD-SNMP-021` | Production certification shall include real or protocol-faithful devices/fixtures covering v1/v2c/v3 security modes, engineID/time-window recovery, malformed/partial responses, TooBig fallback, counter wrap/reset/discontinuity, interface identity changes, trap/inform storms, Inform durable-acceptance/retransmission/duplicate cases and Sensor/Core failure/replay. |
+| `REQ-SNMP-022` | `PRD-SNMP-022` | SNMP protocol, credential, parser and source failures shall remain distinguishable from target/service operational failure and shall participate in the Alert Evidence/telemetry-quality contracts of `Platform_22`. |
+| `REQ-SNMP-023` | `PRD-SNMP-023` | The normal scheduled SNMP operational-metric default is **5 minutes**. This default does not require polling every available OID every five minutes; Cap Pack/monitor definitions may schedule static inventory/topology/lifecycle metadata more slowly when freshness requirements remain satisfied. Availability/liveness remains a separate plane (commonly ~60 seconds by policy). Event/streaming telemetry remains event/stream driven. Policy inheritance follows the existing Platform Default → Tenant → Business Unit/Region → Site → Device Group → Device → Monitor/Metric hierarchy; intervals are stored as durations, not a rigid enum. |
 
 
 ### 11.2 Availability and path
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-002`**: Platform SHALL enforce: ICMP/traceroute/TCP/DNS/TLS/HTTP probes.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 - ICMP reachability/RTT/loss.
 - Configurable device-down validation.
 - Traceroute/path history and changes.
-- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and avoid ECMP route fluttering where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
+- Active path hop-by-hop latency/loss, path fingerprinting, and divergence detection (`REQ-NET-016`). Flow-stable active-path techniques (such as Paris-traceroute-style techniques evaluated by BUILD-040) may be used to preserve flow identifiers across intermediate hops and reduce false path-change artifacts from ECMP where supported. Intermediate unresponsive hops or hidden hops must not assert destination DOWN.
 - TCP/DNS/TLS/HTTP validation where relevant.
 - Multi-vantage validation from secondary Sensors where policy allows, preserving independent source results and contradictory evidence.
 
 ### 11.3 Layer and protocol depth
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-008`**: Platform SHALL enforce: BGP/OSPF/IS-IS/BFD/MPLS/VXLAN-EVPN/VLAN-STP/VRF/HSRP-VRRP/LACP/QoS-CBQoS/multicast/SD-WAN monitoring.
+- **`REQ-NET-009`**: Platform SHALL enforce: WLAN deep client/radio/controller experience.
+- **`REQ-NET-010`**: Platform SHALL enforce: VPN/IPsec/IP SLA/CUCM/VoIP operational monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
 
 Device Packs/telemetry shall support deep monitoring for:
 
@@ -695,6 +783,14 @@ Device Packs/telemetry shall support deep monitoring for:
 
 ### 11.4 Flow analytics
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-004`**: Platform SHALL enforce: NetFlow v5/v9, IPFIX, sFlow, J-Flow/vendor flow with exporter/tenant authority, template/sampling/sequence evidence, enrichment provenance, privacy/RBAC and Flow≠traffic/down semantics.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Platform shall ingest NetFlow v5/v9, IPFIX, sFlow and compatible vendor/J-Flow formats under configured exporter/source/tenant authority. Packet source IP alone is not tenant authority.
 
 Required engineering contracts include: v9/IPFIX template lifecycle/cache/expiry/withdrawal; sampling factor/provenance; sequence/gap/reset evidence; UDP pre-acceptance loss visibility; observation point; ingress/egress/direction evidence; duplicate/exporter-HA semantics; raw evidence preserved before enrichment; temporal entity/IP mapping; DNS/DHCP/IPAM evidence; authenticated user/session evidence where available; ASN/Geo/cloud/SaaS enrichment with confidence/time/provenance.
@@ -707,7 +803,23 @@ Enrichment may include entity/device/interface, site/region, IPAM/subnet, VLAN/V
 
 
 ## 12. Infrastructure, hardware, virtualization and storage
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-006`**: Platform SHALL enforce: UPS/PDU/environment/power/cooling/rack sensors.
+- **`REQ-INF-011`**: Platform SHALL enforce: Identity operational monitoring: AD/LDAP/Kerberos/RADIUS/TACACS+/M365/Exchange.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 12.1 Server/OS
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-001`**: Platform SHALL enforce: SSH/WMI/WinRM agentless infrastructure monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
 
 Support agentless and optional Agent-based monitoring for:
 
@@ -722,6 +834,14 @@ Support agentless and optional Agent-based monitoring for:
 - selected logs/events.
 
 ### 12.2 Hardware/OOB
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-003`**: Platform SHALL enforce: iDRAC/iLO/CIMC/Redfish/IPMI hardware lifecycle.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
 
 Redfish/vendor pack support shall cover:
 
@@ -741,6 +861,14 @@ Redfish/vendor pack support shall cover:
 Support VMware/vCenter/ESXi, Hyper-V, Proxmox and Nutanix with normalized entity relationships such as cluster → host → VM → datastore/network.
 
 ### 12.4 Storage/SAN
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-005`**: Platform SHALL enforce: Storage and SAN/FC monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
 
 Support storage systems and SAN fabric monitoring for capacity, IOPS, throughput, latency, pools/volumes/controllers/disks, replication, FC switches/ports/fabrics/zones/WWNs, errors and congestion where vendor interfaces permit.
 
@@ -777,7 +905,6 @@ On supported Linux distributions and kernels under the certified Ubuntu 24.x / R
 - Base Agent host metrics collection shall continue unaffected if eBPF is `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, or `RESOURCE_GUARDED`.
 
 
-
 ## 13. Database monitoring requirements
 Platform shall provide database packs/connectors for major databases including PostgreSQL, MySQL/MariaDB, Microsoft SQL Server, Oracle, SAP HANA, MongoDB, ClickHouse and Elasticsearch/OpenSearch where interfaces/licensing permit.
 
@@ -800,6 +927,8 @@ Database credentials shall be scoped and protected. Arbitrary dangerous SQL shal
 
 
 ## 14. Cloud, Kubernetes and OpenTelemetry
+
+
 ### 14.1 Cloud
 
 Cloud provider roots include AWS, Azure, GCP and OCI. Vendor identifiers never override Platform tenant/entity authority. Required concepts: cloud hierarchy discovery; ephemeral-child lifecycle/reconciliation; provider API quota/rate-budget governance; throttling; freshness/staleness; provider service-health; audit/change evidence; cloud-network evidence; quota/autoscaling evidence; canonical normalized entity/state; connector self-health. New cloud SDK dependencies remain Platform_07 governed and are not auto-approved.
@@ -842,6 +971,12 @@ Maturity: **SPECIFIED / NOT IMPLEMENTED / NOT CERTIFIED**. Build ownership reuse
 
 ### 14.2 Kubernetes
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-009`**: Platform SHALL enforce: Kubernetes/Docker/container monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Hierarchy shall include:
 
 Cluster → Node → Namespace → Workload → Pod → Container → Service → Ingress.
@@ -858,6 +993,14 @@ OpenTelemetry integration adheres to a two-phase contract boundary (`REQ-INF-010
 
 
 ## 15. Synthetics and service assurance
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-INF-012`**: Platform SHALL enforce: Synthetic monitoring ICMP/TCP/DNS/HTTP/HTTPS/API/TLS.
+- **`REQ-NET-012`**: Platform SHALL enforce: TLS/certificate lifecycle monitoring.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Synthetic Monitor Studio shall support structured, safe tests for:
 
 - ICMP;
@@ -874,106 +1017,30 @@ HTTP/API tests shall support method, headers, authentication, body, expected sta
 
 
 ## 16. Extensibility studios (MIB, API, Device Pack)
-MIB Studio remains part of the single Capability Pack extension architecture (not a second pack registry/SDK). Required contracts include import, revision/version, provenance/licensing, dependencies, compile/test, OID/table/notification mapping and firmware/model compatibility.
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-Required capabilities:
+- **`REQ-EXT-001`**: Platform SHALL enforce: MIB Studio upload/import/revision/provenance/licensing/dependency/compile/test/OID-table-notification mapping/firmware compatibility and device pack generation.
+- **`REQ-EXT-002`**: Platform SHALL enforce: API Studio monitoring-source collection (schema/auth/pagination/mapping/rate/cadence/freshness/schema-drift/provenance) distinct from integration delivery; inbound/outbound/callback webhooks with auth/replay/SSRF/egress/.
+- **`REQ-EXT-003`**: Platform SHALL enforce: Device Pack canonical package across SNMP/REST/gNMI/CLI/NCM/topology/alerts/RCA/dashboards.
+- **`REQ-EXT-004`**: Platform SHALL enforce: Device Packs signed/versioned/exportable/importable/rollback capable.
+- **`REQ-EXT-005`**: Platform SHALL enforce: Device Pack certification levels: Official/Partner/Customer/Experimental.
+- **`REQ-EXT-006`**: Platform SHALL enforce: Device Pack test simulator using sample SNMP walk/API/CLI/trap/syslog.
+- **`REQ-EXT-007`**: Platform SHALL enforce: Vendor MIB/YANG/API/icon/template provenance and redistribution rights tracked.
 
-- MIB library;
-- upload one/multiple MIBs;
-- dependency/import resolution;
-- compile/validation;
-- OID tree/explorer;
-- scalar/table/counter/gauge/enum/trap identification;
-- connect/test against sample device;
-- walk/test;
-- AI-assisted semantic suggestions clearly labeled `AI Suggested`;
-- user confirmation;
-- normalized metric mapping;
-- alert/visualization suggestions;
-- trap registration/decoding;
-- creation/update of Device Pack;
-- versioning/export/import/signing/provenance.
-
-MIB provenance shall classify Platform Supplied, Customer Supplied, Partner Supplied and preserve source/licence/redistribution metadata. Customer-uploaded vendor MIBs shall not automatically be redistributed to other customers.
-
----
-
-
-API Studio collection runtime is **monitoring source collection**, distinct from external integration delivery queues. Required contracts include REST/API schema, authentication reference, pagination, extraction/mapping, rate-limit behavior, collection cadence/freshness, schema-drift handling and source provenance. Do not treat an outbound ITSM/webhook connector queue as the API monitoring scheduler.
-
-Webhook contracts distinguish inbound webhook, outbound webhook and callback, and require as applicable: authentication/signature verification, replay protection, tenant/source binding, SSRF/egress restrictions, allowlists, secret handling, schema validation, rate limits, idempotency and auditing. No arbitrary scripts. No second Pack registry/SDK.
-
-
-Wizard stages:
-
-1. Connection.
-2. Authentication.
-3. Endpoint/OpenAPI import.
-4. Test request.
-5. Schema inspection.
-6. Entity mapping.
-7. Metric mapping.
-8. Collections/pagination/chained requests.
-9. Alerts/monitor definitions.
-10. Dashboard suggestions.
-11. Publish/version.
-
-Support:
-
-- OpenAPI/Swagger import as highest automation path;
-- GET/POST/PUT/PATCH where safe/required;
-- Basic/Bearer/API key/OAuth2/custom header/mTLS;
-- JSON and XML;
-- JSONPath/JMESPath-like mappings through approved libraries;
-- nested arrays/objects;
-- pagination/cursors;
-- retries/rate limits/timeouts;
-- token refresh;
-- timestamp/unit/null transformations;
-- derived metrics;
-- chained endpoints.
-
-AI may suggest schema interpretation but an administrator confirms mappings before production publication.
-
----
-
-
-A Device Pack may contain:
-
-- identification rules;
-- discovery rules;
-- SNMP/MIB/OID/trap mappings;
-- REST/API mappings;
-- gNMI/YANG paths;
-- CLI/parsers;
-- NCM commands and modes;
-- normalized metrics;
-- inventory/entity mappings;
-- topology relationships;
-- dashboards;
-- alert semantics;
-- RCA semantics;
-- remediation/runbook metadata;
-- vendor/model/firmware/API/MIB compatibility;
-- provenance/licensing metadata.
-
-Certification levels:
-
-- Official Certified;
-- Partner Verified;
-- Customer Custom;
-- Experimental.
-
-A Device Pack Test Lab shall accept sample SNMP walks, REST responses, CLI output, traps/syslogs and validate extraction, enums, topology, alerts, NCM parsing and dashboards without repeatedly contacting a production device.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### OSS implementation basis (product constraint)
 Module SHALL use catalogue-approved OSS for commodity primitives and retain Platform-owned product layers (identity, policy, placement, qualification, RCA guardrails, UX). Exact component versions and licence class live in `Platform_07_OSS_Catalog.md`; runtime authority in `Platform_03_Architecture.md`. The historical PRD-OSS tables are absorbed as this constraint — not as a competing catalogue.
 
 ## 17. Canonical entity and operational graph
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-002`**: Platform SHALL enforce: Physical/L2/L3/routing/MPLS/VXLAN/SDWAN/traffic/infra/service/causal/geo views.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The same physical/logical resource shall not become duplicate entities merely because it is observed through SNMP, flow, syslog, NCM, API or Agent.
 
 Entity families include tenant, region, site, network device, chassis/module/interface, VRF/VLAN, route/peer, server/OS/NIC/disk/process/service, hypervisor/VM, storage, DB, Kubernetes, cloud and business service entities.
@@ -990,6 +1057,13 @@ Historical topology shall support viewing the network/service graph as it existe
 
 
 ## 18. Grouping, hierarchy, ownership and circuits
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-013`**: Platform SHALL enforce: Circuit/ISP inventory and SLA correlation.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall support concurrently:
 
 - tags/attributes;
@@ -1202,12 +1276,27 @@ Every grouped/suppressed child remains inspectable with its governing rule/versi
 
 
 ## 21. Graph intelligence, GNN and RCA
+
+
 ### 21.1 Architecture principle
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-001`**: Platform SHALL enforce: One temporal multi-layer canonical operational graph.
+- **`REQ-RCA-004`**: Platform SHALL enforce: Hybrid deterministic+temporal+topology+protocol+change+anomaly RCA.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform RCA is a **hybrid evidence-based graph reasoning system**. It shall not be an LLM-only system and shall not treat GNN output as proof of causality.
 
 ### 21.2 Evidence inputs
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-003`**: Platform SHALL enforce: Relationship provenance/confidence and historical topology.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 RCA shall combine, when available:
 
 - temporal event order;
@@ -1226,6 +1315,12 @@ RCA shall combine, when available:
 
 ### 21.3 GNN learning incorporated from graph-first products
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-007`**: Platform SHALL enforce: GNN only as hypothesis/propagation/impact scorer, never automatic causal proof.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall maintain a temporal multi-layer operational graph suitable for learned graph features. A GNN/graph-learning component may:
 
 - learn propagation signatures;
@@ -1240,6 +1335,13 @@ GNN results must remain subordinate to evidence/protocol constraints. Model outp
 
 ### 21.4 RCA output
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-005`**: Platform SHALL enforce: Root cause, confidence, causal chain, blast radius, evidence, contradictions, missing evidence, recommendation.
+- **`REQ-RCA-006`**: Platform SHALL enforce: INCONCLUSIVE is a valid RCA outcome.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every RCA shall expose:
 
 - probable root cause or `INCONCLUSIVE`;
@@ -1269,6 +1371,12 @@ Codebook input uses TRUE, FALSE and UNKNOWN; stale/absent evidence cannot silent
 
 ### 21.6 RCA quality benchmark
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-011`**: Platform SHALL enforce: RCA correctness feedback and intelligence-quality dashboard.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Engineering/QA shall maintain a labeled incident benchmark including at minimum representative cases such as physical link failure, interface shutdown, BGP/OSPF cascades, MPLS path failure, configuration blackhole, congestion, hardware/power fault, maintenance storm and multi-site dependency failure.
 
 Measure:
@@ -1303,6 +1411,15 @@ Platform shall incorporate graph-first learning without copying NetAI proprietar
 
 
 ## 22. AI Gateway and local intelligence placement
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-008`**: Platform SHALL enforce: Gemini through AI Gateway for NL search/explanation/summaries/recommendations.
+- **`REQ-RCA-009`**: Platform SHALL enforce: Future private/offline/local LLM provider.
+- **`REQ-RCA-010`**: Platform SHALL enforce: AI data boundaries, masking and audit.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Gemini shall be integrated through a provider-independent AI Gateway.
 
 Permitted uses include:
@@ -1341,6 +1458,13 @@ Detailed evidence, security, resource and release contracts are authoritative in
 
 
 ## 23. Operations timeline, troubleshooting, path analysis and EDS
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-NET-014`**: Platform SHALL enforce: Path Analysis workspace.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 For device, site, service and incident contexts, Platform shall provide one time-ordered view combining, as available:
 
 - telemetry state changes;
@@ -1415,108 +1539,48 @@ No universal customer CPU/memory/disk threshold is fixed here. Effective values 
 
 
 ## 24. NCM and Privileged CLI Session Broker
-NCM is Day-1 important. Capabilities below are architecture/product scope; certification follows the Phase 1 / Phase 1.5 split (see also §58.4).
 
-**Phase 1 independently certifiable subset:**
-- credentialed SSH/NETCONF/API connections for authorized NCM/CLI paths;
-- configuration backup;
-- version history;
-- diff;
-- change detection;
-- compliance rules/golden configuration;
-- templates (non-executing authoring/storage where certified);
-- RBAC;
-- reports;
-- API;
-- browser CLI integration only when credential brokering/RBAC/audit are certified;
-- change audit;
-- RCA correlation as supporting evidence.
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-**Phase 1.5 default (unless Founder change control promotes earlier):**
-- bulk push;
-- scheduling/windows for privileged mass execution;
-- maker-checker approval driving automated privileged execution;
-- canary/staged automated privileged rollout;
-- rollback where adapter/device supports it as part of automated remediation paths.
+- **`REQ-NCM-002`**: Platform SHALL enforce: NCM change evidence enters RCA timeline.
+- **`REQ-NCM-003`**: Platform SHALL enforce: Separate NCM concurrency/rate/window controls.
+- **`REQ-NCM-004`**: Platform SHALL enforce: Privileged browser CLI Session Broker; browser never gets credentials.
+- **`REQ-NCM-005`**: Platform SHALL enforce: CLI RBAC/command policy/JIT/approval/break-glass/session audit.
 
-Semantic diff shall only be claimed where a Device Pack/parser supports it.
-
-NCM worker concurrency/rate limits are independent from routine monitoring workers so NCM jobs cannot starve polling.
-
-Bulk operations shall support dry-run/impact preview and canary/staged execution when the privileged-automation envelope is certified (Phase 1.5 by default).
-
----
-
-
-The browser shall never directly receive reusable device credentials.
-
-CLI launch may use an authorized stored Credential Profile, a user-scoped/personal credential where policy permits, or explicitly entered one-time session credentials. One-time credentials must be ephemeral, must not be persisted as reusable secrets unless the user explicitly invokes an authorized credential-management workflow, and must never be logged or exposed to unrelated browser/API clients.
-
-Flow: Browser HTTPS/WebSocket → Core Session Broker → assigned Network Sensor → SSH device.
-
-Controls:
-
-- CLI privilege tiers: no access / read-only / operational / configuration / full privileged, as applicable;
-- tenant/resource scope;
-- JIT/temporary access;
-- reason/ticket requirement;
-- MFA/re-auth where policy requires;
-- command allow/deny patterns;
-- high-risk approval;
-- session timeout/idle/concurrency/hours;
-- full command audit;
-- optional terminal/session playback where configured;
-- break-glass.
-
-Telnet is legacy, disabled by default and never automatic fallback.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 25. IPAM requirements
-IPAM shall support:
 
-- IPv4 and IPv6 as first-class, including dual-stack estates;
-- subnet/supernet hierarchy;
-- VLAN/VRF association;
-- address state/reservation;
-- DNS/DHCP integration;
-- leases;
-- conflicts/duplicates;
-- history;
-- discovery/reconciliation;
-- utilization;
-- exhaustion forecasting;
-- APIs;
-- audit;
-- Microsoft DHCP/DNS and Infoblox integration where APIs are available.
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-IPAM is integrated into the canonical graph and shall not be a separate competing inventory authority.
+- **`REQ-IPAM-001`**: Platform SHALL enforce: Native IPAM IPv4/IPv6/subnet/supernet/VLAN/VRF/address/DNS/DHCP/leases/conflicts/history/forecast.
+- **`REQ-IPAM-002`**: Platform SHALL enforce: Microsoft DHCP/DNS and Infoblox integration.
+- **`REQ-IPAM-003`**: Platform SHALL enforce: IPAM enriches canonical graph and Flow.
+- **`REQ-NET-015`**: Platform SHALL enforce: IPv4/IPv6/dual-stack first-class support.
 
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 26. Display timezone, scheduling and freshness
 | ID | Requirement |
 |---|---|
-| `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
-| `PRD-TIME-002` | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
-| `PRD-TIME-003` | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
-| `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
-| `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
+| `REQ-TIME-001` / `PRD-TIME-001` | All authoritative system/event/telemetry timestamps shall remain absolute UTC instants in storage and machine-to-machine contracts (RFC3339/ISO-8601 capable). Rendered wall-clock strings are never source truth. |
+| `PRD-TIME-002` (product) / see `REQ-TIME-002` UI ownership | Interactive display shall use named IANA TZDB identifiers. Where no saved preference exists, first use defaults to the browser/device local IANA timezone. Users may select zones such as Asia/Kolkata, Europe/London, America/New_York or UTC; fixed `UTC+X` offsets must not model DST-sensitive regions. |
+| `PRD-TIME-003` (product) / see `REQ-TIME-003` UI ownership | Effective display timezone precedence is: explicit dashboard/view/session override → saved user `display_timezone` preference → browser/device local IANA zone → `tenant.timezone` → UTC. Explicit overrides may be preserved in URL/saved views; absence resolves per viewer preference. |
+| `REQ-TIME-004` / `PRD-TIME-004` | Changing display timezone shall update labels/calendar grouping only. It must not change telemetry timestamps, alert evaluation, thresholds, incident sequencing, RCA/correlation, polling/retry/freshness, SLA semantics, maintenance-window execution, business calendars, scheduled jobs, report execution schedules or automation schedules. Operational policies requiring wall-clock interpretation carry their own explicit IANA timezone. Host OS timezone is non-authoritative. |
+| `REQ-TIME-005` / `PRD-TIME-005` | Reports/exports that render local timestamps must disclose the timezone used. Scheduled reports separate execution/schedule timezone from render/display timezone. Calendar-bucket queries may accept an explicit IANA zone and must return unambiguous absolute bucket boundaries plus timezone metadata. DST and half/quarter-hour correctness are mandatory certification subjects. |
 
 
 | ID | Requirement |
 |---|---|
-| `PRD-SCHED-001` | Core owns desired monitoring schedule/policy, placement, recurring assignment and generation/fencing authority. Sensor owns execution of currently authorized work and shall retain durable recurring desired-state sufficient to continue safely during temporary Core outage/failover. No second independent schedule authority and no scheduler microservice. |
-| `PRD-SCHED-002` | Monitor Group (semantic/product grouping), Scheduling Class (priority/freshness behavior) and Execution Class (runtime worker/resource pool) shall remain distinct concepts. |
-| `PRD-SCHED-003` | Recurring monitoring definitions shall specify both nominal cadence and freshness/maximum staleness. The normal SNMP operational-metric default remains 5 minutes and does not mean all OIDs every five minutes. Availability/liveness remains a separate plane. |
-| `PRD-SCHED-004` | Eligible recurring work shall use a versionable deterministic 64-bit phase calculation so fleets do not stampede at clock boundaries. Phase inputs should remain stable across normal restart and preferably across Sensor reassignment; Sensor identity must not dominate where reassignment would reshuffle the estate. |
-| `PRD-SCHED-005` | Admission order shall be priority/scheduling class → freshness urgency/deadline → fairness → execution cost/capacity. Opaque ML shall not drive routine collection scheduling. Cost inputs remain bounded/explainable (protocol, operation, cardinality, duration, RTT, timeout/retry, payload size, API quota). |
-| `PRD-SCHED-006` | Concurrency shall be bounded by Sensor, execution class, protocol, target, tenant, site, subnet and controller/API as applicable. Identical recurring collections must not stack without bound. Missed cycles coalesce or skip per policy with quality/overrun evidence; never create infinite catch-up queues or fabricate historical samples. |
-| `PRD-SCHED-007` | Controller/site/API failure domains shall use bounded retry, dependency-aware backoff, circuit-breaker-like qualification, cheap recovery probes and explicit monitoring-path degradation. `No Data != Device Down` remains invariant. |
-| `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
-| `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
+| `REQ-SCHED-001` / `PRD-SCHED-001` | Core owns desired monitoring schedule/policy, placement, recurring assignment and generation/fencing authority. Sensor owns execution of currently authorized work and shall retain durable recurring desired-state sufficient to continue safely during temporary Core outage/failover. No second independent schedule authority and no scheduler microservice. |
+| `REQ-SCHED-002` / `PRD-SCHED-002` | Monitor Group (semantic/product grouping), Scheduling Class (priority/freshness behavior) and Execution Class (runtime worker/resource pool) shall remain distinct concepts. |
+| `REQ-SCHED-003` / `PRD-SCHED-003` | Recurring monitoring definitions shall specify both nominal cadence and freshness/maximum staleness. The normal SNMP operational-metric default remains 5 minutes and does not mean all OIDs every five minutes. Availability/liveness remains a separate plane. |
+| `REQ-SCHED-004` / `PRD-SCHED-004` | Eligible recurring work shall use a versionable deterministic 64-bit phase calculation so fleets do not stampede at clock boundaries. Phase inputs should remain stable across normal restart and preferably across Sensor reassignment; Sensor identity must not dominate where reassignment would reshuffle the estate. |
+| `REQ-SCHED-005` / `PRD-SCHED-005` | Admission order shall be priority/scheduling class → freshness urgency/deadline → fairness → execution cost/capacity. Opaque ML shall not drive routine collection scheduling. Cost inputs remain bounded/explainable (protocol, operation, cardinality, duration, RTT, timeout/retry, payload size, API quota). |
+| `REQ-SCHED-006` / `PRD-SCHED-006` | Concurrency shall be bounded by Sensor, execution class, protocol, target, tenant, site, subnet and controller/API as applicable. Identical recurring collections must not stack without bound. Missed cycles coalesce or skip per policy with quality/overrun evidence; never create infinite catch-up queues or fabricate historical samples. |
+| `REQ-SCHED-007` / `PRD-SCHED-007` | Controller/site/API failure domains shall use bounded retry, dependency-aware backoff, circuit-breaker-like qualification, cheap recovery probes and explicit monitoring-path degradation. `No Data != Device Down` remains invariant. |
+| `REQ-SCHED-008` / `PRD-SCHED-008` | Scheduler admission shall observe CPU/RAM/spool/queue/latency/error/upload-backlog/freshness-debt pressure. Recovery ramp order is liveness → recovering critical → normal operational → detail → topology/state → inventory/background. Adaptive and event-triggered refresh are capacity/authorization/cooldown/dedup bounded with automatic reversion. |
+| `REQ-SCHED-009` / `PRD-SCHED-009` | Capability Pack contracts carry applicable cadence/freshness/cost semantics. Where valuable, Agents may sample gauges approximately every 30–60 seconds locally and forward governed lower-rate min/max/average/last/count summaries; raw monotonic counters must not be averaged; tiny-sample P95/P99 must not be represented as statistically meaningful. |
 
 
 ## 27. Reporting, SLA/OLA and Service Assurance
@@ -1567,109 +1631,28 @@ SLA/OLA reports shall be able to expose target/expected, minimum, actual, trend,
 Financial/service-credit formulas may be represented as customer-defined metadata/calculation only when configured; Platform shall not invent contractual credits, pricing, liability or commercial terms.
 
 ## 28. ITSM and notification integrations
-Supported adapters shall include architecture for:
 
-- ServiceNow;
-- BMC Helix/Remedy;
-- ServiceDesk Plus;
-- SummitAI;
-- Freshservice/Freshworks;
-- Jira Service Management;
-- generic REST/webhook;
-- email;
-- Microsoft Teams;
-- Slack;
-- approved WhatsApp Business provider/API;
-- SMS/PagerDuty adapters where configured.
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-ITSM integration shall be bidirectional where the target API permits.
+- **`REQ-INT-001`**: Platform SHALL enforce: ServiceNow/BMC/ServiceDesk Plus/SummitAI/Freshservice/Jira SM/generic REST ITSM with binding, certification, preflight, mapping/preview, idempotency and callback auth; external ticket state does not override Platform hea.
+- **`REQ-INT-002`**: Platform SHALL enforce: Email/Teams/Slack/WhatsApp/webhook/SMS/PagerDuty channels.
+- **`REQ-INT-003`**: Platform SHALL enforce: Bidirectional ITSM field/state/note synchronization where API allows.
+- **`REQ-INT-004`**: Platform SHALL enforce: Durable outbound integration queue/retry/idempotency/dead-letter/pause-drain-replay health.
+- **`REQ-INT-005`**: Platform SHALL enforce: Integration Test Sandbox before production enablement.
 
-Required connector contracts include: stable Platform incident ↔ external object binding; connector capability/version certification; guided preflight (DNS/TLS/proxy/auth/permissions); type-safe field mapping; required-field/state validation; payload preview before egress; idempotency keys; race-safe bidirectional lifecycle; signed/authenticated inbound callbacks; queue/retry/dead-letter health; pause/drain/replay; safe configuration promotion; credential rebinding; sanitized support evidence. External ticket closure/state/automation success does **not** prove monitored recovery or override Platform health. No arbitrary Python/JavaScript customer mapping runtime. No mandatory new Integration Fabric service.
-
-Ticket creation shall include root cause/confidence, affected scope, correlated alerts, evidence, config changes and recommended actions.
-
-Recovery policy options:
-
-- resolve only in Platform;
-- update ITSM but leave ticket open;
-- auto-resolve/close selected incident types;
-- resolved-monitoring-recovery state.
-
-A durable outbound integration queue, retries, idempotency/correlation IDs and connector health dashboard are required.
-
-An Integration Test Sandbox shall validate authentication, connection, field mapping, create/update/resolve flows before production enablement.
-
----
-
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 29. RBAC, audit, API-first and query protection
-Authorization model: **Who × Resource × Action × Where × Conditions**.
 
-Dimensions:
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-- tenant;
-- region/site/group/device/service;
-- module;
-- action;
-- condition/time/MFA/ticket/approval.
+- **`REQ-GOV-001`**: Platform SHALL enforce: Append-only/tamper-evident structured audit, SIEM export and protected retention.
+- **`REQ-GOV-002`**: Platform SHALL enforce: RBAC + resource scope + conditions; explicit deny wins.
+- **`REQ-GOV-003`**: Platform SHALL enforce: AD/LDAP/SAML/OIDC/Entra identity mapping.
+- **`REQ-GOV-005`**: Platform SHALL enforce: MFA/approval/reason/ticket for sensitive actions.
 
-Explicit deny wins where supported.
-
-Built-in role templates are cloneable/customizable.
-
-Sensitive actions may require MFA, approval, reason or ticket.
-
-Access Simulator shall answer questions such as “Can user X execute configuration command on device Y?” and explain the effective permission path.
-
-All authorization is enforced server-side.
-
----
-
-
-Audit shall cover authentication, users/RBAC, provisioning, credentials, monitoring policies, alerts/incidents, maintenance, NCM/CLI, IPAM, dashboards/maps/reports, integrations, AI/remediation, Sensors/HA, licensing, retention, backup/restore and upgrades.
-
-Audit event fields include:
-
-- actor/service/policy engine;
-- tenant;
-- action;
-- object/resource;
-- timestamp;
-- source UI/API/system;
-- source IP/session/request ID;
-- before/after;
-- result;
-- reason/ticket.
-
-Audit storage should support append-only/tamper-evident controls, configurable retention/archival, SIEM export and restricted deletion.
-
----
-
-
-All normal customer operations remain UI-first, but the UI shall consume supported control-plane APIs rather than bypassing them with database access.
-
-API Management shall support service accounts, clients/tokens, scopes, rate limits, usage, failures, expiry/rotation and audit.
-
-Outbound event/webhook subscriptions shall include relevant alert, incident, device, NCM, SLA and state-change events.
-
----
-
-
-Platform shall protect itself from:
-
-- unbounded dashboard/raw queries;
-- high-cardinality custom metrics/labels;
-- API connector explosions;
-- excessive Flow/log rate;
-- excessive report concurrency.
-
-Controls include timeouts, maximum scan/rows, asynchronous large exports, cancellation, per-tenant/user concurrency, cardinality detection and recommendations to drop/normalize unstable labels.
-
----
-
-
-**Maturity note:** persistent production IdentityDirectory / PermissionGrantDirectory authority may be absent on current main; Discovery authorization may be intentionally fail-closed until permission integration is complete (#92). Target product requirements remain as specified above.
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 30. Retention, Storage Protection Engine and Legal/investigation hold
 Administration → Data & Retention shall allow configuration by data class/scope for:
 
@@ -1801,6 +1784,12 @@ RCA and AI may recommend or summarize approved runbooks. Customer-approved sourc
 
 ### 31.6 Post-Incident Review / Problem Management
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-RCA-013`**: Platform SHALL enforce: PIR/problem-management generation and customer runbook knowledge base.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform shall generate a draft PIR from incident timeline, RCA, impact, evidence, ITSM ticket, configuration changes, actions and recovery. Human operators add/approve final root cause, corrective action, preventive action and lessons learned. Output can be reported/exported.
 
 ### 31.7 Intelligence Quality / RCA Accuracy
@@ -1845,8 +1834,12 @@ A Housekeeping workspace shall show status/history/failures for rollups, TTL del
 
 ### 31.14 Usage and Licensing Forecast
 
-Authorized administrators shall see licensed vs used entities/elements/modules and forecast approaching entitlement thresholds/expiry. This does not replace the agreed expiry/grace behavior.
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-LIC-006`**: Platform SHALL enforce: Usage/licensing dashboard and entitlement-aware UI.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### 31.15 Contextual Help
 
 Complex settings and diagnostics shall expose `What is this?`, contextual documentation and, where allowed, AI explanation grounded in current Platform documentation/configuration. Help must never modify configuration without a separate explicit action.
@@ -1855,32 +1848,20 @@ Complex settings and diagnostics shall expose `What is this?`, contextual docume
 
 
 ## 32. Upgrade, canary, rollback and PKI
-Platform upgrade workflow shall include:
-
-- preflight;
-- backup/restore point;
-- compatibility check;
-- component/Sensor drain where required;
-- install/migrate;
-- health verification;
-- rollback strategy.
-
-Sensor/Agent/Device Pack changes should support canary/staged rollout (e.g., pilot group → larger group → full deployment) with configurable stop/rollback conditions.
-
-Feature flags may restrict new features to selected tenants/groups during controlled rollout.
-
----
-
-
-Administration shall show UI, Sensor, Agent, internal-service and integration certificates, issuer, expiry, days remaining, usage and status.
-
-Support customer CA, CSR/import/renewal, trust stores and certificate rotation. Expiring certificates produce proactive alerts.
-
----
 
 
 ## 33. Licensing and usage forecast
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-LIC-001`**: Platform SHALL enforce: Commercial license supports annual/perpetual/device/element/module models.
+- **`REQ-LIC-002`**: Platform SHALL enforce: 30-day expiry warning.
+- **`REQ-LIC-003`**: Platform SHALL enforce: 7-day dashboard banner before expiry.
+- **`REQ-LIC-004`**: Platform SHALL enforce: Post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30); polling stops after the 15-day grace expires unless manually extended/renewed. T-7 pre-expiry banner remains distinct..
+- **`REQ-LIC-005`**: Platform SHALL enforce: Historical data remains accessible after polling stops.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ### Licensing grace — Founder-approved 15-day post-expiry grace
 
 **Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).
@@ -2358,6 +2339,14 @@ Phase 1 standalone certification is not gated by Core HA failover. When the Phas
 
 - Phase 1.5 HA profile: Core HA failover <60s with Sensor continuity.
 
+### 42.1 Requirement, journey and screen acceptance binding
+
+For each capability selected into a certification envelope, retain its existing `PRD-*`/`REQ-*` identity and bind the requirement to: actor and tenant/resource scope; trigger/preconditions; authoritative state/data owner; existing Dataflow or specialized flow; numbered UI workspace or named administrative subview; governed read/action contract; normal, denied, empty/no-data, partial, stale, conflict, timeout/cancel and recovery outcomes where applicable; audit/notification result; and reproducible acceptance evidence. A shared contract may be inherited explicitly; it must not conceal a capability-specific rule or leave the implementer to invent one.
+
+`Platform_06` §118 owns the operator-journey binding supplement; `Platform_09` §3/§4 and specialized masters own field/state/interaction semantics. Preserve UI-001..UI-098 and the registered routes. A route/title/tab entry is presentation coverage, not a functional dashboard, authenticated workflow, backend API or certification result.
+
+Two gates remain distinct. An essential unselected query, mutation, state, field/unit or authorization contract is a **documentation/design blocker** for that capability and must be resolved or explicitly held before implementation. An adequately specified but unimplemented API/session bridge, runtime integration or test is an **implementation/certification gate**; it does not make the normative requirement absent. Both must be visible in the existing traceability/build evidence, and neither is a pass inferred from green unrelated CI. No supported endpoint, performance measurement or production-ready screen may be invented to fill a binding.
+
 ---
 
 
@@ -2387,7 +2376,7 @@ A2.1 absorbed Version 3.0 / v3.1 / v3.2.2 and related reconciliation content int
 
 ---
 
-## Phase-1 endpoint operations requirements — Issues #169/#170
+## 45. Phase-1 endpoint operations requirements — Issues #169/#170
 
 | Requirement ID | Phase-1 product requirement |
 |---|---|
@@ -2463,9 +2452,11 @@ Outbound delivery uses a PostgreSQL transactional outbox to connector workers; i
 
 Phase-1 connector certification targets are **ServiceNow, Jira Service Management, BMC Helix and ManageEngine ServiceDesk Plus / ServiceDesk Plus MSP**. Phase-1.5 certification-priority targets are **Ivanti Neurons for ITSM, Freshservice/Freshservice MSP, SolarWinds Service Desk, TOPdesk, SysAid and HaloITSM**. This is AmrudAi certification priority, not a claimed global market ranking. Every capability claim is edition/API/version/auth/workflow specific.
 
+**Phase boundary (baseline vs expansion):** Phase 1 owns the Integration Fabric baseline above — the common Integration Service architecture, mandatory safe delivery/authorization/durability, the four Phase-1 ITSM certification targets, Mapping Studio and Test Sandbox. Phase 1.5 expands enterprise-foundation depth (advanced bidirectional reconciliation/relationship-level certification, extended Integration Fabric capabilities, second-wave ITSM connectors under `REQ-INT-013`, and expanded integration capacity/compatibility certification where explicitly scoped). Phase 1.5 does **not** relocate the four Phase-1 ITSM connectors, the common Integration Service architecture, or Mapping Studio/Test Sandbox out of Phase 1.
+
 ### 58.6 CMDB authority and reconciliation
 
-Support Phase-1 **Enrichment** (CMDB -> Platform) and bounded **Publication** (Platform -> CMDB), plus Phase-1 architecture for governed bidirectional reconciliation with deeper relationship certification in Phase 1.5. External CIs bind to canonical Platform entities; no second entity database is created. Last-write-wins and automatic entity deletion from missing external CIs are prohibited.
+Support Phase-1 **Enrichment** (CMDB -> Platform) and bounded **Publication** (Platform -> CMDB), plus Phase-1 architecture for governed bidirectional reconciliation with deeper relationship certification in Phase 1.5. External CIs bind to canonical Platform entities; no second entity database is created. Last-write-wins and automatic entity deletion from missing external CIs are prohibited. Canonical Platform entity authority, tenant isolation, explicit field/class ownership, audit and conflict safeguards remain Phase-1 commitments. Phase 1.5 owns governed advanced bidirectional reconciliation and relationship-level certification depth; it does **not** move Phase-1 Enrichment or bounded Publication into Phase 1.5.
 
 Observed reachability, telemetry, device configuration, routing, discovered technical topology/runtime relationships and RCA/evidence remain Platform technical truth. ITSM workflow/assignee/CAB state and normal business-owner/support-group/cost-centre/lifecycle metadata remain external authority by default; business criticality, declared service relationships, maintenance policy and selected tags/custom fields may use explicit configurable field/class authority. Conflicts remain visible/auditable.
 
@@ -2579,8 +2570,8 @@ No row above implies implementation, benchmark, certification or deployment.
 
 ### Phase contract
 
-- **Phase 1:** current frozen Network & Infrastructure Observability commercial core.
-- **Phase 1.5:** enterprise foundation: HA/MSP, Integration Fabric + CMDB reconciliation, bounded sampled operational spans/service edges, NCM Change Assurance, selected broader Capability Packs and first-class serverless.
+- **Phase 1:** current frozen Network & Infrastructure Observability commercial core, including preserved Integration Fabric / ITSM / CMDB baselines in §58.5–58.7 (four ITSM certification targets; common Integration Service architecture and mandatory safe delivery/authorization/durability; CMDB Enrichment and bounded Publication; canonical entity authority/tenant isolation/field ownership/audit/conflict safeguards; Phase-1 architectural preparation for governed bidirectional reconciliation; Mapping Studio and Test Sandbox).
+- **Phase 1.5:** enterprise foundation expansion: HA/MSP; Integration Fabric and CMDB depth beyond the Phase-1 baseline (governed advanced bidirectional reconciliation and relationship-level certification; extended enterprise Integration Fabric capabilities; second-wave ITSM connectors; expanded integration capacity/compatibility certification where explicitly scoped); bounded sampled operational spans/service edges; NCM Change Assurance; selected broader Capability Packs; and first-class serverless. Phase 1.5 does not relocate the Phase-1 four ITSM connectors or bounded CMDB Enrichment/Publication.
 - **Phase 2:** Enterprise ITOM/AIOps RFP Readiness. Platform shall deliver native or certified-integrated coverage for the `PRD-ECR-*` catalogue in Platform_23 and pass `ECRP-P2-v1`.
 - **Phase 2.5+:** native full APM and native full always-on DPI/deep packet analytics.
 

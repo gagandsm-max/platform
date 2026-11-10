@@ -7,7 +7,7 @@
 **Governing documents:** `Platform_01_BRD.md`, `Platform_02_PRD.md`, `Platform_03_Architecture.md`
 **Companions:** `Platform_04_HLD.md`, `Platform_05_LLD.md`, `Platform_08_Requirements_Traceability.md`, `Platform_12_Decision_Source_Register.md`
 **Normalization state:** NORMALIZED_V1
-**Last reconciliation:** 2026-10-08 — BUILD-011 OSS-124 engineering admission reconcile (Issue #168 / Master comment `6059162933`); prior 2026-09-24 A2.3 OSS catalogue normalization and formal OSS-008→REQ-OSS-008 migration (Issue #108) retained
+**Last reconciliation:** 2026-11-08 — rebaseline verification against canonical main `92f0fb37805c234be2869619abcc01ad26b5f30b` after Issue #302/PR #303; no OSS catalogue change from that Agent custody repair. Prior 2026-11-06 OSS-124 source-implementation truth correction (then main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`), 2026-10-08 engineering admission (Issue #168 / Master comment `6059162933`) and 2026-09-24 A2.3 normalization / OSS-008→REQ-OSS-008 migration remain unchanged provenance. No new dependency, source pin or release certification.
 **Important:** This is an engineering/licensing governance baseline, not legal advice. Exact pinned versions and their complete transitive/bundled licenses must be scanned before release.
 
 **Maturity:** `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`. Architectural approval (`Decision`) is not implementation evidence (`Truth state`).
@@ -16,16 +16,29 @@
 
 ## 1. Purpose
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-001`**: Platform SHALL enforce: Clean-room Platform independent of ThoughtData and NetAI.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Platform is a clean-room proprietary commercial product that deliberately reuses mature permissively licensed protocol engines, SDKs, data infrastructure and UI libraries instead of rebuilding commodity functions. Platform must build its differentiated logic — canonical entity graph, Device Pack model, MIB/API Studios, monitoring scheduler, Sensor placement, policy hierarchy, false-alert qualification, incident correlation, RCA/GNN intelligence, NCM governance, IPAM authority, Dashboard/Report/Map Studios, multi-tenancy, audit semantics and licensing — as Platform-owned code.
 
 The rule is **libraries and infrastructure over nested products**: use mature OSS to avoid reinventing SNMP, Kafka, database engines, SSH, chart rendering, etc.; do not embed another complete NMS/IPAM/dashboard product as Platform's authority.
 
 **Namespace note:** Catalogue IDs use the `OSS-NNN` form (for example catalogue **OSS-008 = ClickHouse**). Formal Mother Reference requirements use `REQ-*` IDs. The former formal air-gap requirement ID `OSS-008` was migrated to **`REQ-OSS-008`** in A2.3 to end the catalogue/requirement namespace collision. Historical prose may mention the old formal ID only when explicitly marked migrated/historical.
 
+
 ## 2. Decision labels and truth states
 
 ### 2.1 Architectural decision labels (allow-list intent)
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-003`**: Platform SHALL enforce: Green permissive licenses generally allowed; Yellow review; Red blocked by default.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 - `USE`: approved architectural dependency, subject to pinned-version scan.
 - `USE/WRAP`: approved, but must be hidden behind a Platform adapter/interface.
 - `CANDIDATE`: technically suitable but not frozen until P0 benchmark/architecture review.
@@ -49,6 +62,12 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 
 ## 3. Approved/candidate catalogue
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-002`**: Platform SHALL enforce: Only approved OSS catalogue dependencies may ship.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 | ID | Domain | Capability | OSS / Technology | License | Decision | Truth state | Runtime | How Platform uses it | What remains custom |
 |---|---|---|---|---|---|---|---|---|---|
 | OSS-001 | Core Framework | Core control plane/API | Spring Boot | Apache-2.0 | USE | CURRENT_RUNTIME | Core | Java 21 modular Core framework, REST/API, security integration, configuration, lifecycle. | Do not build web/application framework plumbing. Platform-specific domain modules, policies, authorization semantics and workflows remain custom. |
@@ -67,7 +86,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-014 | Search | Optional dedicated full-text search | OpenSearch | Apache-2.0 | OPTIONAL-LATER | OPTIONAL_FUTURE | Core | Add only if customer log search requirements exceed ClickHouse text-search capability. | Not mandatory in V1 to keep footprint low. Elasticsearch is not the core store. |
 | OSS-020 | Network Collection | SNMP v1/v2c/v3 | GoSNMP | BSD-style | USE/WRAP | CURRENT_RUNTIME | Sensor | SNMP Get/GetNext/GetBulk/Walk plus protocol support needed by certified traps/informs and privileged SET actions. | Do not reimplement BER/SNMP. Platform owns scheduling, Credential Profile resolution, Poll Planner, typed normalization/exact counters, validation, retry, trap storm/source trust, qualification and policy. Routine monitoring remains read-only; library SET capability does not authorize monitoring-time SET. |
 | OSS-021 | Network Collection | MIB parsing | gosmi | MIT | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Core Studio/Sensor build tooling | Parse SMIv1/v2 MIBs for MIB Studio, OID metadata, textual conventions, enums, tables/indexes and notifications. | Platform owns provenance/licensing, dependency workflow, semantic transforms, sample-device validation, Capability/Device Pack generation and redistribution controls. Approved OSS status does not mean MIB Studio/runtime wiring is already implemented. |
-| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Streaming Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns enrichment, canonical flow schema, cardinality controls, Kafka publishing and analytics. |
+| OSS-022 | Network Collection | NetFlow/IPFIX/sFlow parsing | GoFlow2 | BSD-3-Clause | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Streaming Sensor | Decode NetFlow v5/v9, IPFIX and sFlow. | Platform owns enrichment, canonical flow schema, cardinality controls, Kafka publishing and analytics. Catalogue approval is **not** version admission: BUILD-051 source that imports GoFlow2 is blocked until non-BUILD gate `FLOW_PARSER_DEPENDENCY_ADMISSION_GATE` freezes exact released version/commit, BSD-3-Clause revalidation, transitive inventory, SBOM/CVE, API surface used, reproducible module checksum, frozen-protocol-fixture compatibility and rollback to prior admitted version (dependency admission ≠ Flow certification). |
 | OSS-023 | Network Collection | ICMP | golang.org/x/net/icmp | BSD-3-Clause | USE | CURRENT_RUNTIME | Sensor/Agent | ICMP echo and low-level packet operations. | Platform owns scheduling, statistics, validation workflows, jitter/loss aggregation and path correlation. |
 | OSS-024 | Network Collection | DNS protocol | miekg/dns | BSD-style | USE | APPROVED_NOT_IMPLEMENTED | Sensor/Agent | Detailed DNS synthetic checks where standard resolver APIs are insufficient. | Platform owns test definitions, validation and SLA semantics. |
 | OSS-025 | Network Collection | SSH | golang.org/x/crypto/ssh | BSD-3-Clause | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Sensor | SSH transport for CLI, discovery, diagnostics and NCM. | Platform owns credential brokering, command controls, session audit and vendor behavior. |
@@ -124,7 +143,7 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 | OSS-121 | OSS Governance | SBOM generation | Syft | Apache-2.0 | USE-TOOLING | APPROVED_NOT_IMPLEMENTED | CI/CD | Generate SPDX/CycloneDX SBOM. | Tooling output must be archived per release. |
 | OSS-122 | OSS Governance | Vulnerability/license/secret scanning | Trivy | Apache-2.0 | USE-TOOLING | APPROVED_NOT_IMPLEMENTED | CI/CD | Scan containers/filesystems/SBOMs for vulnerabilities, licenses and secrets. | Scanner classifications do not replace legal policy. |
 | OSS-123 | OSS Governance | Deep license/source scan | ScanCode Toolkit | Apache-2.0 overall; reference datasets/third-party have additional licenses | USE-TOOLING | APPROVED_NOT_IMPLEMENTED | CI/CD/Legal | Deep license/copyright/package detection. | Use as tooling, not shipped runtime; comply with its own notices/data licenses. |
-| OSS-124 | Linux Agent | Kernel process/network telemetry | github.com/cilium/ebpf | MIT | USE/WRAP | APPROVED_NOT_IMPLEMENTED | Linux Agent | Approved Go library for loading and managing eBPF programs on Linux Agent for bounded process-to-network telemetry. **Engineering-admitted temporary derived source (not a customer release pin):** base `v0.22.0` commit `e55144e17360b60cc4583229c35c2dbf0935b308` + accepted upstream backports only `a204b5faca7fcadd2e5f835f47b02ecc66317aa6` and `4f576b5923e565087a46ed107683196fefb8fb23`; derived archive SHA256 `50abc98cb507b16868419018909fd4da934b2089bfbea4dcd8d0875216d67a4a`. No additional patches without new admission review. Object gates remain fail-closed (`#2103`, `#2083`, `kfunc`/`.ksyms`); Clang-governed object path; exact source/SBOM/provenance retained; migrate/re-evaluate against first acceptable stable upstream release containing equivalent fixes. | Platform owns probe design, local aggregation, resource bounds, loss/shed accounting, durable queueing and canonical entity correlation. **Engineering dependency admission** (satisfied for bounded product implementation; NOT customer support/runtime certification): exact source/version/patch provenance; transitive dependency inventory; licence/notice review; CVE/security review; SPDX/CycloneDX; reproducibility; exact object/loader fail-closed controls; least-privilege model; verifier/map/ring failure semantics; representative live kernel implementation-feasibility proof. **Release/runtime certification remains mandatory** before release/support claims under BUILD-018 / BUILD-019 / BUILD-130 / BUILD-134: certified Ubuntu/RHEL kernel matrix; claimed amd64/arm64 coverage; Secure Boot/lockdown/LSM where claimed; signed package/object provenance; offline/air-gap installation; install/upgrade/rollback; kernel-upgrade behavior; final CPU/RSS/kernel-map/ring/non-interference benchmarks. Engineering admission does not claim customer distribution/legal approval; legal/commercial distribution approval remains separate. Do not claim implemented, runtime-certified, or deployed. |
+| OSS-124 | Linux Agent | Kernel process/network telemetry | github.com/cilium/ebpf | MIT | USE/WRAP | CURRENT_RUNTIME | Linux Agent — optional bounded source implementation | Approved Go library for loading and managing eBPF programs on Linux Agent for bounded process-to-network telemetry. **Engineering-admitted temporary derived source (not a customer release pin):** base `v0.22.0` commit `e55144e17360b60cc4583229c35c2dbf0935b308` + accepted upstream backports only `a204b5faca7fcadd2e5f835f47b02ecc66317aa6` and `4f576b5923e565087a46ed107683196fefb8fb23`; derived archive SHA256 `50abc98cb507b16868419018909fd4da934b2089bfbea4dcd8d0875216d67a4a`. No additional patches without new admission review. Object gates remain fail-closed (`#2103`, `#2083`, `kfunc`/`.ksyms`); Clang-governed object path; exact source/SBOM/provenance retained; migrate/re-evaluate against first acceptable stable upstream release containing equivalent fixes. | Platform owns probe design, local aggregation, resource bounds, loss/shed accounting, durable queueing and canonical entity correlation. **Engineering dependency admission** (satisfied for bounded product implementation; NOT customer support/runtime certification): exact source/version/patch provenance; transitive dependency inventory; licence/notice review; CVE/security review; SPDX/CycloneDX; reproducibility; exact object/loader fail-closed controls; least-privilege model; verifier/map/ring failure semantics; representative live kernel implementation-feasibility proof. **Release/runtime certification remains mandatory** before release/support claims under BUILD-018 / BUILD-019 / BUILD-130 / BUILD-134: certified Ubuntu/RHEL kernel matrix; claimed amd64/arm64 coverage; Secure Boot/lockdown/LSM where claimed; signed package/object provenance; offline/air-gap installation; install/upgrade/rollback; kernel-upgrade behavior; final CPU/RSS/kernel-map/ring/non-interference benchmarks. Engineering admission does not claim customer distribution/legal approval; legal/commercial distribution approval remains separate. Current source evidence: `agent/go.mod` uses the admitted local replacement; `agent/linux/ebpf/` and `agent/linux/cmd/optional_ebpf.go` implement the optional bounded loader/probe path; BUILD-011 whole-BUILD technical acceptance is recorded in the Build Register. This is a source-implementation truth correction, not expansion of the approved source or customer support matrix. `agent/common/collector/` still uses `UnwiredStructuredEvidenceSink` / `TRANSPORT_NOT_WIRED` for physical structured evidence; BUILD-016/062 delivery and downstream persistence remain separate. Do not claim package/kernel-matrix runtime certification, customer release approval or deployment from this row. |
 
 
 ## 4. Evaluated alternatives / explicitly not selected as core dependencies
@@ -149,6 +168,14 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 
 ## 5. Commercial redistribution requirements
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-004`**: Platform SHALL enforce: SBOM SPDX + CycloneDX, notices, license texts, provenance/checksums every release.
+- **`REQ-OSS-006`**: Platform SHALL enforce: Vendor MIB/YANG/SDK/API examples/icons/templates require provenance/redistribution rights.
+- **`REQ-OSS-007`**: Platform SHALL enforce: Customer-supplied MIBs may be used for that customer but not automatically redistributed.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 1. **Version pinning:** every shipped Maven/NPM/Go/Python/OS package must be pinned or resolved through a reproducible lock/manifest.
 2. **Transitive scan:** top-level license is never enough. CI must inspect Maven transitive dependencies, Go modules, Python wheels, NPM packages, native libraries and bundled data.
 3. **Attribution:** required copyright and license notices must be preserved in `THIRD_PARTY_NOTICES.txt` and/or the release's license directory.
@@ -163,6 +190,12 @@ The rule is **libraries and infrastructure over nested products**: use mature OS
 
 ## 6. CI compliance pipeline
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-OSS-005`**: Platform SHALL enforce: Transitive dependency license/CVE scan mandatory.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ```text
 Dependency proposed
   -> catalogue check
@@ -278,3 +311,9 @@ Issue #272 selects **no new OSS dependency**.
 Future Phase-2.5 implementation may require instrumentation, trace, profiling, packet-capture/decoding or storage components, but each candidate MUST pass the normal OSS admission process for licence/redistribution, security/CVE posture, maintenance health, resource cost, architecture fit, air-gap/offline packaging, tenant/privacy implications, upgrade/rollback and vendor-lock-in/exit risk.
 
 Roadmap inclusion is not dependency approval.
+
+## Current dependency truth reconciliation — 2026-11-06
+
+This correction is bounded to verified source at GitHub main `36e1513f25265d0bcd45bdfe5156ee02fdbf5238`. `CURRENT_RUNTIME` identifies a dependency actually wired in a runtime source path, including an optional disabled-by-default path; it does not certify every deployment profile, activate that path, or grant commercial distribution approval. The source-admission restrictions in OSS-124 remain unchanged.
+
+OSS-004 Apicurio Registry and OSS-005/006 Avro/Protocol Buffers remain approved architecture with `APPROVED_NOT_IMPLEMENTED` current truth. Current JSON transport is not evidence that those dependencies were revoked, and their catalog approval is not evidence that a registry currently runs or that all physical messages use Avro/Protobuf. BUILD-063 and `Platform_17_API_Event_and_Data_Model_Contracts.md` own exact physical serialization, schema compatibility, migration/replay and registry-admission gates. No new runtime service or dependency is introduced by this documentation correction.

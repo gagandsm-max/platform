@@ -46,13 +46,13 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Tool authority model
 
-- **ChatGPT + GitHub is the Platform control plane.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance/certification. It does not write product code.
+- **ChatGPT + GitHub is the Platform control plane and final technical gate/certification authority.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance/certification. It does not write product code.
 - **Cursor CLI is the default bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness and requires no `writerElevation`.
-- **Codex is an additional authorized bounded implementation, test and debugging writer** (Founder decision 2026-10-07). Codex CLI and ChatGPT Desktop App in Codex mode are approved client interfaces to the same Codex authority, not separate writers or certification authorities. Codex cannot independently verify, act as gatekeeper, merge or self-certify. Plain ChatGPT Desktop conversation is not assumed to have repository filesystem/execution access unless Codex mode or explicitly connected local-computer access is active.
+- **Codex is an additional authorized bounded implementation, test and debugging writer** (Founder decision 2026-10-07). **Codex CLI and Codex Desktop (ChatGPT Desktop App in Codex mode) are one Codex authority family** — client interfaces to the same Codex authority, not independent writers or independent certification sources from each other. Codex cannot independently verify, act as gatekeeper, merge or self-certify. Plain ChatGPT Desktop conversation is not assumed to have repository filesystem/execution access unless Codex mode or explicitly connected local-computer access is active.
 - **Cursor Cloud is a never-writer under current policy.** Elevation cannot authorize it; any future change requires an explicit Founder decision recorded in `project_agents/tool_authority.json`.
-- **Antigravity CLI is read-only/adversarial.** It is the independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. It is not an implementation writer under the active commercial-readiness workflow, cannot validate its own work, cannot self-certify, and is not final certification authority — ChatGPT + GitHub performs final technical certification.
+- **Antigravity CLI is read-only/adversarial.** It is an independent adversarial reviewer / exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. It is **not the sole auditor**: any suitable authorized tool may perform read-only/advisory review of another tool's candidate. Antigravity is not an implementation writer under the active commercial-readiness workflow, cannot validate its own work, cannot self-certify, and is not final certification authority — ChatGPT + GitHub performs final technical certification.
 - **GitHub Copilot is a never-writer** and limited auxiliary PR/code-review only. Elevation cannot authorize it as writer, verifier, gatekeeper, merge authority, or sole certification evidence.
-- **One writer per checkout/worktree.** Cursor CLI and Codex may run concurrently only on isolated branches/worktrees with non-overlapping file ownership and later controlled integration.
+- **One writer per checkout/worktree remains mandatory.** Cursor and Codex may be bounded writers in isolated worktrees concurrently only with non-overlapping file ownership and later controlled integration. A writer cannot independently certify its own candidate.
 - Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
 - No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
 - Authoritative machine-readable source: `project_agents/tool_authority.json`.
@@ -76,6 +76,16 @@ A mother document **MUST** be updated when:
 
 Such updates require deliberate change control, cross-document reconciliation, Decision Register update where a decision changes, and GitHub review/merge.
 No implementation may permanently diverge from mother-reference truth. If implementation discovers a mother-document error, correct the mother documents rather than knowingly preserve a false specification.
+
+## P0 Mother Reference correction gate — 2026-11-06
+
+The Founder-directed priority is to reconcile the **existing** Mother References across all six P0 documentation areas: technical requirements, application/user flows, UI/UX, schema/API/event/migration contracts, the Master Build Sequence Register, and executable module plans. `Platform_00` §10.1, `Platform_08` §4.1–4.3 and `Platform_12` §29 govern acceptance and adjudication. The root `Platform_Master_Build_Sequence_Register_v1.0.md` remains the single programme execution map.
+
+- Before a correction, the responsible reviewer MUST verify the exact current `main`/task SHA, read the owning and affected masters, check existing coverage and implementation evidence, and record ACCEPT, ACCEPT WITH CHANGES, REJECT, HOLD FOR EVIDENCE or FOUNDER DECISION REQUIRED with rationale. An earlier handover or open PR is evidence to challenge, not merged authority.
+- Corrections MUST preserve stable REQ/PRD/BUILD/UI/DF identifiers, approved phase boundaries and the 25-file v3.3.0 set unless separately governed change control authorizes a change. Existing owners take precedence over creating new master documents.
+- Every accepted correction MUST update its affected owners and the Index/Decision Register/RTM/Build Register/navigation where applicable. No writer may resolve a material missing contract by guessing an API, schema, capacity guarantee, HA mechanism or security exception.
+- All six areas require acceptance together. `DOC_P0_BLOCKED` remains until the complete evidence gate passes; a corrected subset or green structural validator is not partial acceptance. Documentation acceptance, implementation maturity and production certification remain separate.
+- Documentation work MUST use isolated controlled branches and PRs, exact-head independent review and relevant validation. It MUST NOT change runtime code, infrastructure, CI runner state or service configuration merely to make documentation pass. Existing tool authority and exact-SHA independent-audit requirements remain in force; writers cannot certify their own amendments.
 
 ## Non-negotiable engineering rules
 
@@ -224,7 +234,7 @@ Do not paste the agent or Skill catalogue here. Resolve it from manifests.
 - Writer isolation: one writer per checkout; parallel writes use separate branches/worktrees
 - Evidence: typed claims, exact-head current-base CI, no writer self-certification
 
-Capability Pack v1.3 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library (63 Skills) from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §3; do not freeze a historical file-count ceiling.
+Capability Pack v1.3 currently resolves 12 P0 + 22 P1 agents and a bounded Skill library (63 Skills) from those manifests. Those counts are snapshots, not a frozen product requirement. Platform product version remains v3.3.0. Current Mother Reference file count and set are discovered from `Platform_00_Document_Index.md` §5; do not freeze a historical file-count ceiling.
 
 ---
 
@@ -273,7 +283,7 @@ The v3.3.0 requirements are architecture/product authority only. Runtime impleme
 
 Non-negotiable execution rules:
 - Phase 1 remains the frozen production Network & Infrastructure Observability core; do not pull Phase-2 breadth into Phase 1 merely because a customer RFP asks for it.
-- Phase 1.5 is the enterprise foundation: exactly-two-Core HA/MSP certification, Integration Fabric/CMDB reconciliation, bounded operational OTel span/dependency evidence, NCM Change Assurance, selected broader packs and serverless.
+- Phase 1.5 is the enterprise foundation: exactly-two-Core HA/MSP certification, **advanced/full** Integration Fabric and governed bidirectional CMDB reconciliation (expanding the preserved Phase-1 four ITSM rails, Enrichment/bounded Publication, Mapping Studio/Test Sandbox and common Integration Service — not relocating them), bounded operational OTel span/dependency evidence, NCM Change Assurance, selected broader packs and serverless.
 - Phase 2 is the Enterprise ITOM/AIOps RFP-readiness envelope. Its exit gate is `ECRP-P2-v1`, not feature presence.
 - Full native APM (bytecode/auto-instrumentation, method/line-level tracing, continuous profiling, full RUM/session replay) and full native always-on DPI/deep packet analytics are prohibited from Phase 2 and require Phase 2.5+ change control.
 - Phase 2 MAY integrate with external APM/NPM/DPI/SIEM/CMDB/ITSM tools and ingest their evidence through governed Integration Packs; external-tool evidence never bypasses tenant identity, provenance, confidence, RBAC, audit, rate/cardinality controls or Platform RCA safety.

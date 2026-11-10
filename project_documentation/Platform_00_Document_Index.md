@@ -5,7 +5,7 @@
 **Status:** **Authoritative Mother Reference — Documentation Constitution (A1 NORMALIZED_V1)**
 **Product:** Platform (internal engineering/build identifier) / AmrudAi (commercial customer-facing product name)
 **Project independence:** Clean-room product; separate from ThoughtData, Enterprise360 and NetAI
-**Last reconciliation:** 2026-10-29 — Issue #269 Founder-approved Phase 2 Enterprise RFP Readiness full-set roadmap reconciliation; Mother Reference set remains v3.3.0 and v3.4.0 remains reserved for the separately gated set-wide tranche. Prior Issue #200/#202 Phase 1/1.5 envelope reconciliation and ACP-001..ACP-018 decisions retained.
+**Last reconciliation:** 2026-11-10 — P0 Mother Reference correction candidate reconciled against canonical main `e207be47372236aadade3d452167bc03f4e5025e` after PR #304 and exact-main Platform CI `42791498627` attempt 3 SUCCESS 4/4. Integrates adjudicated PR #300/#301/#283/#284 clauses into existing owners; all six areas have completed candidate-level P0/P1 semantic review, while programme state remains `DOC_P0_BLOCKED` under §10.1 until governed PR/CI/merge and post-merge read-back complete. Issues #200/#202/#268/#269/#272 and ACP-001..ACP-018 remain governing scope. Set version remains v3.3.0; v3.4.0 is reserved for the separately gated set-wide tranche. Amendments become authoritative only after reviewed merge to canonical main.
 **Normalization state:** NORMALIZED_V1. Platform_01..08 are NORMALIZED_V1 after A2.3; Platform_09..23 remain TRANSITIONAL_LEGACY until later A3–A5 tranches.
 
 ## 1. Authority
@@ -28,7 +28,7 @@
 - Capacity statements remain engineering targets until benchmark-certified. A capacity target is not benchmark certification.
 - Security/compliance readiness must never be represented as achieved certification until independently achieved. Security readiness is not compliance certification.
 - Customer-value/MTTR percentages are not product claims until supported by disclosed reproducible customer/pilot evidence.
-- A1 does not resolve Founder/commercial/legal-reserved conflicts (including any licence-grace day-count conflict between Mother References and external handover notes). Encountered conflicts remain unresolved until Founder change control.
+- Engineering MUST NOT invent a resolution to Founder/commercial/legal-reserved conflicts. First check recorded supersession: the 15-day post-expiry grace is already decided by the Founder on 2026-09-30 (`Platform_12` §22), so obsolete seven-day text requires correction, not a new commercial decision. Genuinely unresolved reserved matters remain blocked until Founder change control.
 
 ## 3. Maturity model
 
@@ -53,7 +53,7 @@ Unsupported combined spellings that accidentally imply a higher maturity without
 
 A logical table, API, topic, service or interface described in a Mother Reference does **not** prove it physically exists.
 
-Where implementation exists, documentation should eventually point to physical source evidence such as:
+An implementation-maturity claim MUST identify its exact source SHA and physical evidence for the claimed boundary, such as:
 
 - migration;
 - schema;
@@ -65,7 +65,7 @@ Where implementation exists, documentation should eventually point to physical s
 - benchmark;
 - CI evidence.
 
-Where absent, status remains `SPECIFIED` / `NOT IMPLEMENTED` (or equivalent). A1 establishes this rule; A2–A5 progressively attach evidence pointers without inventing architecture.
+Where production-path source is absent, status remains `SPECIFIED` / `NOT IMPLEMENTED`. Where evidence has not been inspected, status is `NOT VERIFIED`; lack of a pointer alone MUST NOT be misreported as proof that code is absent. A default-off implementation is not the same as an absent implementation. Structural normalization and historical layer checkmarks do not satisfy semantic or implementation evidence gates.
 
 ## 5. Exact Mother Reference set
 
@@ -166,7 +166,7 @@ Conflicts require documented change control.
 
 ## 8. Mandatory capability specification contract
 
-Every significant capability/sub-capability must eventually be specified against the following contract fields where applicable. Fields that are genuinely irrelevant may state **N/A with reason**. The contract must not encourage meaningless boilerplate.
+Every significant approved capability/sub-capability MUST satisfy the following applicable contract fields before documentation acceptance or implementation admission for that boundary. Shared behavior MAY be inherited by an exact owner/section reference plus capability-specific differences; copying all 83 fields into every document is not required. A genuinely irrelevant field MUST state **N/A with reason**. A material unknown MUST identify an owner, evidence required and blocked acceptance; a generic “as needed” or family-level link is insufficient.
 
 1. capability ID/name
 2. customer/operational outcome
@@ -252,7 +252,7 @@ Every significant capability/sub-capability must eventually be specified against
 82. owner of each unresolved decision
 83. blocking impact
 
-A1 makes this contract normative. Completing the field set for every capability across Platform_01..23 is A2–A5 work, not an A1 claim.
+The 2026-11-06 Founder directive makes complete, reviewed coverage across the six areas in §10.1 P0. Earlier A1/A2–A5 normalization labels describe document structure only; they do not defer this acceptance obligation or claim it has passed. Approved future-phase intent remains explicit and MUST NOT be promoted into an earlier phase. An unresolved in-scope contract remains a blocker even when its phase is recorded.
 
 ## 9. Fixed product/architecture decisions
 
@@ -308,10 +308,10 @@ A1 makes this contract normative. Completing the field set for every capability 
 - Optional dedicated local/private inference is an AI-Gateway provider, not a third Core/HA authority or authoritative data store; deterministic Platform operation does not depend on it.
 - Authoritative system/event/telemetry instants are absolute UTC; interactive display uses IANA zones with precedence override → user preference → browser local → tenant.timezone → UTC; display preference never rewrites operational policy timezones; host OS timezone is non-authoritative.
 - Recurring monitoring uses Core schedule/placement authority plus Sensor durable local desired-state execution; Monitor Group, Scheduling Class and Execution Class remain distinct; cadence and freshness are both required; deterministic phase spreading and failure-domain backoff are mandatory architecture.
-- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence; benchmarking/certification/deployment remain open, and derived delta/rate/reset/wrap/discontinuity semantics remain a P0 implementation gap.
+- Exact raw Counter64 Sensor→Core→Kafka→ClickHouse transport/persistence is **IMPLEMENTED+TESTED** on current main after PR #84, including full unsigned-64 boundary coverage and replay-safe `UInt64` persistence. After PR #304, the BUILD-042 exact Counter32/Counter64 delta/rate/reset/wrap/discontinuity **leaf engine** is also implemented (`sensor/internal/protocol/snmp/counter/`). Bounded status: `PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending`. Network Sensor integration, whole BUILD-042/BUILD-048 certification and deployment remain open.
 - Exactly-two-Core Active/Standby HA remains P0 and not production-certified; Phase 1 certifies standalone Core only. No Patroni/repmgr/ClickHouse Keeper/Raft/Consul/etcd third-coordination selection is made by this baseline.
 - Standard production Sensor roles are NETWORK, INFRASTRUCTURE, FLOW and LOG; SYNTHETIC and CLOUD_API are conditional dedicated roles; COMBINED is lab/dev/small-deployment unless separately certified; runtime STREAMING_EVENT requires product/runtime reconciliation toward FLOW/LOG.
-- PR #81 Sensor telemetry durability is canonical at-least-once; concurrent pending-reservation republish amplification is P1 hardening, not a new datastore.
+- Sensor telemetry durability remains at-least-once: PostgreSQL reservation/publisher lease, Kafka transactional publication, PostgreSQL finalization, then deletion-authorizing ACK. Current source includes publisher-lease arbitration; the old “no publisher lease” description is obsolete. Cross-store crash-window replay, downstream visibility/deduplication and declared failure-profile certification remain separate gates (`Platform_12` §16; `Platform_17`).
 
 ## 10. Completeness and global traceability
 
@@ -329,11 +329,19 @@ Machine-enforced structural protection is provided by:
 
 These are supporting governance artifacts, not Mother References.
 
+### 10.1 Six-area P0 documentation acceptance
+
+**Authority:** Founder directive 2026-11-06; adjudication and current baseline are recorded in `Platform_12` §29. The attached handover is a proposal, not a substitute for current-source review. The existing master set and root Build Register remain the owners; no additional TRD, flow, UI or schema master is authorized merely because a gap exists.
+
+`Platform_08` §4.1 is the canonical six-area acceptance matrix. Each approved requirement MUST trace to its phase, technical contract, applicable journey/UI, API/event/data/migration contract, test/operational acceptance and BUILD/module plan. Explicit nontechnical or non-UI applicability requires a reason. Every material missing binding, contradiction or unselected load-bearing decision blocks the affected area and therefore the programme.
+
+`DOC_P0_ACCEPTED` requires all six areas to pass at one reviewed source baseline, with no unresolved in-scope material gap, exact-head independent review, relevant validation/CI, reviewed merge and post-merge read-back. Until then the programme is `DOC_P0_BLOCKED`; no “partial but accepted” state exists. `SOURCE_RECONCILED` identifies a verified baseline, not complete documentation. A structural validator PASS cannot establish semantic completeness, implemented behavior or production readiness.
+
 ## 11. Explicit unresolved/P0 items
 
 Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026-09-21 handoff priority freeze. Restated here for navigation:
 
-- exact Counter64 typed pipeline (Sensor→Core→Kafka→ClickHouse) preserving full unsigned 64-bit source truth;
+- BUILD-042 Network Sensor integration / counter correctness benchmark / certification of the already-merged exact Counter32/Counter64 derivation leaf (PR #304) plus raw path (PR #84); leaf implementation is not whole-BUILD or BUILD-048 certification (§9);
 - display timezone persistence/API/UI behavior (`display_timezone` preference, precedence, DST/report correctness);
 - generic recurring scheduling/freshness/deterministic spreading and production scheduler wiring (including SNMP);
 - failure-domain backoff, recovery ramp and resource-pressure deferral behavior;
@@ -417,7 +425,7 @@ Policy:
 
 For ChatGPT Project use, these **25 Markdown mother-reference files** are sufficient as the authoritative source set.
 For code-agent enforcement, `AGENTS.md` should also be available at repository root (`~/nms/AGENTS.md` in a working clone), preferably as the existing symlink to `project_documentation/AGENTS.md`, so tools that auto-discover root instructions see the same content.
-Authority of the clone follows §12 after merge to the canonical GitHub repository.
+Authority of the clone follows §13 after merge to the canonical GitHub repository.
 
 OSS governance remains governed by `Platform_07_OSS_Catalog.md`:
 
@@ -510,7 +518,7 @@ This v3.2.2 documentation baseline freezes implementation-honest architecture be
 
 Closed-domain reconciliation decision: Flow/NTA, Log/SIEM, Cloud/full-stack, Extensibility/API Studio/Webhook and ITSM/Automation requirements remain inside existing owners (`REQ-NET-*`, `REQ-INF-*`, `REQ-EXT-*`, `REQ-INT-*` and related PRD/Architecture sections). **SPECIALIZED MASTER NOT REQUIRED AT THIS BASELINE** for those domains. This does not permanently prohibit a later master if future scope genuinely justifies one under PR #78 number-allocation governance.
 
-Founder-fixed **Display Time Zone** behavior is specified as UTC source-of-truth instants plus per-user IANA display preference with explicit precedence and strict separation from operational-policy timezones. Generic recurring **scheduling/freshness** architecture extends Core placement/Sensor scheduler/Capability Pack contracts without a scheduler microservice. Exact Counter64 remains **SPECIFIED / P0 / NOT END-TO-END IMPLEMENTED**. Exactly-two-Core Active/Standby HA remains **SPECIFIED / P0 / NOT PRODUCTION CERTIFIED**. Sensor production-role direction reconciles NETWORK/INFRASTRUCTURE/FLOW/LOG with conditional SYNTHETIC/CLOUD_API and lab COMBINED; runtime `STREAMING_EVENT` requires implementation reconciliation and is not the final product substitute for FLOW/LOG.
+Founder-fixed **Display Time Zone** behavior is specified as UTC source-of-truth instants plus per-user IANA display preference with explicit precedence and strict separation from operational-policy timezones. Generic recurring **scheduling/freshness** architecture extends Core placement/Sensor scheduler/Capability Pack contracts without a scheduler microservice. Exact Counter64 / BUILD-042 remains **PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending** (not end-to-end certified/deployed). Exactly-two-Core Active/Standby HA remains **SPECIFIED / P0 / NOT PRODUCTION CERTIFIED**. Sensor production-role direction reconciles NETWORK/INFRASTRUCTURE/FLOW/LOG with conditional SYNTHETIC/CLOUD_API and lab COMBINED; runtime `STREAMING_EVENT` requires implementation reconciliation and is not the final product substitute for FLOW/LOG.
 
 PR #81 telemetry durability (durable stream identity + reserve→Kafka→finalize→ACK) is canonical **at-least-once**. Concurrent HTTP retry amplification is recorded as P1 hardening. Old PR #59 insert-token/dedupe-window correctness is superseded; only bounded Kafka→ClickHouse micro-batching remains as future P1 performance work after benchmark.
 
@@ -528,7 +536,7 @@ The proposed plaintext Platform transport direction was **rejected** for product
 
 The resource-efficiency principle is accepted as an engineering constraint: optimize measured algorithms/data paths/queries/schemas/batching/unnecessary work before increasing certified hardware, without weakening correctness, durability, security or freshness.
 
-Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. Derived counter delta/rate/reset/wrap/discontinuity behavior remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**.
+Implementation truth is also reconciled to verified current `main`: PR #84 established the exact raw Counter64 Sensor→Core→Kafka→ClickHouse path as **IMPLEMENTED+TESTED**. PR #304 (`e207be47372236aadade3d452167bc03f4e5025e`) added the BUILD-042 exact Counter32/Counter64 delta/rate/reset/wrap/discontinuity leaf engine. Bounded status remains `PARTIAL — exact raw Counter64 + counter derivation leaf implemented; integration/benchmark/certification pending` — not Network Sensor-integrated, not BUILD-042/048 certified, not deployed.
 
 This reconciliation updates existing Mother References and keeps the authoritative set at **25 files**, version **v3.2.2**, highest specialized master **Platform_23**. No `Platform_24` is introduced.
 
@@ -593,6 +601,10 @@ Maturity invariant remains: **SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED 
 
 ---
 
+## 2026-10-30 — Transportation, connectivity and redundancy adversarial-audit disposition
+
+The external transport audit and corrected response were independently adjudicated. Scope remains the governing **v3.3.0 / 25 Mother Reference files** and the frozen Issue #200 phase envelopes. Approved clarifications are in Platform_03 §§7.1–7.2 (Active/fencing/durability barrier, WAN/reconnect/capacity and design-side negative-acceptance scenarios), Platform_04 (transport/HA subsystem boundary), Platform_06 (overload/replay/partition dataflow), Platform_12 (accept/partial/reject provenance), and Platform_17 (on-wire ACK/retry semantics). The pre-existing Platform_11 sizing baseline, Platform_14 certification authority and Build Sequence Register execution ownership remain unchanged; audit findings do not expand their file-edit ownership. This neither changes formal requirement/BUILD IDs nor chooses a third Core, HA consensus/witness/fencing technology, 30–60s token TTL or universal RTT algorithm. Kafka/PG atomicity, ClickHouse ACK/consumer custody, two-Core fencing, HA RPO0 and large global-estate acceptance remain unproven until independently certified.
+
 ## A.15 Phase 1 / Phase 1.5 certification-envelope reconciliation — Issue #200 / #202
 
 **Authority:** Issue [#200](https://github.com/gagandsm-max/platform/issues/200) (frozen envelopes) and Issue [#202](https://github.com/gagandsm-max/platform/issues/202) (Tranche A bounded writer). Technical main precondition: BUILD-011 post-merge at `179a72837d050f4c757858452d3719c2e8978b95` (CI run `38120861672`); that evidence does not certify Phase-1 GA or Core HA.
@@ -637,7 +649,7 @@ Issue #269 is an additive Founder-approved roadmap reconciliation inside Mother 
 
 The authoritative phase outcome is:
 - **Phase 1:** frozen production Network & Infrastructure Observability core.
-- **Phase 1.5:** Enterprise Foundation — exactly-two-Core HA/MSP, Integration Fabric, CMDB reconciliation, bounded operational OTel spans/dependency evidence, NCM Change Assurance, selected broader technology packs and serverless.
+- **Phase 1.5:** Enterprise Foundation — exactly-two-Core HA/MSP; **advanced/full** Integration Fabric and governed bidirectional CMDB reconciliation that expands (does not relocate) the preserved Phase-1 four ITSM certification targets, Enrichment/bounded Publication, Mapping Studio/Test Sandbox and common Integration Service; bounded operational OTel spans/dependency evidence; NCM Change Assurance; selected broader technology packs and serverless.
 - **Phase 2:** **Enterprise ITOM/AIOps RFP Readiness** for heterogeneous large-enterprise estates, regulated deployments, monitoring/ITOM/AIOps integrations and enterprise-scale certification. Formal `PRD-ECR-*` / `REQ-ECR-*` authority lives in Platform_23.
 - **Phase 2.5+:** full native APM and full native always-on DPI/deep packet analytics. Phase 2 may integrate those external tools and consume their evidence without claiming native full APM/DPI.
 

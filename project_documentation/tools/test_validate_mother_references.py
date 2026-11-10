@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 import tempfile
@@ -18,6 +19,7 @@ from validate_mother_references import (  # noqa: E402
     CANONICAL_MOTHER_REFERENCE_VERSION,
     CONSTITUTIONAL_AUTHORITATIVE_COUNT,
     SCHEMA_VERSION,
+    MotherReferenceValidator,
     validate_docs_root,
 )
 
@@ -61,7 +63,7 @@ def _header(doc_id: str | None, version: str = "3.3.0") -> str:
 
 
 def _req_registry(rows: list[tuple[str, str, str]]) -> str:
-    """rows: (id, summary, owner)."""
+    """rows: (id, summary, owner). Locator defaults to the fixture section that holds the ID."""
     lines = [
         "<!-- GLOBAL PRIMARY REQ REGISTRY -->",
         "### GLOBAL PRIMARY REQ REGISTRY",
@@ -70,8 +72,14 @@ def _req_registry(rows: list[tuple[str, str, str]]) -> str:
         "|---|---|---|---|---|---|---|",
     ]
     for rid, summary, owner in rows:
+        # Platform_08-owned fixture IDs live under historical §6; other owners use §1.
+        locator = (
+            "§6 Historical requirement catalogue"
+            if owner.endswith("Platform_08_Requirements_Traceability.md")
+            else "§1 Section"
+        )
         lines.append(
-            f"| {rid} | {summary} | `{owner}` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |"
+            f"| {rid} | {summary} | `{owner}` | {locator} | BASE_RTM_INDEXED | SPECIFIED | n/a |"
         )
     lines.append("<!-- END GLOBAL PRIMARY REQ REGISTRY -->")
     return "\n".join(lines)
@@ -88,7 +96,7 @@ def _prd_registry(rows: list[tuple[str, str, str]]) -> str:
     ]
     for rid, summary, owner in rows:
         lines.append(
-            f"| {rid} | {summary} | `{owner}` | §1 | — | SPECIFIED |"
+            f"| {rid} | {summary} | `{owner}` | §1 Section | — | SPECIFIED |"
         )
     lines.append("<!-- END GLOBAL PRIMARY PRD REGISTRY -->")
     return "\n".join(lines)
@@ -261,15 +269,20 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                     for old, new in req_row_overrides.items():
                         body = body.replace(old, new, 1)
             elif fname == "Platform_02_PRD.md":
-                body = _header(doc_id, version) + (
-                    p02_body
-                    or (
-                        "\n".join(
+                if p02_body is None:
+                    p02_content = (
+                        "## 1. Section\n\n"
+                        + "\n".join(
                             f"| `{rid}` | {summary} |" for rid, summary, _owner in prd_rows
                         )
                         + "\n"
                     )
-                )
+                elif re.search(r"^##\s+1\b", p02_body, re.M):
+                    p02_content = p02_body
+                else:
+                    # Preserve custom bodies while satisfying default §1 PRD locator.
+                    p02_content = "## 1. Section\n\n" + p02_body
+                body = _header(doc_id, version) + p02_content
             else:
                 body = _header(
                     (doc_id_overrides or {}).get(fname, doc_id), version
@@ -545,8 +558,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             errors,
         )
 
-    def test_18_transitional_legacy_duplicate_sections_not_blocked(self) -> None:
-        # Platform_09+ remain TRANSITIONAL_LEGACY; duplicate ## numbers allowed.
+    def test_18_transitional_legacy_duplicate_sections_are_blocked(self) -> None:
+        # All Mother References reject duplicate numeric section identifiers,
+        # including TRANSITIONAL_LEGACY documents.
         root = self._write_minimal()
         (root / "Platform_09_UI_UX_Master.md").write_text(
             _header("PLATFORM-UIUX-001")
@@ -554,9 +568,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8",
         )
         errors = validate_docs_root(root)
-        self.assertFalse(
+        self.assertTrue(
             any(
-                "Platform_09_UI_UX_Master.md: duplicate normalized" in e for e in errors
+                "Platform_09_UI_UX_Master.md" in e
+                and "duplicate numbered section identifier" in e
+                for e in errors
             ),
             errors,
         )
@@ -1010,7 +1026,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8"
         )
         p08 = p08.replace(
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue |",
             "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` |  |",
             1,
         )
@@ -1033,8 +1049,8 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             encoding="utf-8"
         )
         p08 = p08.replace(
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 | BASE_RTM_INDEXED | SPECIFIED | n/a |",
-            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §2 |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue | BASE_RTM_INDEXED | SPECIFIED | n/a |",
+            "| REQ-P-001 | Quality | `Platform_08_Requirements_Traceability.md` | §6 Historical requirement catalogue |",
             1,
         )
         (root / "Platform_08_Requirements_Traceability.md").write_text(
@@ -2243,6 +2259,3239 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             ),
             errors,
         )
+
+    def test_69_normative_owner_table_with_requirement_prose_passes(self) -> None:
+        """Legitimate normative owner anchors (ID + requirement prose) must pass."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "## 1. Section\n\n"
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 28. ITSM and notification integrations\n\n"
+                "Platform SHALL provide ServiceNow/BMC/Jira SM ITSM connectors with "
+                "binding, certification and durable outbox semantics (`REQ-INT-001`).\n"
+            ),
+        )
+        # Override default §1 locator to the substantive §28 owner section.
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-INT-001 | ITSM connectors | `Platform_02_PRD.md` | §1 Section |",
+            "| REQ-INT-001 | ITSM connectors | `Platform_02_PRD.md` | §28 ITSM and notification integrations |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_70_identifier_only_ownership_index_footer_fails(self) -> None:
+        """Trailing RTM formal-ID ownership index placeholders must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 28. ITSM\n\nProduct prose without the formal ID.\n\n"
+                "<!-- RTM FORMAL-ID OWNERSHIP INDEX -->\n"
+                "## RTM formal-ID ownership index\n\n"
+                "This section is a structural ownership index.\n\n"
+                "- `REQ-INT-001`\n"
+                "<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-INT-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_71_bare_id_bullet_list_without_prose_fails(self) -> None:
+        """Bare identifier bullets (no requirement prose) must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-NET-008",
+                    "Protocol depth",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body=(
+                "| `PRD-HA-001` | HA pair |\n\n"
+                "## 11. Network monitoring\n\n"
+                "Some unrelated prose.\n\n"
+                "- `REQ-NET-008`\n"
+            ),
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-NET-008" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_72_missing_owner_id_still_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                (
+                    "REQ-INT-001",
+                    "ITSM connectors",
+                    "Platform_02_PRD.md",
+                )
+            ],
+            p02_body="| `PRD-HA-001` | HA pair |\n\n## 28. ITSM\n\nNo formal ID here.\n",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-INT-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_73_invalid_owner_document_still_fails(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md")
+            ],
+            req_row_overrides={
+                "`Platform_08_Requirements_Traceability.md`": "`Platform_99_Does_Not_Exist.md`",
+            },
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-P-001" in e
+                and (
+                    "not a valid Mother Reference filename" in e
+                    or "does not exist" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_74_duplicate_primary_ids_still_fail(self) -> None:
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                ("REQ-P-001", "Duplicate", "Platform_08_Requirements_Traceability.md"),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("duplicate primary REQ row: REQ-P-001" in e for e in errors),
+            errors,
+        )
+
+    def test_75_existing_source_ids_with_normative_prose_remain_accepted(self) -> None:
+        """Valid existing source IDs in owner prose/tables remain accepted."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-P-001", "Quality", "Platform_08_Requirements_Traceability.md"),
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+                ),
+            ]
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_76_rtm_section_formal_requirements_marker_alone_fails(self) -> None:
+        """<!-- RTM SECTION FORMAL REQUIREMENTS --> catalogues must not prove ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-001", "Clean-room", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\nCatalogue prose without the formal ID.\n\n"
+            + "<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->\n"
+            + "#### Formal requirements — REQ-OSS\n\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-OSS-001` | Clean-room Platform |\n"
+            + "<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-OSS -->\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-001 | Clean-room | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-001 | Clean-room | `Platform_07_OSS_Catalog.md` | §1 Purpose |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-OSS-001" in e
+                and (
+                    "absent from declared owner" in e
+                    or "does not bind ID" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_77_synthetic_two_column_summary_under_marker_fails(self) -> None:
+        """Synthetic two-column summary tables under markers cannot own a requirement."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-DATA-001", "Retention", "Platform_11_Sizing_Capacity_Storage_Master.md"),
+            ],
+        )
+        (root / "Platform_11_Sizing_Capacity_Storage_Master.md").write_text(
+            _header("PLATFORM-SIZING-001")
+            + "## 10. Retention\n\nNo substantive ID outside the marker.\n\n"
+            + "<!-- RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-DATA-001` | Customer-configurable raw retention |\n"
+            + "<!-- END RTM SECTION FORMAL REQUIREMENTS: REQ-DATA -->\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §1 Section |",
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §10 Retention |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("REQ-DATA-001" in e for e in errors),
+            errors,
+        )
+
+    def test_78_wrong_domain_owner_fails(self) -> None:
+        """ID present only in a non-owner document does not satisfy ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-UI-001", "Dashboard Studio", "Platform_09_UI_UX_Master.md"),
+            ],
+        )
+        (root / "Platform_09_UI_UX_Master.md").write_text(
+            _header("PLATFORM-UIUX-001") + "## 1. Section\n\nNo UI requirement ID here.\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 1. Section\n\n| `PRD-HA-001` | HA |\n\n"
+            + "## 9. UI\n\n`REQ-UI-001` lives only in the wrong owner.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-UI-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_79_missing_and_stale_section_locator_fail(self) -> None:
+        """Missing section and stale locator that does not contain the ID both fail."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 1. Mandate\n\nUnrelated.\n\n"
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "Platform SHALL use exactly two Core nodes (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        # Missing section
+        p08_missing = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §99 Missing |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08_missing, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e and "locator section not found" in e for e in errors
+            ),
+            errors,
+        )
+        # Stale section: exists but does not contain the ID
+        p08_stale = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Mandate |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08_stale, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e and "absent from locator section" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_80_duplicate_conflicting_owner_still_fails_on_declared_owner(self) -> None:
+        """Declared owner without the ID fails even if another doc also mentions it."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-NET-001", "SNMP", "Platform_02_PRD.md"),
+            ],
+            p02_body="## 1. Section\n\n| `PRD-HA-001` | HA |\n\nNo NET ID here.\n",
+        )
+        (root / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+            _header("PLATFORM-PROTOCOL-001")
+            + "## 1. Section\n\nAlso mentions `REQ-NET-001` but is not the declared owner.\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-NET-001" in e and "absent from declared owner" in e for e in errors
+            ),
+            errors,
+        )
+
+    def test_81_valid_substantive_and_specialized_master_owners_pass(self) -> None:
+        """Exact locator + ID inside substantive owner section must pass."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+                (
+                    "REQ-OIV-001",
+                    "SaaS monitoring",
+                    "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md",
+                ),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "Platform SHALL deploy exactly two Core nodes for HA (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        (root / "Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md").write_text(
+            _header("PLATFORM-INTELVALUE-001")
+            + "## 1. Section\n\n"
+            + "Platform SHALL provide SaaS monitoring evidence (`REQ-OIV-001`).\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §7 Exactly-two-Core HA |",
+            1,
+        )
+        p08 = p08.replace(
+            "| REQ-OIV-001 | SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | §1 Section |",
+            "| REQ-OIV-001 | SaaS monitoring | `Platform_19_Operational_Intelligence_MTTR_and_Value_Addendum.md` | §1 Section |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertEqual(errors, [], errors)
+
+    def test_81b_synthetic_dot_zero_family_locator_fails(self) -> None:
+        """Platform_08 may not point primary ownership at `.0 Normative requirements`."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\n"
+            + "### 7.0 Normative requirements — REQ-A family\n\n"
+            + "Platform SHALL deploy exactly two Core nodes for HA (`REQ-A-001`).\n\n"
+            + "### 7.1 Substantive HA contract\n\n"
+            + "Exactly two Core nodes.\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §1 Section |",
+            "| REQ-A-001 | Two-Core HA | `Platform_03_Architecture.md` | §7.0 Normative requirements — REQ-A family |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-A-001" in e
+                and "synthetic .0 Normative requirements" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_82_unmarked_two_column_summary_table_alone_fails(self) -> None:
+        """Two-column Requirement ID | Normative requirement tables alone cannot own."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-002", "Approved OSS only", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\nCatalogue intro without the formal ID in prose.\n\n"
+            + "| Requirement ID | Normative requirement |\n"
+            + "|---|---|\n"
+            + "| `REQ-OSS-002` | Approved OSS only |\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-002 | Approved OSS only | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-002 | Approved OSS only | `Platform_07_OSS_Catalog.md` | §1 Purpose |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "REQ-OSS-002" in e
+                and (
+                    "absent from declared owner" in e
+                    or "does not bind ID" in e
+                    or "absent from locator section" in e
+                )
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_83_four_column_synthetic_family_table_alone_fails(self) -> None:
+        """Four-column family boilerplate tables cannot satisfy primary ownership."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-OSS-003", "Licence review", "Platform_07_OSS_Catalog.md"),
+            ],
+        )
+        (root / "Platform_07_OSS_Catalog.md").write_text(
+            _header("PLATFORM-OSS-001")
+            + "## 1. Purpose\n\n"
+            + "### 1.0 Normative requirements — REQ-OSS family\n\n"
+            + "**Shared normative envelope:** inherits parent OSS admission contract.\n\n"
+            + "| Requirement ID | Normative SHALL contract | Parent-section envelope | Boundary / non-goal |\n"
+            + "|---|---|---|---|\n"
+            + "| `REQ-OSS-003` | Platform SHALL require licence/CVE/SBOM review before merge. "
+            + "Distinctive obligations bind with the shared envelope. | Inherits shared envelope | "
+            + "Do not invent unlisted OSS. |\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-OSS-003 | Licence review | `Platform_07_OSS_Catalog.md` | §1 Section |",
+            "| REQ-OSS-003 | Licence review | `Platform_07_OSS_Catalog.md` | §1.0 Normative requirements — REQ-OSS family |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("REQ-OSS-003" in e for e in errors),
+            errors,
+        )
+
+    def test_84_differently_named_family_catalogue_fails(self) -> None:
+        """Named family-catalogue headings cannot own a requirement."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-DATA-001", "Retention", "Platform_11_Sizing_Capacity_Storage_Master.md"),
+            ],
+        )
+        (root / "Platform_11_Sizing_Capacity_Storage_Master.md").write_text(
+            _header("PLATFORM-SIZING-001")
+            + "## 10. Retention\n\nIntro only.\n\n"
+            + "### REQ-DATA family catalogue\n\n"
+            + "`REQ-DATA-001` Customer-configurable raw retention.\n",
+            encoding="utf-8",
+        )
+        p08 = (root / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        p08 = p08.replace(
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §1 Section |",
+            "| REQ-DATA-001 | Retention | `Platform_11_Sizing_Capacity_Storage_Master.md` | §10 Retention |",
+            1,
+        )
+        (root / "Platform_08_Requirements_Traceability.md").write_text(
+            p08, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(any("REQ-DATA-001" in e for e in errors), errors)
+
+    def test_85_duplicate_conflicting_primary_owner_rows_fail(self) -> None:
+        """Duplicate primary ownership rows for the same ID fail."""
+        root = self._write_minimal(
+            req_rows=[
+                ("REQ-A-001", "Two-Core HA", "Platform_03_Architecture.md"),
+                ("REQ-A-001", "Conflicting HA", "Platform_02_PRD.md"),
+            ],
+        )
+        (root / "Platform_03_Architecture.md").write_text(
+            _header("PLATFORM-ARC-001")
+            + "## 7. Exactly-two-Core HA\n\nPlatform SHALL use two Cores (`REQ-A-001`).\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any("duplicate primary REQ row: REQ-A-001" in e for e in errors),
+            errors,
+        )
+
+    def test_86_duplicate_subsection_11_1_fails(self) -> None:
+        """Duplicate ### 11.1 headings fail closed."""
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 11. Network\n\n"
+            + "### 11.1 SNMP\n\nFirst body.\n\n"
+            + "### 11.1 SNMP\n\nDuplicate body.\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "duplicate numbered section identifier" in e
+                and "11.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_87_duplicate_nested_11_1_1_fails(self) -> None:
+        """Duplicate #### 11.1.1 headings fail closed."""
+        root = self._write_minimal()
+        (root / "Platform_02_PRD.md").write_text(
+            _header("PLATFORM-PRD-001")
+            + "## 11. Network\n\n"
+            + "### 11.1 SNMP\n\n"
+            + "#### 11.1.1 Enterprise SNMP\n\nOne.\n\n"
+            + "#### 11.1.1 Enterprise SNMP\n\nTwo.\n\n",
+            encoding="utf-8",
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "Platform_02_PRD.md" in e
+                and "duplicate numbered section identifier" in e
+                and "11.1.1" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_88_duplicate_section_with_req_id_is_ambiguous(self) -> None:
+        """Locator into a duplicated section fails closed even if one copy has the REQ."""
+        from validate_mother_references import locator_binds_id
+
+        owner = (
+            "## 4. Alerts\n\n"
+            "### 4.2 Ownership\n\n`REQ-ALT-011` ownership contract.\n\n"
+            "### 4.2 Ownership\n\nDuplicate without id.\n"
+        )
+        ok, reason = locator_binds_id(
+            "§4.2 Alert ownership", "REQ-ALT-011", owner
+        )
+        self.assertFalse(ok)
+        self.assertIn("ambiguous", reason)
+
+    def test_89_synthetic_subtree_strips_through_nested_children(self) -> None:
+        """Non-normative stripping continues past nested child headings."""
+        from validate_mother_references import strip_ownership_index_placeholders
+
+        text = (
+            "## 1. Purpose\n\nKeep.\n\n"
+            "### Non-normative ownership index\n\n"
+            "#### Nested child still non-normative\n\n"
+            "`REQ-OSS-001` bare.\n\n"
+            "### 1.1 Real subsection\n\n"
+            "Platform SHALL enforce OSS admission (`REQ-OSS-001`).\n"
+        )
+        cleaned = strip_ownership_index_placeholders(text)
+        self.assertNotIn("Nested child still non-normative", cleaned)
+        self.assertIn("### 1.1 Real subsection", cleaned)
+        self.assertIn("REQ-OSS-001", cleaned)
+
+    def test_90_valid_unique_hierarchy_passes_section_map(self) -> None:
+        """Unique numbered hierarchy maps without collision."""
+        from validate_mother_references import section_body_map
+
+        text = (
+            "## 11. Network\n\n"
+            "### 11.1 SNMP\n\nSNMP body.\n\n"
+            "#### 11.1.1 Enterprise\n\nNested.\n\n"
+            "### 11.2 Path\n\nPath body.\n"
+        )
+        bodies = section_body_map(text)
+        self.assertIn("11", bodies)
+        self.assertIn("11.1", bodies)
+        self.assertIn("11.1.1", bodies)
+        self.assertIn("11.2", bodies)
+        self.assertIn("SNMP body", bodies["11.1"])
+        self.assertIn("Path body", bodies["11.2"])
+
+    def test_91_req_alt_002_binds_to_substantive_threshold_contract(self) -> None:
+        """REQ-ALT-002 must bind to §6.1 threshold contract, not a one-line §6 header."""
+        from validate_mother_references import locator_binds_id, section_body_map
+
+        docs = Path(__file__).resolve().parents[1]
+        owner_path = (
+            docs / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        )
+        owner = owner_path.read_text(encoding="utf-8")
+        bodies = section_body_map(owner)
+        self.assertIn("6.1", bodies)
+        body_61 = bodies["6.1"]
+        self.assertIn("REQ-ALT-002", body_61)
+        # Substantive envelope + typed families must be present (not binding-only).
+        for needle in (
+            "Common threshold evaluation envelope",
+            "Static threshold",
+            "Duration threshold",
+            "Consecutive threshold",
+            "Rate threshold",
+            "Baseline threshold",
+            "Missing threshold",
+            "Composite threshold",
+            "Dependency threshold",
+            "Business-time threshold",
+            "GROUP / cross-entity threshold",
+            "TRUE | FALSE | UNKNOWN",
+            "Float64",
+            "IANA",
+            "AlertPolicyDefinitionV1",
+        ):
+            self.assertIn(needle, body_61, needle)
+        self.assertIn("6.1.11", bodies)
+        body_group = bodies["6.1.11"]
+        for needle in (
+            "canonical inventory/group/service selector",
+            "ANY | ALL | COUNT | PERCENT",
+            "Minimum qualified member count",
+            "UNKNOWN",
+            "No Data ≠ Device Down",
+            "as_of",
+            "membership snapshot",
+        ):
+            self.assertIn(needle, body_group, needle)
+        ok, reason = locator_binds_id(
+            "§6.1 Alert threshold evaluation contract", "REQ-ALT-002", owner
+        )
+        self.assertTrue(ok, reason)
+        # Coarse §6-only binding header must not be treated as the RTM locator target
+        # once §6.1 owns the contract; §6 still contains the ID via children, but the
+        # primary Platform_08 locator is required to name §6.1.
+        rtm = (docs / "Platform_08_Requirements_Traceability.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertRegex(
+            rtm,
+            r"REQ-ALT-002.*§6\.1 Alert threshold evaluation contract",
+        )
+        self.assertNotRegex(
+            rtm,
+            r"REQ-ALT-002.*§6 Alert-policy lifecycle and false-alert quality gates",
+        )
+
+    def test_92_varchar_enum_width_too_narrow_fails(self) -> None:
+        """VARCHAR width must fit every declared enum literal."""
+        root = self._write_minimal()
+        p17 = (root / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(
+            encoding="utf-8"
+        )
+        if "outcome VARCHAR(" not in p17:
+            p17 += (
+                "\n| `rca_revision` | outcome VARCHAR(14) NN "
+                "(CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE) |\n"
+            )
+        else:
+            p17 = p17.replace(
+                "outcome VARCHAR(16) NN (CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE)",
+                "outcome VARCHAR(14) NN (CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE)",
+            )
+            if "PARTIAL_EVIDENCE" not in p17:
+                p17 += (
+                    "\n| `rca_revision` | outcome VARCHAR(14) NN "
+                    "(CONCLUDED/INCONCLUSIVE/PARTIAL_EVIDENCE) |\n"
+                )
+        (root / "Platform_17_API_Event_and_Data_Model_Contracts.md").write_text(
+            p17, encoding="utf-8"
+        )
+        errors = validate_docs_root(root)
+        self.assertTrue(
+            any(
+                "VARCHAR(14) too narrow" in e and "PARTIAL_EVIDENCE" in e
+                for e in errors
+            ),
+            errors,
+        )
+
+    def test_93_alert_policy_definition_v1_contract(self) -> None:
+        """Platform_17 freezes AlertPolicyDefinitionV1 + authoring ops."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "AlertPolicyDefinitionV1",
+            'schema_version: "1.0"',
+            "subject_selector",
+            "evidence_class",
+            "root_condition: ThresholdExprV1",
+            "recovery_condition",
+            "severity_mapping",
+            "evaluation_cadence",
+            "evidence_contract_ref",
+            "ThresholdExprV1",
+            "STATIC | DURATION | CONSECUTIVE | RATE | BASELINE | MISSING",
+            "COMPOSITE | GROUP | DEPENDENCY | BUSINESS_TIME",
+            "SubjectSelectorV1",
+            "SeverityMappingV1",
+            "EvaluationCadenceV1",
+            "CalendarRefV1",
+            "expr_id",
+            "OP-POLICY-CREATE",
+            "POST /alert-policies",
+            "POST /alert-policies/{policyId}/versions",
+            ":validate",
+            "version_no",
+            "typed field/path",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Root business_calendar_ref is forbidden in schema V1 (single BUSINESS_TIME path).
+        root_block = p17[
+            p17.find("AlertPolicyDefinitionV1 {") : p17.find(
+                "AlertPolicyDefinitionV1 {"
+            )
+            + 700
+        ]
+        self.assertNotIn("business_calendar_ref", root_block)
+        self.assertIn(
+            "forbids `business_calendar_ref` on `AlertPolicyDefinitionV1`",
+            p17,
+        )
+
+    def test_93b_alert_policy_nested_schemas_and_single_validate_route(self) -> None:
+        """Nested AlertPolicy types are fully defined; one canonical validate route."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # Nested type field freezes
+        for needle in (
+            "scope_kind: TENANT | REGION | SITE | GROUP | SERVICE | ENTITY",
+            "scope_id: UUID | null",
+            "metric_ref: string | null",
+            "monitor_ref: string | null",
+            "include_descendants: boolean",
+            "on_true: INFO | WARNING | MINOR | MAJOR | CRITICAL",
+            "on_false: NO_FIRE | CLEAR",
+            "on_unknown: NO_FIRE | PRESERVE_ACTIVE",
+            "mode: ON_EVIDENCE | FIXED_INTERVAL",
+            "interval_seconds: uint32 | null",
+            "max_staleness_seconds: uint32",
+            "calendar_id: UUID",
+            "version_no: uint32",
+            "kind: STATIC",
+            "ComparisonV1",
+            "threshold_high",
+            "lower_inclusive",
+            "upper_inclusive",
+            "fire: ComparisonV1",
+            "clear: ComparisonV1 | null",
+            "kind: DURATION",
+            "duration_seconds",
+            "unknown_behavior: PAUSE | RESET",
+            "unknown_grace_seconds",
+            "kind: CONSECUTIVE",
+            "required_true_count",
+            "unknown_behavior: RESET | SKIP",
+            "kind: RATE",
+            "comparison: ComparisonV1",
+            "minimum_interval_seconds",
+            "kind: BASELINE",
+            "BaselineRefV1",
+            "baseline_ref: BaselineRefV1",
+            "comparison: ABOVE | BELOW | OUTSIDE_BAND",
+            "kind: MISSING",
+            "expected_cadence_seconds",
+            "freshness_deadline_seconds",
+            "kind: COMPOSITE",
+            "operator: AND | OR | NOT",
+            "kind: GROUP",
+            "member_selector: SubjectSelectorV1",
+            "aggregation: ANY | ALL | COUNT | PERCENT",
+            "min_qualified_members",
+            "count_threshold",
+            "percent_threshold",
+            "evaluation_window_seconds",
+            "alignment_tolerance_seconds",
+            "NESTED_GROUP_NOT_SUPPORTED_V1",
+            "kind: DEPENDENCY",
+            "DependencyRefV1",
+            "dependency_ref: DependencyRefV1",
+            "DependencyActivationV1",
+            "activation: DependencyActivationV1",
+            "action: SUPPRESS | DEFER | ANNOTATE",
+            "kind: BUSINESS_TIME",
+            "blackout_calendar_ref: CalendarRefV1 | null",
+            "applicability: IN_WINDOW | OUTSIDE_WINDOW",
+            "gap_behavior: OUTSIDE_WINDOW",
+            "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
+            "Float64 before delta",
+            "**never** silently normalizes",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Retired ambiguous RATE/STATIC fields must not remain as the V1 contract
+        self.assertNotIn("unit_per_second: string", p17)
+        self.assertNotIn("hysteresis: number | null", p17)
+        self.assertNotIn("sensitivity: number", p17)
+        # Single canonical validate route — no alternate public body-validate API
+        self.assertIn(
+            "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
+            p17,
+        )
+        self.assertIn("ONLY** standalone validation operation", p17)
+        self.assertNotIn("validate body `{definition}` before persist", p17)
+        self.assertNotIn(
+            "**or** validate body",
+            p17,
+        )
+        self.assertIn("ValidationResult{ok, errors[{path, code, message_key}]}", p17)
+        self.assertIn("pre-persist validation boundary", p17)
+
+    def test_93c_alert_policy_threshold_persistence_closes_p22_61(self) -> None:
+        """Platform_17 persists every configurable Platform_22 §6.1 choice (docs only)."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # 1. STATIC inclusive/exclusive bounds
+        for needle in (
+            "lower_inclusive: boolean | null",
+            "upper_inclusive: boolean | null",
+            "INSIDE` / `OUTSIDE` require non-null `threshold_high`",
+            "§6.1.2 range semantics",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 2. explicit clear/hysteresis representation
+        for needle in (
+            "StaticThresholdV1",
+            "clear: ComparisonV1 | null",
+            "clear = null` means ordinary FALSE evaluation of `fire`",
+            "no hidden hysteresis number",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 3. DURATION PAUSE/RESET + grace
+        for needle in (
+            "DurationThresholdV1",
+            "unknown_behavior: PAUSE | RESET",
+            "unknown_grace_seconds: uint32",
+            "RESET` requires `unknown_grace_seconds = 0`",
+            "PAUSE` preserves elapsed TRUE duration",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 4. CONSECUTIVE RESET/SKIP
+        for needle in (
+            "ConsecutiveThresholdV1",
+            "unknown_behavior: RESET | SKIP",
+            "SKIP` — UNKNOWN/stale does not increment",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 5–9. BASELINE ID+version, reference window, sample sufficiency,
+        # deviation mode/units, stale behavior/fallback immutable policy version
+        for needle in (
+            "BaselineThresholdV1",
+            "BaselineRefV1",
+            "baseline_id: string",
+            "version_no: uint32",
+            "reference_window_seconds: uint32",
+            "minimum_qualified_samples: uint32",
+            "deviation_mode: ABSOLUTE | RELATIVE_PERCENT | SIGMA_MULTIPLE",
+            "deviation_unit: string | null",
+            "stale_behavior: UNKNOWN | USE_FALLBACK_POLICY",
+            "fallback_policy_ref: PolicyVersionRefV1 | null",
+            "PolicyVersionRefV1",
+            "baseline fallback-cycle rejection",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 10. recursive nested GROUP rejection
+        for needle in (
+            "NESTED_GROUP_NOT_SUPPORTED_V1",
+            "recursively walk the complete `child` expression tree",
+            "No descendant at any depth may have `kind=GROUP`",
+            "GROUP → COMPOSITE → GROUP",
+            "exact offending JSON path",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 11. BUSINESS_TIME fold/gap behavior + blackout identity
+        for needle in (
+            "BusinessTimeThresholdV1",
+            "gap_behavior: OUTSIDE_WINDOW",
+            "fold_behavior: EARLIER_OFFSET | LATER_OFFSET",
+            "MUST NEVER depend on an unwritten implementation default",
+            "blackout_calendar_ref: CalendarRefV1 | null",
+            "HOLD_STATE",
+        ):
+            self.assertIn(needle, p17, needle)
+        # 12. common-envelope persistence coverage matrix
+        for needle in (
+            "common-envelope persistence coverage matrix",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "Clear / reset / hysteresis",
+            "Missing / stale behavior",
+            "Dependency behavior",
+            "DependencyThresholdV1.action` + `DependencyThresholdV1.activation",
+            "Business-time applicability",
+            "BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY",
+            "Blackout / freeze identity",
+            "BusinessTimeThresholdV1.blackout_calendar_ref",
+            "Version authority",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Root dual-representation must not remain in the coverage matrix row.
+        matrix = p17[
+            p17.find("common-envelope persistence coverage matrix") : p17.find(
+                "This matrix exists to prevent persistence-versus-evaluation divergence."
+            )
+        ]
+        self.assertNotIn("`business_calendar_ref`; `BusinessTimeThresholdV1", matrix)
+        # 13. single canonical validation route remains unchanged
+        self.assertIn(
+            "POST /alert-policies/{policyId}/versions/{versionNo}:validate",
+            p17,
+        )
+        self.assertIn("ONLY** standalone validation operation", p17)
+        self.assertIn(
+            "OP-POLICY-CREATE**, **OP-POLICY-VERSION-CREATE** and **OP-POLICY-VERSION-VALIDATE**",
+            p17,
+        )
+        self.assertIn("recursive schema and semantic validation", p17)
+        self.assertIn("unknown fields in schema V1 MUST fail validation", p17)
+        self.assertIn(
+            "root `business_calendar_ref` is not a valid V1 field",
+            p17,
+        )
+        self.assertIn(
+            "`DEPENDENCY` requires `dependency_ref`, `activation`",
+            p17,
+        )
+        # Documentation proof only — not a runtime implementation claim
+        self.assertIn(
+            "this schema owns the persisted shape only",
+            p17,
+        )
+
+    def test_93d_dependency_action_and_business_time_single_path(self) -> None:
+        """Docs prove dependency action persistence + single business-time path."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p22 = (
+            docs
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        ).read_text(encoding="utf-8")
+
+        # --- DependencyThresholdV1 action + activation persistence ---
+        dep17 = p17[
+            p17.find("**DEPENDENCY — `DependencyThresholdV1`**") : p17.find(
+                "**BUSINESS_TIME — `BusinessTimeThresholdV1`**"
+            )
+        ]
+        for needle in (
+            "activation: DependencyActivationV1",
+            "action: SUPPRESS | DEFER | ANNOTATE",
+            "immutable within a policy version",
+            "no dependency action",
+            "Dependency disappearance/revocation removes the dependency effect reversibly",
+        ):
+            self.assertIn(needle, dep17, needle)
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for needle in (
+            "semantic_states: SemanticStateV1[]",
+            "maintenance_active: boolean",
+            "combine: ANY | ALL",
+            "At least one criterion MUST be enabled",
+            "combine=ANY",
+            "combine=ALL",
+            "No hidden/default combination behavior is permitted",
+            "ALL` with only one enabled criterion is invalid",
+            "Finite activation fixtures",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN`",
+        ):
+            self.assertIn(needle, act, needle)
+        self.assertIn("SemanticStateV1", p17)
+        self.assertIn(
+            "MUST NOT invent a second state model",
+            p17,
+        )
+
+        # Platform_22 owns exact SUPPRESS / DEFER / ANNOTATE semantics
+        body_dep = p22[p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")]
+        for needle in (
+            "##### SUPPRESS",
+            "child expression is still evaluated and evidence retained",
+            "MUST NOT rewrite child semantic state to `UP`",
+            "MUST NOT clear an already-active alert solely because the dependency became active",
+            "suppression is removed and current child evidence is immediately re-evaluated",
+            "no historical child evidence is deleted",
+            "##### DEFER",
+            "does not emit a new firing transition yet",
+            "evidence is retained as dependency-deferred",
+            "no false healthy state is emitted",
+            "no delayed alert is emitted",
+            "re-evaluate CURRENT qualified child evidence",
+            "do not backdate a new alert to the original deferred time",
+            "An already-active alert is not silently cleared by `DEFER`",
+            "##### ANNOTATE",
+            "does not alter child fire/clear evaluation",
+            "cannot independently suppress or clear the child alert",
+            "No Data / stale graph evidence cannot activate `SUPPRESS`/`DEFER`",
+            "current `as_of` graph authority",
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
+        ):
+            self.assertIn(needle, body_dep, needle)
+
+        # --- Business-time single representation + blackout identity ---
+        root_block = p17[
+            p17.find("AlertPolicyDefinitionV1 {") : p17.find(
+                "###### `SubjectSelectorV1`"
+            )
+        ]
+        self.assertNotIn("business_calendar_ref:", root_block)
+        self.assertIn(
+            "forbids `business_calendar_ref` on `AlertPolicyDefinitionV1`",
+            root_block,
+        )
+        bt17 = p17[
+            p17.find("**BUSINESS_TIME — `BusinessTimeThresholdV1`**") : p17.find(
+                "###### `ThresholdExprV1` ↔ `Platform_22` §6.1.1 common-envelope persistence coverage matrix"
+            )
+        ]
+        for needle in (
+            "calendar_ref: CalendarRefV1",
+            "blackout_calendar_ref: CalendarRefV1 | null",
+            "exactly one** business-time representation",
+            "HOLD_STATE",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "Missing/invalid configured `blackout_calendar_ref` ⇒ `UNKNOWN`",
+            "not silently “no blackout”",
+            "never fall back to always-on evaluation",
+        ):
+            self.assertIn(needle, bt17, needle)
+        body_bt = p22[p22.find("#### 6.1.10 Business-time threshold") : p22.find("#### 6.1.11")]
+        for needle in (
+            "exactly one** representation",
+            "Root `AlertPolicyDefinitionV1.business_calendar_ref` is forbidden",
+            "blackout_calendar_ref",
+            "HOLD_STATE",
+            "FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1",
+            "do not clear an already-active alert solely because blackout started",
+            "BLACKOUT_HOLD",
+            "do not backdate a new firing transition",
+            "not silently “no blackout”",
+            "Do not fall back to always-on evaluation",
+        ):
+            self.assertIn(needle, body_bt, needle)
+
+        # Coverage matrix mapping + recursive validator proofs
+        matrix = p17[
+            p17.find("common-envelope persistence coverage matrix") : p17.find(
+                "This matrix exists to prevent persistence-versus-evaluation divergence."
+            )
+        ]
+        self.assertIn(
+            "DependencyThresholdV1.action` + `DependencyThresholdV1.activation",
+            matrix,
+        )
+        self.assertIn(
+            "BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY",
+            matrix,
+        )
+        self.assertIn("BusinessTimeThresholdV1.blackout_calendar_ref", matrix)
+        self.assertNotIn("`business_calendar_ref`; `BusinessTimeThresholdV1", matrix)
+        for needle in (
+            "root `business_calendar_ref` is not a valid V1 field",
+            "no alternate calendar representation may exist elsewhere on `AlertPolicyDefinitionV1` outside `BusinessTimeThresholdV1`",
+            "`BUSINESS_TIME` requires `calendar_ref`",
+            "when `blackout_calendar_ref` is present it MUST resolve same-tenant",
+            "`DEPENDENCY` requires `dependency_ref`, `activation`",
+            "action ∈ {SUPPRESS, DEFER, ANNOTATE}",
+        ):
+            self.assertIn(needle, p17, needle)
+
+    def test_94_async_state_mapping_g05_cc_async(self) -> None:
+        """G-05 / CC-ASYNC freeze admission vs persisted async lifecycle."""
+        docs = Path(__file__).resolve().parents[1]
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "ACCEPTED_FOR_ASYNC_EXECUTION",
+            "state=QUEUED",
+            "QUEUED → RUNNING → SUCCEEDED",
+            "cancel_requested=true",
+            "COMPLETED` is **not** a second persisted state",
+        ):
+            self.assertIn(needle, p06, needle)
+        for needle in (
+            "CC-ASYNC",
+            "ACCEPTED_FOR_ASYNC_EXECUTION",
+            "SUCCEEDED",
+            "cancel_requested",
+            "COMPLETED` is not a second persisted",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Stale G-05 vocabulary must not remain as the sole mapping.
+        g05 = p06[p06.find("| G-05 |") : p06.find("| G-05 |") + 900]
+        self.assertNotIn("`ACCEPTED`, `RUNNING`, `COMPLETED`", g05)
+
+    def test_95_query_cursor_envelope_cc_cursor(self) -> None:
+        """Platform_17 CC-CURSOR envelope + BUILD-067 fixture bindings."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "CC-CURSOR",
+            "cursor_schema_version",
+            "query_operation_id",
+            "filter_fingerprint",
+            "resource_scope_fingerprint",
+            "sort_definition",
+            "last_sort_tuple",
+            "tie_break_resource_id",
+            "CURSOR_INVALID",
+            "CURSOR_EXPIRED",
+            "CURSOR_STALE",
+            "CURSOR_SCOPE_CHANGED",
+            "never grants authorization",
+            "LIVE_KEYSET",
+            "SNAPSHOT",
+            "consistency_mode",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "CC-CURSOR",
+            "duplicate sort values",
+            "CURSOR_INVALID",
+            "CURSOR_SCOPE_CHANGED",
+            "LIVE_KEYSET",
+            "SNAPSHOT",
+        ):
+            self.assertIn(needle, register, needle)
+
+    def test_95b_cc_cursor_live_keyset_and_snapshot_semantics(self) -> None:
+        """LIVE_KEYSET mutation semantics vs SNAPSHOT guarantees are distinct."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "consistency_mode` | literal `LIVE_KEYSET`",
+            "MAY be omitted or reappear",
+            "LIVE/evolving-list behavior",
+            "not** snapshot consistency",
+            "MUST NOT be used as an implicit closed",
+            "Do **not** add a growing `seen_ids`",
+            "consistency_mode` | literal `SNAPSHOT`",
+            "snapshot_ref",
+            "Stable membership",
+            "MUST NOT advertise SNAPSHOT",
+            "mutation-proof no-duplicate",
+        ):
+            self.assertIn(needle, p17, needle)
+        # Impossible mutation-proof guarantee removed from LIVE_KEYSET
+        self.assertNotIn(
+            "already-returned rows are never duplicated solely because of mutation",
+            p17,
+        )
+        for needle in (
+            "FX-LIVE_KEYSET",
+            "FX-SNAPSHOT",
+            "POS-LIVE_KEYSET",
+            "POS-SNAPSHOT",
+            "concurrent sort-key mutation follows documented LIVE semantics",
+            "insert/update/delete after snapshot does not alter the paged snapshot",
+            "no growing `seen_ids`",
+            "Not every query must support SNAPSHOT",
+        ):
+            self.assertIn(needle, register, needle)
+
+    def test_96_flow_observed_estimated_separation(self) -> None:
+        """Flow raw/DAF-FLW/BUILD-093 keep observed and estimated separate."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        for needle in (
+            "observed_bytes",
+            "observed_packets",
+            "estimated_bytes",
+            "estimated_packets",
+            "estimate_method",
+            "sampling_breakdown",
+            "sampling_cohort_id",
+            "estimate_coverage",
+            "UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN",
+            "INGRESS | EGRESS | UNKNOWN",
+            "never one unlabeled total",
+        ):
+            self.assertIn(needle, p17, needle)
+        self.assertIn("observed vs estimated", register.lower())
+        self.assertIn("SAMPLED_UNKNOWN", register)
+
+    def test_96b_flow_mixed_sampling_cohort_and_partial_coverage(self) -> None:
+        """Mixed sampling cohorts + PARTIAL estimate coverage are frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p09 = (docs / "Platform_09_UI_UX_Master.md").read_text(encoding="utf-8")
+        for needle in (
+            "sampling_cohort_id",
+            "FULL | PARTIAL | NONE",
+            "sampling_breakdown[]",
+            "populated ONLY for `FULL`",
+            "For `PARTIAL`, top-level estimate is null",
+            "Never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`",
+            "never silently average different sampling rates/models",
+            "flow_rollup_1m/1h",
+            "Estimated values may be computed only per certified `SAMPLED_KNOWN`",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "UNSAMPLED + SAMPLED_KNOWN",
+            "two SAMPLED_KNOWN cohorts with different rates",
+            "SAMPLED_UNKNOWN mixed with known",
+            "validity-window transition",
+            "replay of one cohort",
+            "estimate_coverage=FULL",
+            "misleading unlabeled whole-traffic total",
+        ):
+            self.assertIn(needle, register, needle)
+        self.assertIn("estimate_coverage", p09)
+        self.assertIn("sampling_breakdown", p09)
+        # Ambiguous singular sampling_metadata must not remain as the DAF-FLW projection
+        self.assertNotIn(
+            "estimate_method?, sampling_metadata, quality",
+            p17,
+        )
+
+    def test_97_profile_freeze_gates_block_dispatch(self) -> None:
+        """BUILD-031/032/045 remain NOT DISPATCHABLE until named gates PASS."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p12 = (docs / "Platform_12_Decision_Source_Register.md").read_text(
+            encoding="utf-8"
+        )
+        for gate in (
+            "WIN_AGENTLESS_P1_PROFILE_FREEZE_GATE",
+            "REDFISH_P1_PROFILE_FREEZE_GATE",
+            "DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE",
+        ):
+            self.assertIn(gate, p12, gate)
+            self.assertIn(gate, register, gate)
+            self.assertIn("NOT DISPATCHABLE", register)
+
+    def test_98_network_flow_source_reality_status(self) -> None:
+        """BUILD-043/044/045/051 must not overstate main 92f0fb37 source reality."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register_path = root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        register = register_path.read_text(encoding="utf-8")
+
+        def summary_maturity(build_id: str) -> str:
+            prefix = f"| {build_id} |"
+            for line in register.splitlines():
+                if line.startswith(prefix):
+                    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                    return cells[4]
+            self.fail(f"missing summary row {build_id}")
+            return ""
+
+        def ledger_maturity(num: str) -> str:
+            section = register[register.find("### BUILD-040..054") :]
+            nxt = section.find("\n### BUILD-", 1)
+            if nxt != -1:
+                section = section[:nxt]
+            prefix = f"| {num} |"
+            for line in section.splitlines():
+                if line.startswith(prefix):
+                    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                    return cells[-1]
+            self.fail(f"missing ledger row {num}")
+            return ""
+
+        for build_id, num, required in (
+            ("BUILD-043", "043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            (
+                "BUILD-045",
+                "045",
+                (
+                    "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE "
+                    "PASS; NOT_IMPLEMENTED"
+                ),
+            ),
+            ("BUILD-051", "051", "NOT_IMPLEMENTED"),
+        ):
+            self.assertEqual(summary_maturity(build_id), required, build_id)
+            self.assertEqual(ledger_maturity(num), required, f"ledger {num}")
+
+        for banned in (
+            "Mostly not implemented",
+            "Not production",
+            "Partial/spec",
+        ):
+            # Banned tokens must not remain as maturity claims for the four builds.
+            for build_id in ("BUILD-043", "BUILD-044", "BUILD-045", "BUILD-051"):
+                row = next(
+                    line
+                    for line in register.splitlines()
+                    if line.startswith(f"| {build_id} |")
+                )
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                self.assertNotIn(banned, cells[4], f"{build_id}:{banned}")
+
+        # Neighbor genuine partials must not be downgraded by this correction.
+        for build_id, needle in (
+            ("BUILD-040", "Partial"),
+            ("BUILD-041", "Partial"),
+            (
+                "BUILD-042",
+                "PARTIAL — exact raw Counter64 + counter derivation leaf "
+                "implemented; integration/benchmark/certification pending",
+            ),
+            ("BUILD-046", "Partial"),
+            ("BUILD-047", "Partial code"),
+            ("BUILD-050", "Partial"),
+        ):
+            self.assertIn(needle, summary_maturity(build_id), build_id)
+        self.assertNotEqual(
+            summary_maturity("BUILD-042"),
+            "Raw Counter64 exists",
+            "BUILD-042 must not regress to obsolete sole raw-path maturity",
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_network_flow_source_reality_status()
+        self.assertEqual(validator.errors, [])
+
+    def test_98b_network_flow_source_reality_regression_fails(self) -> None:
+        """Overstated BUILD-043/051 maturity must fail the source-reality pin."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-043 | Interface/entity reconciliation | ifIndex | 041/042 | Partial | exit |\n"
+                "| BUILD-044 | SNMP traps/informs | traps | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-045 | gNMI/NETCONF/REST | connector | DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-051 | Flow receiver | NetFlow | 020 | Not production | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 043 | Interface/entity reconciliation | Core | delta | D | exit | n/a | Partial |\n"
+                "| 044 | SNMP traps/informs | Sensor | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 045 | gNMI; **NOT DISPATCHABLE until `DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE` PASS** | TARGET | Gate | D | exit | rb | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED |\n"
+                "| 051 | Flow receiver | Sensor | delta | D | exit | allowlist | Not production |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_network_flow_source_reality_status()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected source-reality failures")
+            self.assertIn("BUILD-043", joined)
+            self.assertIn("BUILD-051", joined)
+            self.assertIn("Partial", joined)
+            self.assertIn("Not production", joined)
+
+    def test_99_agent_ingress_pending_reservation_invariant(self) -> None:
+        """Platform_17 §7.1 pending-reservation safety must remain frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p05 = (docs / "Platform_05_LLD.md").read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        frozen = (
+            "A deterministic pre-publication non-terminal rejection MUST NOT "
+            "leave an unpublished durable pending reservation blocking continuity."
+        )
+        self.assertIn(frozen, p17)
+        self.assertIn("### 7.1 Agent-ingress pending-reservation", p17)
+        for needle in (
+            "TERMINALLY_REJECTED",
+            "ERR_AGENT_IDENTITY_CONFLICT",
+            "ERR_AGENT_ASSIGNMENT_UNKNOWN",
+            "pending_first_sequence IS NULL",
+            "Authenticate Sensor",
+            "exact durable prior-disposition",
+            "mutable assignment / entity / binding validation",
+            "conditional release",
+            "publisher-owned",
+            "Sensor retains custody",
+            "same unsettled sequence",
+            "### 7.1.8 Mandatory acceptance tests / fixtures",
+            "### 7.1.9 Schema migration / release-guard upgrade precondition",
+            "Historical pending publication state is **not inferable**",
+            "SUPERSEDED contract — zero-pending as mandatory migration blocker",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "LEGACY_UNKNOWN",
+            "AUTHORITY_VALIDATED",
+            "Crash after mutable validation failure, before pending release",
+            "Manual pending deletion/reset is **not** accepted remediation",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        self.assertIn(frozen, p05)
+        self.assertIn("`Platform_17` §7.1", p05)
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", p05)
+        self.assertIn(frozen, p06)
+        self.assertIn("`Platform_17` §7.1", p06)
+        self.assertIn("`Platform_17` §7.1", register)
+        self.assertIn("pending-reservation", register)
+        self.assertIn("does **not** reopen this certified record", register)
+
+        # Authority-checkpoint upgrade gate + ownership split + race-safe cutover.
+        self.assertIn(
+            "SUPERSEDED: zero-pending as mandatory migration blocker",
+            p16,
+        )
+        self.assertIn(
+            "active Agent-ingress publisher/writer ownership = non-zero",
+            p16,
+        )
+        self.assertIn("MUST NOT delete pending Agent-ingress rows manually", p16)
+        self.assertIn("STAGE 1 — DRAIN MODE", p16)
+        self.assertIn("STAGE 2 — HARD CUTOVER FENCE", p16)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p16)
+        self.assertIn("check-then-unlock-then-migrate gap is forbidden", p16)
+        self.assertIn(
+            "active Agent-ingress publisher/writer ownership = non-zero",
+            p06,
+        )
+        self.assertIn("LEGACY_UNKNOWN", p06)
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
+        self.assertIn("No Core partial-schema state is valid", p06)
+        for race in (
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+        ):
+            self.assertIn(race, p17, race)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p17)
+        self.assertIn("STAGE 1 — DRAIN MODE", p17)
+        self.assertIn("STAGE 2 — HARD CUTOVER FENCE", p17)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn("runtime", row_062.lower())
+        self.assertIn(
+            "crash-after-mutable-validation-before-pending-release",
+            row_062,
+        )
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", row_062)
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("LEGACY_UNKNOWN", row_127)
+        self.assertIn(
+            "zero-pending-as-mandatory-migration-blocker",
+            row_127,
+        )
+        self.assertIn("BUILD-127", register)
+        ledger_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 127 |")
+        )
+        self.assertIn("U1 clean migration", ledger_127)
+        self.assertIn("U2 dormant legacy pending", ledger_127)
+        self.assertIn("U4 active publisher", ledger_127)
+        self.assertIn(
+            "manual pending deletion/reset is **not** accepted remediation",
+            ledger_127,
+        )
+
+        # Just-corrected Network/Flow status truth must remain intact.
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+        row_045 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-045 |")
+        )
+        self.assertIn("NOT DISPATCHABLE", row_045)
+        self.assertIn("NOT_IMPLEMENTED", row_045)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99b_agent_ingress_pending_reservation_regression_fails(self) -> None:
+        """Removing the frozen pending-reservation invariant must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            # Minimal Platform_17 without the frozen invariant / §7.1 owner.
+            (tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md").write_text(
+                "# Platform 17\n\n## 7. Telemetry durability\n\n"
+                "reserve then publish then finalize.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_05_LLD.md").write_text(
+                "# LLD\n\nNo pending-reservation binding.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_06_Dataflow.md").write_text(
+                "# Dataflow\n\nNo pending-reservation binding.\n",
+                encoding="utf-8",
+            )
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n\n| BUILD-003 | transport | x | y | CERTIFIED | z |\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected pending-reservation failures")
+            self.assertIn("pending-reservation", joined.lower())
+            self.assertIn("MUST NOT", joined)
+
+    def test_99c_agent_ingress_zero_pending_upgrade_gate(self) -> None:
+        """Authority-checkpoint upgrade gate + crash recovery + BUILD-127 ownership."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        # Migration abort on active ownership; dormant legacy may preserve.
+        for needle in (
+            "If the active-writer / active-publisher-lease drain precondition is violated, migration MUST abort",
+            "Migration apply MUST be transactional",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U4 active publisher blocks migration",
+            "Dormant legacy pending alone MUST NOT abort migration",
+            "Failure is observable/audited",
+            "CUTOVER-RACE-1",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "LEGACY_UNKNOWN",
+            "J7",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        # Crash/restart exact retry recovery fixture under BUILD-062.
+        self.assertIn(
+            "Crash after mutable validation failure, before pending release",
+            p17,
+        )
+        self.assertIn("Fixture 6 is a required BUILD-062 failure fixture", p17)
+        ledger_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 062 |")
+        )
+        self.assertIn(
+            "crash after mutable-validation failure before pending release",
+            ledger_062,
+        )
+        self.assertIn("exact retry reconciles/releases unpublished pending", ledger_062)
+
+        # BUILD-127 owns the upgrade/cutover gate; BUILD-062 owns runtime fence.
+        self.assertIn("LEGACY_UNKNOWN", register)
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("LEGACY_UNKNOWN", row_127)
+        self.assertIn("hard cutover fence", row_127)
+        self.assertIn(
+            "zero-pending-as-mandatory-migration-blocker",
+            row_127,
+        )
+        self.assertIn("CUTOVER-RACE-1", register)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn(
+            "Active-writer-drain **upgrade/migration cutover certification**",
+            row_062,
+        )
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
+        self.assertIn("BUILD-127", row_062)
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", row_062)
+
+        # Platform_16 / §119.21 preflight surface + hard cutover fence.
+        self.assertIn("Enter STAGE 1 drain mode", p16)
+        self.assertIn("Enter STAGE 2 hard cutover fence", p16)
+        self.assertIn("upgrade aborts at preflight/migration gate", p16)
+        self.assertIn("STAGE 1 drain mode", p06)
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("publisher leases=0", p06)
+        self.assertIn("CUTOVER-RACE-1", register)
+        self.assertIn("hard cutover fence", row_127)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
+
+        # No regression of sFlow + status truth.
+        self.assertIn("sFlow v5", register)
+        self.assertIn("S5 sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99d_agent_ingress_zero_pending_upgrade_gate_regression_fails(
+        self,
+    ) -> None:
+        """Dropping authority-checkpoint upgrade gate / BUILD-127 ownership fails closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        # Keep §7.1 runtime contract but strip the upgrade-gate subsection.
+        stripped = p17_full.replace(
+            "#### 7.1.9 Schema migration / release-guard upgrade precondition",
+            "#### 7.1.9 REMOVED",
+        )
+        self.assertNotIn(
+            "#### 7.1.9 Schema migration / release-guard upgrade precondition",
+            stripped,
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            # Register without BUILD-127 LEGACY_UNKNOWN / supersession ownership.
+            register_bad = (
+                "# Register\n\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED — does **not** "
+                "reopen this certified record | z |\n"
+                "| BUILD-024 | agent gateway | pending-reservation | "
+                "`Platform_17` §7.1 | Partial | z |\n"
+                "| BUILD-062 | ingestion | runtime pending-reservation | "
+                "`Platform_17` §7.1 | Partial | z |\n"
+                "| BUILD-127 | upgrade | matrix only | 126 | Incomplete | "
+                "Upgrade matrix |\n"
+                "| BUILD-043 | net | x | y | SPECIFIED_ONLY / NOT_IMPLEMENTED | z |\n"
+                "| BUILD-044 | net | x | y | SPECIFIED_ONLY / NOT_IMPLEMENTED | z |\n"
+                "| BUILD-051 | flow | x | y | NOT_IMPLEMENTED | z |\n"
+            )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(register_bad, encoding="utf-8")
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(
+                validator.errors, "expected authority-checkpoint gate failures"
+            )
+            self.assertTrue(
+                "7.1.9" in joined
+                or "LEGACY_UNKNOWN" in joined
+                or "AUTHORITY_CHECKPOINT" in joined
+                or "BUILD-127" in joined
+                or "zero-pending" in joined.lower(),
+                joined,
+            )
+
+    def test_99e_agent_ingress_hard_cutover_fence_and_races(self) -> None:
+        """Hard cutover fence, fenced zero-check, and CUTOVER-RACE-1..4."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "per-Sensor lock alone does **not** fence",
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-10",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "final active-ownership check and migration MUST share one uninterrupted",
+            "create no reservation",
+            "no terminal disposition",
+            "no deletion authorization",
+            "no watermark change",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        # CUTOVER-RACE-1: either abort on visible active ownership OR fence reject.
+        self.assertIn(
+            "retry enters before hard fence and becomes visible active pending/writer work",
+            p17,
+        )
+        self.assertIn(
+            "hard fence wins first and retry receives retryable",
+            p17,
+        )
+        self.assertIn(
+            "Forbidden: migration commits while the retry creates or owns",
+            p17,
+        )
+        # CUTOVER-RACE-2 in-flight writer drain.
+        self.assertIn(
+            "cutover waits for it to terminate/commit/rollback",
+            p17,
+        )
+        # CUTOVER-RACE-3 publisher lease block.
+        self.assertIn("Publisher lease exists at cutover", p17)
+        self.assertIn("Migration must not proceed", p17)
+        # CUTOVER-RACE-4 post-commit resume.
+        self.assertIn(
+            "exact retained Sensor request retries normally under the upgraded runtime",
+            p17,
+        )
+        self.assertIn(
+            "no duplicate deletion-authorizing ACK or false sequence gap",
+            p17,
+        )
+
+        for needle in (
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap is forbidden",
+            "while fenced",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "Do not introduce a third witness/coordinator",
+        ):
+            self.assertIn(needle, p16, needle)
+
+        self.assertIn("STAGE 2 hard cutover fence", p06)
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
+        self.assertIn("CUTOVER-RACE abort", p06)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p06)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", p06)
+
+        self.assertIn("CUTOVER-RACE-1", register)
+        self.assertIn("CUTOVER-LOCK-1", register)
+        self.assertIn("hard cutover fence", register)
+        row_127 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-127 |")
+        )
+        self.assertIn("hard cutover fence", row_127)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", row_127)
+        self.assertIn("CUTOVER-LOCK-1", row_127)
+        row_062 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-062 |")
+        )
+        self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", row_062)
+
+        # Prior P0 closures must remain intact.
+        self.assertIn("sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99f_agent_ingress_hard_cutover_regression_fails(self) -> None:
+        """Dropping hard-cutover fence / race fixtures must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        stripped = (
+            p17_full.replace("STAGE 2 — HARD CUTOVER FENCE", "STAGE 2 REMOVED")
+            .replace("CUTOVER-RACE-1", "RACE-REMOVED-1")
+            .replace("ERR_PLATFORM_UPGRADE_IN_PROGRESS", "ERR_REMOVED")
+        )
+        self.assertNotIn("STAGE 2 — HARD CUTOVER FENCE", stripped)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(
+                (
+                    root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+                ).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected hard-cutover failures")
+            self.assertTrue(
+                "HARD CUTOVER" in joined
+                or "CUTOVER-RACE" in joined
+                or "ERR_PLATFORM_UPGRADE_IN_PROGRESS" in joined,
+                joined,
+            )
+
+    def test_99g_agent_ingress_global_cutover_lock_protocol(self) -> None:
+        """Global AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 protocol must stay frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "both Cores must honor the same PostgreSQL global cutover lock",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-2",
+            "CUTOVER-LOCK-3",
+            "CUTOVER-LOCK-4",
+            "CUTOVER-LOCK-5",
+            "CUTOVER-LOCK-6",
+            "CUTOVER-LOCK-7",
+            "CUTOVER-LOCK-8",
+            "CUTOVER-LOCK-9",
+            "CUTOVER-LOCK-10",
+            "ordinary reservation holds SHARED",
+            "old-version binary without global-lock support",
+            "two-Core profile proves neither Core can mutate",
+            "migration failure rolls back schema and releases EXCLUSIVE",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        for needle in (
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "Do not introduce a third witness/coordinator",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+        ):
+            self.assertIn(needle, p16, needle)
+
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p06)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", p06)
+        self.assertIn("CUTOVER-LOCK-1", register)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", register)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99h_agent_ingress_global_cutover_lock_regression_fails(self) -> None:
+        """Dropping AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        stripped = p17_full.replace(
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", "LOCK_REMOVED"
+        ).replace("CUTOVER-LOCK-1", "LOCKFIX-REMOVED-1")
+        self.assertNotIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", stripped)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(
+                (
+                    root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+                ).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected global cutover lock failures")
+            self.assertTrue(
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" in joined
+                or "CUTOVER-LOCK" in joined,
+                joined,
+            )
+
+    def test_99i_agent_ingress_authority_checkpoint_recovery_contract(self) -> None:
+        """Authority checkpoint + LEGACY_UNKNOWN supersession must stay frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "#### 7.1.10 Durable authority checkpoint",
+            "UNVALIDATED",
+            "AUTHORITY_VALIDATED",
+            "LEGACY_UNKNOWN",
+            "#### 7.1.11 Historical temporal authority",
+            "assignmentGeneration",
+            "SensorAcceptanceEvidenceV1",
+            "PendingCanonicalBindingV1",
+            "##### 7.1.11.4 UNVALIDATED exact retry",
+            "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+            "ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+            "#### 7.1.12 AUTHORITY_VALIDATED retry",
+            "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
+            "LEGACY_PENDING_RECONCILIATION_REQUIRED",
+            "#### 7.1.14 Publication-uncertain authority change — mandatory case J7",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U3 multi-tenant legacy pending",
+            "U4 active publisher blocks migration",
+            "U5A",
+            "U5B",
+            "U6 insufficient historical proof",
+            "U7 accepted/settled history unchanged",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN`",
+            "authority checkpoint cannot authorize new sequences",
+            "raw `acceptedAt` alone is insufficient",
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
+            "replay uses persisted Entity A",
+            "does **not** resolve to Entity B",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        self.assertIn(
+            "SUPERSEDED: zero-pending as mandatory migration blocker",
+            p16,
+        )
+        self.assertIn("LEGACY_UNKNOWN", p16)
+        self.assertIn("U5A", p16)
+        self.assertIn("U5B", p16)
+        self.assertIn("### 3.2 Agent-ingress authority-checkpoint", p14)
+        self.assertIn("U5A", p14)
+        self.assertIn("U5B", p14)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", p14)
+        self.assertIn("### 29.10 Agent-ingress authority-checkpoint", p12)
+        self.assertIn("SensorAcceptanceEvidenceV1", p12)
+        self.assertIn("PendingCanonicalBindingV1", p12)
+        self.assertIn(
+            "supersedes zero-pending-as-mandatory-migration-blocker",
+            register,
+        )
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", register)
+        self.assertIn("SENSOR_ACCEPTANCE_EVIDENCE_V1", register)
+        self.assertIn("PENDING_CANONICAL_BINDING_V1", register)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", register)
+        # Preserve prior closures.
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p17)
+        self.assertIn("sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        self.assertIn("PARTIAL", row_042)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99j_authority_checkpoint_p1_qualification_negatives(self) -> None:
+        """P1 freezes: clock qualification, UNVALIDATED retry, canonical binding."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p05 = (docs / "Platform_05_LLD.md").read_text(encoding="utf-8")
+
+        # Raw acceptedAt alone is insufficient.
+        self.assertIn("raw `acceptedAt` alone is insufficient", p17)
+        self.assertIn("raw `acceptedAt` alone is insufficient", p14)
+        self.assertNotRegex(
+            p17,
+            r"Sensor `acceptedAt`;\s*$",
+            "raw acceptedAt must not remain the sole historical authority input",
+        )
+
+        # Clock qualification negatives (unsigned/nonnegative + ordered interval).
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p17)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p17)
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p14)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p14)
+        self.assertIn("clock_max_error_ms = -1", p17)
+        self.assertIn("clock_sync_age_ms = -1", p17)
+        self.assertIn("clock_max_error_ms = -1", p14)
+        self.assertIn("clock_sync_age_ms = -1", p14)
+        self.assertIn("clock_max_error_ms > 5000", p14)
+        self.assertIn("clock_sync_age_ms > 300000", p14)
+        self.assertIn("clock_max_error_ms = 0", p17)
+        self.assertIn("clock_sync_age_ms = 0", p17)
+        self.assertIn("acceptance_lower <= accepted_at_utc", p17)
+        self.assertIn("accepted_at_utc <= acceptance_upper", p17)
+        self.assertIn("acceptance_lower <= acceptance_upper", p17)
+        self.assertIn("acceptance_lower <= accepted_at_utc", p14)
+        self.assertIn("accepted_at_utc <= acceptance_upper", p14)
+        self.assertIn("acceptance_lower <= acceptance_upper", p14)
+        self.assertIn("UNQUALIFIED / INVALID", p17)
+        self.assertIn(
+            "MUST NEVER become more permissive than missing clock evidence",
+            p17,
+        )
+        self.assertIn("No transition to `AUTHORITY_VALIDATED`", p17)
+        self.assertIn(
+            "MUST NOT transition to `AUTHORITY_VALIDATED`",
+            p14,
+        )
+        self.assertIn(
+            "uncertainty overlapping revocation fails historical authority",
+            p17,
+        )
+        self.assertIn(
+            "Exact equality with the revocation boundary is **not** historically authorized",
+            p17,
+        )
+        self.assertIn("acceptance_upper == revoked_at", p17)
+        self.assertIn("acceptance_upper == revoked_at", p14)
+        self.assertIn("ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN", p14)
+
+        # UNVALIDATED qualified historical retry can become AUTHORITY_VALIDATED.
+        self.assertIn("UNVALIDATED → AUTHORITY_VALIDATED", p17)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", p17)
+        self.assertIn(
+            "qualified historical acceptance → `AUTHORITY_VALIDATED`",
+            p17,
+        )
+
+        # Publisher cannot claim before AUTHORITY_VALIDATED.
+        self.assertIn(
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
+            p17,
+        )
+        self.assertIn(
+            "Publisher claim MUST NOT occur unless exact pending state is `AUTHORITY_VALIDATED`",
+            p17,
+        )
+
+        # Canonical binding snapshot required before AUTHORITY_VALIDATED publication.
+        self.assertIn("PendingCanonicalBindingV1", p17)
+        self.assertIn("pending_canonical_batch_sha256", p17)
+        self.assertIn(
+            "canonical binding snapshot is required before `AUTHORITY_VALIDATED` publication",
+            p17,
+        )
+        self.assertIn(
+            "PendingCanonicalBindingV1",
+            p05,
+        )
+
+        # Exact replay remains Entity A after current binding becomes Entity B.
+        self.assertIn("replay uses persisted Entity A", p17)
+        self.assertIn("does **not** resolve to Entity B", p17)
+        self.assertIn(
+            "changed request body cannot use Entity A snapshot",
+            p17,
+        )
+        self.assertIn(
+            "do **NOT** re-resolve entity identity against the current live entity binding",
+            p17,
+        )
+        self.assertIn(
+            "A current entity-binding change cannot redirect already validated pending telemetry to another entity",
+            p17,
+        )
+
+        # LEGACY_UNKNOWN without reproducible canonical identity → stream-local reconciliation.
+        self.assertIn("U5B", p17)
+        self.assertIn(
+            "canonical mapping not reproducible",
+            p17,
+        )
+        self.assertIn(
+            "Current mutable entity resolution alone is **NOT** sufficient proof after a binding change",
+            p17,
+        )
+        self.assertIn("U5B", p14)
+
+        # Maturity honesty remains PENDING_IMPLEMENTATION (no runtime claim).
+        self.assertIn(
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            p17,
+        )
+        self.assertIn(
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "does **NOT** implement authority-checkpoint recovery",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+        # Negative: stripping SensorAcceptanceEvidenceV1 fails closed.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            stripped = (
+                p17.replace("SensorAcceptanceEvidenceV1", "REMOVED_EVIDENCE")
+                .replace("PendingCanonicalBindingV1", "REMOVED_BINDING")
+                .replace("J8_UNVALIDATED_CRASH_THEN_REVOCATION", "REMOVED_J8")
+                .replace("U5A", "REMOVED_U5A")
+                .replace("U5B", "REMOVED_U5B")
+            )
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            (tmp_docs / "Platform_05_LLD.md").write_text(
+                "# LLD\nPlatform_17` §7.1\n"
+                "A deterministic pre-publication non-terminal rejection MUST NOT "
+                "leave an unpublished durable pending reservation blocking continuity.\n"
+                "ERR_AGENT_IDENTITY_CONFLICT\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_06_Dataflow.md").write_text(
+                "# Dataflow\nPlatform_17` §7.1\n"
+                "A deterministic pre-publication non-terminal rejection MUST NOT "
+                "leave an unpublished durable pending reservation blocking continuity.\n"
+                "### 119.21 Upgrade / rollback\n"
+                "active Agent-ingress publisher/writer ownership = non-zero\n"
+                "LEGACY_UNKNOWN\nSTAGE 1 drain mode\nSTAGE 2 hard cutover fence\n"
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS\nAGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                "No Core partial-schema state is valid\nAUTHORITY_CHECKPOINT_RECOVERY\n",
+                encoding="utf-8",
+            )
+            (
+                tmp_docs
+                / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+            ).write_text(
+                "# Ops\n"
+                "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                "pending-reservation upgrade gate\n"
+                "SUPERSEDED: zero-pending as mandatory migration blocker\n"
+                "active Agent-ingress publisher/writer ownership = non-zero\n"
+                "LEGACY_UNKNOWN\n"
+                "MUST NOT delete pending Agent-ingress rows manually\n"
+                "Verify no active Agent-ingress publisher leases remain\n"
+                "Verify no in-flight Agent-ingress writers\n"
+                "STAGE 1 — DRAIN MODE\nSTAGE 2 — HARD CUTOVER FENCE\n"
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                "check-then-unlock-then-migrate gap is forbidden\n"
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW\n"
+                "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                "Do not introduce a third witness/coordinator\n",
+                encoding="utf-8",
+            )
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED | does **not** reopen this certified record |\n"
+                "| BUILD-043 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-044 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-051 | x | y | z | NOT_IMPLEMENTED | a |\n"
+                "| BUILD-062 | runtime pending | x | y | Significant partial | AUTHORITY_CHECKPOINT_RECOVERY ERR_PLATFORM_UPGRADE_IN_PROGRESS AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 crash-after-mutable-validation-before-pending-release |\n"
+                "| BUILD-127 | LEGACY_UNKNOWN zero-pending-as-mandatory-migration-blocker hard cutover fence AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 CUTOVER-LOCK-1 | x | y | Incomplete | U1 |\n"
+                "| 127 | Upgrade | x | AUTHORITY_CHECKPOINT_RECOVERY | D | U1 clean migration U2 dormant legacy pending U4 active publisher manual pending deletion/reset is **not** accepted remediation | r | Incomplete |\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected P1 freeze failures")
+            self.assertTrue(
+                "SensorAcceptanceEvidenceV1" in joined
+                or "PendingCanonicalBindingV1" in joined
+                or "J8_UNVALIDATED" in joined
+                or "U5A" in joined
+                or "U5B" in joined,
+                joined,
+            )
+
+    def test_99k_sensor_acceptance_clock_range_evidence_regressions(self) -> None:
+        """P1: nonnegative clock bounds, ordered interval, malformed fail-closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_path = docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        p14_path = docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        p12_path = docs / "Platform_12_Decision_Source_Register.md"
+        p17 = p17_path.read_text(encoding="utf-8")
+        p14 = p14_path.read_text(encoding="utf-8")
+        p12 = p12_path.read_text(encoding="utf-8")
+
+        # Positive contract presence.
+        for needle in (
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "clock_max_error_ms = 5001",
+            "clock_sync_age_ms = 300001",
+            "clock_max_error_ms = 0",
+            "clock_sync_age_ms = 0",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
+            "No wrapping, saturation or silent coercion",
+            "checked duration arithmetic",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+        ):
+            self.assertIn(needle, p17, needle)
+        for needle in (
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "MUST NOT transition to `AUTHORITY_VALIDATED`",
+        ):
+            self.assertIn(needle, p14, needle)
+        self.assertIn("0 <= clock_max_error_ms <= 5000", p12)
+        self.assertIn("0 <= clock_sync_age_ms <= 300000", p12)
+        self.assertIn(
+            "MUST NEVER be more permissive than missing clock evidence",
+            p12,
+        )
+
+        # Maturity honesty preserved.
+        self.assertIn(
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            p17,
+        )
+        self.assertIn(
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+        # Regression: drop nonnegative floors / interval ordering / security text.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            weakened = (
+                p17.replace("0 <= clock_max_error_ms <= 5000", "clock_max_error_ms <= 5000")
+                .replace("0 <= clock_sync_age_ms <= 300000", "clock_sync_age_ms <= 300000")
+                .replace("clock_max_error_ms = -1", "REMOVED_NEG_ERROR")
+                .replace("clock_sync_age_ms = -1", "REMOVED_NEG_AGE")
+                .replace(
+                    "acceptance_lower <= accepted_at_utc",
+                    "REMOVED_LOWER_ORDER",
+                )
+                .replace(
+                    "accepted_at_utc <= acceptance_upper",
+                    "REMOVED_UPPER_ORDER",
+                )
+                .replace(
+                    "acceptance_lower <= acceptance_upper",
+                    "REMOVED_INTERVAL_ORDER",
+                )
+                .replace(
+                    "MUST NEVER become more permissive than missing clock evidence",
+                    "REMOVED_SECURITY_INVARIANT",
+                )
+                .replace(
+                    "No transition to `AUTHORITY_VALIDATED`",
+                    "malformed evidence MAY transition to AUTHORITY_VALIDATED",
+                )
+                .replace(
+                    "Exact equality `acceptance_upper == revoked_at` is **NOT** authorized.",
+                    "Exact equality `acceptance_upper == revoked_at` is authorized.",
+                )
+            )
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(weakened, encoding="utf-8")
+            # Minimal companions so earlier required-doc checks do not dominate.
+            for name, body in (
+                (
+                    "Platform_05_LLD.md",
+                    "# LLD\nPlatform_17` §7.1\n"
+                    "A deterministic pre-publication non-terminal rejection MUST NOT "
+                    "leave an unpublished durable pending reservation blocking continuity.\n"
+                    "ERR_AGENT_IDENTITY_CONFLICT\nSensorAcceptanceEvidenceV1\n"
+                    "PendingCanonicalBindingV1\nJ8_UNVALIDATED_CRASH_THEN_REVOCATION\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n",
+                ),
+                (
+                    "Platform_06_Dataflow.md",
+                    "# Dataflow\nPlatform_17` §7.1\n"
+                    "A deterministic pre-publication non-terminal rejection MUST NOT "
+                    "leave an unpublished durable pending reservation blocking continuity.\n"
+                    "### 119.21 Upgrade / rollback\n"
+                    "active Agent-ingress publisher/writer ownership = non-zero\n"
+                    "LEGACY_UNKNOWN\nSTAGE 1 drain mode\nSTAGE 2 hard cutover fence\n"
+                    "ERR_PLATFORM_UPGRADE_IN_PROGRESS\nAGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                    "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                    "No Core partial-schema state is valid\nAUTHORITY_CHECKPOINT_RECOVERY\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1\nPENDING_CANONICAL_BINDING_V1\n"
+                    "U5A\nU5B\n",
+                ),
+                (
+                    "Platform_14_Test_Performance_and_Release_Quality.md",
+                    "# Tests\n### 3.2 Agent-ingress authority-checkpoint\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "U5A\nU5B\nJ8_UNVALIDATED_CRASH_THEN_REVOCATION\n"
+                    "raw `acceptedAt` alone is insufficient\n"
+                    "0 <= clock_max_error_ms <= 5000\n0 <= clock_sync_age_ms <= 300000\n"
+                    "clock_max_error_ms = -1\nclock_sync_age_ms = -1\n"
+                    "clock_max_error_ms > 5000\nclock_sync_age_ms > 300000\n"
+                    "acceptance_lower <= accepted_at_utc\n"
+                    "accepted_at_utc <= acceptance_upper\n"
+                    "acceptance_lower <= acceptance_upper\n"
+                    "acceptance_upper == revoked_at\nUNQUALIFIED / INVALID\n"
+                    "MUST NEVER become more permissive than missing clock evidence\n"
+                    "MUST NOT transition to `AUTHORITY_VALIDATED`\n"
+                    "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN\n",
+                ),
+                (
+                    "Platform_12_Decision_Source_Register.md",
+                    "# Decisions\n### 29.10 Agent-ingress authority-checkpoint\n"
+                    "SensorAcceptanceEvidenceV1\nPendingCanonicalBindingV1\n"
+                    "J8_UNVALIDATED_CRASH_THEN_REVOCATION\nU5A\nU5B\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "0 <= clock_max_error_ms <= 5000\n0 <= clock_sync_age_ms <= 300000\n"
+                    "acceptance_lower <= accepted_at_utc <= acceptance_upper\n"
+                    "MUST NEVER be more permissive than missing clock evidence\n"
+                    "UNQUALIFIED / INVALID\n",
+                ),
+                (
+                    "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+                    "# Ops\n"
+                    "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                    "pending-reservation upgrade gate\n"
+                    "SUPERSEDED: zero-pending as mandatory migration blocker\n"
+                    "active Agent-ingress publisher/writer ownership = non-zero\n"
+                    "LEGACY_UNKNOWN\n"
+                    "MUST NOT delete pending Agent-ingress rows manually\n"
+                    "Verify no active Agent-ingress publisher leases remain\n"
+                    "Verify no in-flight Agent-ingress writers\n"
+                    "STAGE 1 — DRAIN MODE\nSTAGE 2 — HARD CUTOVER FENCE\n"
+                    "ERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                    "check-then-unlock-then-migrate gap is forbidden\n"
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                    "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                    "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW\n"
+                    "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                    "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                    "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION\n"
+                    "U5A\nU5B\n"
+                    "Do not introduce a third witness/coordinator\n",
+                ),
+            ):
+                (tmp_docs / name).write_text(body, encoding="utf-8")
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED | does **not** reopen this certified record |\n"
+                "| BUILD-043 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-044 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-051 | x | y | z | NOT_IMPLEMENTED | a |\n"
+                "| BUILD-062 | runtime pending | x | y | Significant partial | AUTHORITY_CHECKPOINT_RECOVERY SENSOR_ACCEPTANCE_EVIDENCE_V1 PENDING_CANONICAL_BINDING_V1 J8_UNVALIDATED_CRASH_THEN_REVOCATION ERR_PLATFORM_UPGRADE_IN_PROGRESS AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 crash after mutable-validation failure before pending release |\n"
+                "| BUILD-127 | LEGACY_UNKNOWN zero-pending-as-mandatory-migration-blocker hard cutover fence AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 CUTOVER-LOCK-1 | x | y | Incomplete | U1 |\n"
+                "| 127 | Upgrade | x | AUTHORITY_CHECKPOINT_RECOVERY | D | U1 clean migration U2 dormant legacy pending U4 active publisher manual pending deletion/reset is **not** accepted remediation | r | Incomplete |\n"
+                "Platform_17` §7.1\npending-reservation\nBUILD-024\n"
+                "SensorAcceptanceEvidenceV1\nPendingCanonicalBindingV1\n"
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION\nU5A\nU5B\n"
+                "supersedes zero-pending-as-mandatory-migration-blocker\n"
+                "CUTOVER-RACE-1\nCUTOVER-LOCK-1\nERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                "UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(
+                validator.errors,
+                "expected clock-range / uncertainty regression failures",
+            )
+            self.assertTrue(
+                "0 <= clock_max_error_ms <= 5000" in joined
+                or "nonnegative" in joined
+                or "acceptance_lower <= accepted_at_utc" in joined
+                or "more permissive" in joined
+                or "AUTHORITY_VALIDATED" in joined
+                or "revocation-boundary" in joined
+                or "NOT authorized" in joined
+                or "negative" in joined,
+                joined,
+            )
+
+    def test_99g_build_042_counter_leaf_source_truth(self) -> None:
+        """BUILD-042 must reflect PR #304 leaf without certification claims."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+
+        required = (
+            "PARTIAL — exact raw Counter64 + counter derivation leaf "
+            "implemented; integration/benchmark/certification pending"
+        )
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        ledger_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| 042 |")
+        )
+        self.assertIn(required, row_042)
+        self.assertIn(required, ledger_042)
+        self.assertNotEqual(
+            [c.strip() for c in row_042.strip().strip("|").split("|")][4],
+            "Raw Counter64 exists",
+        )
+        self.assertIn(required, p17)
+        self.assertIn("PR #304", p17)
+        self.assertIn("sensor/internal/protocol/snmp/counter/", p17)
+        self.assertIn("no whole BUILD-042 certification", p17)
+        self.assertIn("no BUILD-048 Network Sensor certification", p17)
+        self.assertIn("no deployment claim", p17)
+        self.assertNotIn(
+            "That derived Counter32/Counter64 reset/wrap/discontinuity/"
+            "rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_build_042_counter_leaf_source_truth()
+        self.assertEqual(validator.errors, [])
+
+    def test_99h_build_042_obsolete_raw_only_status_fails(self) -> None:
+        """Regressing BUILD-042 to Raw Counter64 exists must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-042 | SNMP counters | counters | 041 | Raw Counter64 exists | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 042 | SNMP counters | Core | delta | D | exit | n/a | Raw Counter64 exists |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_build_042_counter_leaf_source_truth()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected BUILD-042 failures")
+            self.assertIn("BUILD-042", joined)
+            self.assertTrue(
+                "Raw Counter64 exists" in joined
+                or "PARTIAL — exact raw Counter64" in joined,
+                joined,
+            )
+
+    def test_100_dependency_activation_any_all_combine(self) -> None:
+        """DependencyActivationV1 MUST persist explicit ANY|ALL combination."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p22 = (
+            docs
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        ).read_text(encoding="utf-8")
+
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for needle in (
+            "combine: ANY | ALL",
+            "The semantic-state criterion is ENABLED when `semantic_states` is non-empty",
+            "The maintenance criterion is ENABLED when `maintenance_active = true`",
+            "At least one criterion MUST be enabled",
+            "`ANY` — activation is TRUE when at least one ENABLED criterion matches",
+            "`ALL` — activation is TRUE only when every ENABLED criterion matches",
+            "If only one criterion is enabled, `combine` MUST be `ANY`",
+            "ALL` with only one enabled criterion is invalid",
+            "No hidden/default combination behavior is permitted",
+            "both criteria enabled and both match ⇒ TRUE for `ANY` and for `ALL`",
+            "`combine=ALL`, both enabled, only one matches ⇒ FALSE",
+            "`combine=ALL` configured with only one enabled criterion ⇒ validation failure",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action",
+            "combination operator determines only whether dependency activation is TRUE",
+        ):
+            self.assertIn(needle, act, needle)
+
+        body_dep = p22[
+            p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")
+        ]
+        for needle in (
+            "combine: ANY | ALL",
+            "combine=ANY` ⇒ activation TRUE when ≥1 ENABLED criterion matches",
+            "combine=ALL` ⇒ activation TRUE only when every ENABLED criterion matches",
+            "if only one criterion is enabled, `combine` MUST be `ANY`",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
+            "##### SUPPRESS",
+            "##### DEFER",
+            "##### ANNOTATE",
+        ):
+            self.assertIn(needle, body_dep, needle)
+
+        validator = MotherReferenceValidator(docs, repo_root=docs.parent)
+        validator.errors = []
+        validator.validate_dependency_activation_combine_operator()
+        self.assertEqual(validator.errors, [])
+
+    def test_101_build_051_flow_udp_profile_freeze(self) -> None:
+        """BUILD-051 first UDP profile/gate/slices remain NOT_IMPLEMENTED."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p10 = (
+            docs / "Platform_10_Protocol_Security_Connector_Master.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        p07 = (docs / "Platform_07_OSS_Catalog.md").read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+
+        summary = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-051 |")
+        )
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = next(
+            line for line in section.splitlines() if line.startswith("| 051 |")
+        )
+
+        for row in (summary, ledger):
+            self.assertIn("FLOW_UDP_P1_PROFILE_V1", row)
+            self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", row)
+            self.assertIn("NOT_IMPLEMENTED", row)
+            self.assertIn("SPECIFIED_NOT_IMPLEMENTED", row)
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            maturity = cells[4] if cells[0].startswith("BUILD-") else cells[-1]
+            self.assertEqual(maturity, "NOT_IMPLEMENTED", maturity)
+            self.assertNotIn("Partial", maturity)
+
+        for needle in (
+            "sensor/internal/protocol/flow/",
+            "NetFlow v5",
+            "NetFlow v9",
+            "IPFIX v10",
+            "sFlow v5",
+            "S1 protocol-neutral",
+            "S2 NetFlow v5",
+            "S3 NetFlow v9",
+            "S4 IPFIX v10 UDP",
+            "S5 sFlow v5",
+            "S6 receiver/admission shell",
+            "S6 MUST NOT bypass BUILD-022/023",
+            "template_refresh_timeout_seconds > 0",
+            "NO_BUFFER_UNTEMPLATED_DATA",
+            "MALFORMED_PACKET",
+            "TEMPLATE_MISSING",
+            "TEMPLATE_EXPIRED",
+            "SEQUENCE_GAP",
+            "EXPORTER_UNBOUND",
+            "EXPORTER_AMBIGUOUS",
+            "never Device Down",
+            "do not delete previously durable authoritative Flow facts",
+            "revert external parser dependency to prior admitted version",
+        ):
+            self.assertIn(needle, ledger, needle)
+
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p12)
+        self.assertIn("dependency admission only", p12)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p07)
+        self.assertIn("FLOW_UDP_P1_PROFILE_V1", p10)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p10)
+        self.assertIn("NO_BUFFER_UNTEMPLATED_DATA", p10)
+        combined_lower = (ledger + p10).lower()
+        self.assertIn("sflow flow vs counter", combined_lower)
+        # IPFIX sequence distinction + restart/expiry ownership
+        self.assertIn("record-based", combined_lower)
+        self.assertIn("EMPTY", ledger)
+        self.assertIn("FLOW_UDP_P1_PROFILE_V1", p17)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p17)
+        self.assertIn("template_refresh_timeout_seconds > 0", p17)
+        self.assertIn("NO_BUFFER_UNTEMPLATED_DATA", p17)
+
+        # sFlow v5 datagram sequence contract (BUILD-051 S5)
+        self.assertIn("sFlow v5 datagram sequence", p10)
+        self.assertIn("Primary loss authority = datagram sequence", p10)
+        self.assertIn("UINT32 wrap", p10)
+        self.assertIn("DUPLICATE_DATAGRAM", p10)
+        self.assertIn("OUT_OF_ORDER_OR_OLD_DATAGRAM", p10)
+        self.assertIn("EXPORTER_RESTART_OR_DISCONTINUITY", p10)
+        self.assertIn("SEQUENCE_DISCONTINUITY_UNKNOWN", p10)
+        self.assertIn("SAMPLE_SEQUENCE_GAP", p10)
+        self.assertIn("sample-sequence supplemental-only", ledger)
+        self.assertIn("datagram-sequence primary loss authority", ledger)
+        self.assertIn("collector-restart baseline", ledger)
+        self.assertIn("sFlow v5 sequence quality envelope", p17)
+        self.assertIn("sFlow v5 datagram sequence / discontinuity authority", p12)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_network_flow_source_reality_status()
+        self.assertEqual(validator.errors, [])
+
+    def test_101b_build_051_must_remain_not_implemented(self) -> None:
+        """Promoting BUILD-051 to Partial after profile freeze must fail."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-043 | Interface | ifIndex | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-044 | Traps | traps | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-045 | gNMI | connector | DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-051 | Flow | FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | 020 | Partial | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 043 | Interface | Core | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 044 | Traps | Sensor | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 045 | gNMI; **NOT DISPATCHABLE until `DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE` PASS** | TARGET | Gate | D | exit | rb | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED |\n"
+                "| 051 | Flow FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | Sensor | delta | D | exit | rb | Partial |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_network_flow_source_reality_status()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected BUILD-051 maturity failure")
+            self.assertIn("BUILD-051", joined)
+            self.assertIn("Partial", joined)
+
+    def test_101c_sflow_v5_datagram_sequence_contract(self) -> None:
+        """sFlow datagram sequence / wrap / gap / discontinuity pins must hold."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p10 = (
+            docs / "Platform_10_Protocol_Security_Connector_Master.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = next(
+            line for line in section.splitlines() if line.startswith("| 051 |")
+        )
+        maturity = [c.strip() for c in ledger.strip().strip("|").split("|")][-1]
+        self.assertEqual(maturity, "NOT_IMPLEMENTED")
+
+        for needle in (
+            "Primary loss authority = datagram sequence",
+            "sFlow datagram `sequence_number`",
+            "Do **NOT** scope only by source IP",
+            "Sample sequence numbers are supplemental",
+            "UINT32 serial arithmetic",
+            "distance = (C - P) mod 2^32",
+            "DUPLICATE_DATAGRAM",
+            "SEQUENCE_COLLISION",
+            "SEQUENCE_GAP",
+            "missing_datagrams = distance - 1",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "UINT32 wrap",
+            "0xffffffff → 0",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "do not calculate datagram loss across the boundary",
+            "current exporter uptime < previous exporter uptime",
+            "NOT** legal when a trusted uptime decrease is present",
+            "When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal",
+            "trusted uptime decrease",
+            "MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "Duplicate and reorder do not become loss",
+            "first valid datagram establishes a fresh collector-side baseline",
+            "sample family (`FLOW` or `COUNTER`)",
+            "SAMPLE_SEQUENCE_GAP",
+            "MUST NOT change primary datagram loss counts",
+            "sub_agent_id",
+            "malformed packet does not mutate sequence high-water",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, p10, needle)
+        self.assertNotIn(
+            "uptime decrease with otherwise plausible modular progression = "
+            "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`",
+            p10,
+        )
+
+        for needle in (
+            "datagram-sequence primary loss authority",
+            "uint32 wrap",
+            "duplicate/reorder/gap distinction",
+            "restart/discontinuity epoch",
+            "sample-sequence supplemental-only",
+            "collector-restart baseline",
+            "SEQUENCE_GAP",
+            "DUPLICATE_DATAGRAM",
+            "SAMPLE_SEQUENCE_GAP",
+            "sub_agent_id",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, ledger, needle)
+
+        for needle in (
+            "sFlow v5 sequence quality envelope",
+            "DUPLICATE_DATAGRAM",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "SAMPLE_SEQUENCE_GAP",
+            "datagram header `sequence_number`",
+            "MUST NOT mutate primary datagram-loss counts",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        for needle in (
+            "sFlow v5 datagram sequence / discontinuity authority",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "current exporter uptime < previous exporter uptime",
+            "ALWAYS classifies `EXPORTER_RESTART_OR_DISCONTINUITY`",
+            "NOT** legal when a trusted uptime decrease is present",
+            "prefer possible false discontinuity over fabricated giant loss",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, p12, needle)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_sflow_v5_datagram_sequence_contract()
+        self.assertEqual(validator.errors, [])
+
+    def test_101e_sflow_uptime_decrease_must_not_be_unknown(self) -> None:
+        """Trusted uptime decrease must not classify as SEQUENCE_DISCONTINUITY_UNKNOWN."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            docs_tmp = tmp_root / "project_documentation"
+            docs_tmp.mkdir()
+            p10_src = (
+                docs / "Platform_10_Protocol_Security_Connector_Master.md"
+            ).read_text(encoding="utf-8")
+            # Regress fixture 8 to the contradictory UNKNOWN classification.
+            p10_bad = p10_src.replace(
+                "trusted uptime decrease (`current < previous`) with otherwise "
+                "plausible modular progression = ALWAYS "
+                "`EXPORTER_RESTART_OR_DISCONTINUITY` (epoch boundary; not "
+                "confirmed reboot; MUST NOT produce "
+                "`SEQUENCE_DISCONTINUITY_UNKNOWN`).",
+                "uptime decrease with otherwise plausible modular progression = "
+                "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`, not confirmed reboot.",
+            )
+            self.assertIn(
+                "uptime decrease with otherwise plausible modular progression = "
+                "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`",
+                p10_bad,
+            )
+            (docs_tmp / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+                p10_bad, encoding="utf-8"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                (root / "Platform_Master_Build_Sequence_Register_v1.0.md").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(docs_tmp, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_sflow_v5_datagram_sequence_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected fixture-8 UNKNOWN regression failure")
+            self.assertIn("SEQUENCE_DISCONTINUITY_UNKNOWN", joined)
+
+    def test_101d_sflow_sequence_regression_detects_loss(self) -> None:
+        """Dropping datagram-sequence primary authority must fail validation."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            # Minimal register with BUILD-051 profile freeze but no S5 pins.
+            bad_register = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-051 | Flow | FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | 020 | NOT_IMPLEMENTED | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 051 | Flow FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED S5 sFlow v5 | Sensor | delta | D | exit | rb | NOT_IMPLEMENTED |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad_register, encoding="utf-8"
+            )
+            # Point docs_root at a copy of Platform_10 with sequence contract removed.
+            docs_tmp = tmp_root / "project_documentation"
+            docs_tmp.mkdir()
+            p10_src = (
+                docs / "Platform_10_Protocol_Security_Connector_Master.md"
+            ).read_text(encoding="utf-8")
+            # Keep FLOW profile markers so the validator does not skip, but strip
+            # the dedicated sFlow datagram sequence owner heading.
+            p10_bad = p10_src.replace(
+                "sFlow v5 datagram sequence / gap / duplicate / reorder / restart semantics",
+                "sFlow v5 evidence notes",
+            )
+            self.assertNotIn("sFlow v5 datagram sequence", p10_bad)
+            self.assertIn("FLOW_UDP_P1_PROFILE_V1", p10_bad)
+            (docs_tmp / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+                p10_bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs_tmp, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_sflow_v5_datagram_sequence_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected sFlow sequence contract failure")
+            self.assertIn("sFlow v5 datagram sequence", joined)
+
+    def test_102_host_global_runtime_exclusion_contract(self) -> None:
+        """Shared-host Docker runtime exclusion must stay frozen across owners."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p13 = (
+            docs / "Platform_13_Engineering_Development_and_Docker_Standards.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p15 = (
+            docs / "Platform_15_CI_CD_Packaging_and_Distribution.md"
+        ).read_text(encoding="utf-8")
+
+        lock_path = (
+            "/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock"
+        )
+        for needle in (
+            "## 22. Host-global shared Docker runtime exclusion",
+            lock_path,
+            "flock",
+            "fcntl.flock",
+            "Kernel lock ownership is authoritative",
+            "Never unlink",
+            "runtime-busy",
+            "CODEX Desktop heavy E2E",
+            "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
+            "agent-e2e-*",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
+        ):
+            self.assertIn(needle, p13, needle)
+
+        for needle in (
+            "### 3.8 Self-hosted host-global runtime exclusion",
+            "Integration, PostgreSQL, contract, security",
+            lock_path,
+            "before any Platform Docker mutation",
+            "owned cleanup",
+            "always()",
+            "runtime-busy",
+            "agent-e2e-*",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
+            "| `.github/workflows/platform-ci.yml` |",
+        ):
+            self.assertIn(needle, p15, needle)
+
+        for needle in (
+            "### Host-global runtime exclusion acceptance",
+            "Persistence, Structured JSON Logs, and Workstation Isolation",
+            "not** an allowlist for `agent-e2e-*`",
+            "Local E2E owns the lock",
+            "CI owns the lock",
+            "Foreign containers remain unchanged throughout Test 20",
+            "CI cancellation / process death releases the lock",
+            "CI cleanup never deletes foreign `agent-e2e-*`",
+            "Same-inode independent nonblocking acquisition",
+            "Two GitHub Integration jobs cannot become simultaneous",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "PENDING_IMPLEMENTATION",
+        ):
+            self.assertIn(needle, p14, needle)
+
+        # Preserve prior P0 closures — these must not regress with this pin.
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("sFlow v5", register)
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        self.assertIn("PARTIAL", row_042)
+        self.assertNotIn("Raw Counter64 exists", row_042)
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("### 7.1 Agent-ingress pending-reservation", p17)
+        self.assertIn("combine: ANY | ALL", p17)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_host_global_runtime_exclusion_contract()
+        self.assertEqual(validator.errors, [])
+
+    def test_102b_host_global_runtime_exclusion_regression_fails(self) -> None:
+        """Dropping the host-global lock owner section must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (tmp_docs / "Platform_13_Engineering_Development_and_Docker_Standards.md").write_text(
+                "# Platform 13\n\n## 14. Compose profiles\n\n"
+                "Docker Compose development without host exclusion.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_15_CI_CD_Packaging_and_Distribution.md").write_text(
+                "# Platform 15\n\n### 3.1 Pipeline stages\n\nCI/CD stages.\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_14_Test_Performance_and_Release_Quality.md").write_text(
+                "# Platform 14\n\n### Current CI evidence boundary\n\n"
+                "Four jobs exist.\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_host_global_runtime_exclusion_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(
+                validator.errors,
+                "expected host-global runtime exclusion failures",
+            )
+            self.assertIn("host-global", joined.lower())
 
 
 if __name__ == "__main__":

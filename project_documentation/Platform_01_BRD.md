@@ -83,19 +83,19 @@ Business outcome: an authorized operator can discover, monitor, diagnose and gov
 
 | ID | Principle | Business requirement |
 |---|---|---|
-| BR-P01 | Excellent product | Features must be production-grade, coherent, supportable and testable; no demo-only behavior may be represented as complete. |
-| BR-P02 | Ease of use | Normal provisioning, administration, monitoring configuration, troubleshooting and reporting must be achievable through the UI without editing files, YAML, database rows or source code. |
-| BR-P03 | Very low false alerts | Platform must qualify failures using multiple evidence sources, hysteresis, dependency awareness, recovery validation and correlation before escalating avoidable noise. Absolute zero false alerts cannot be guaranteed; the measurable goal is to minimize and continuously measure them. |
-| BR-P04 | Meaningful AI | AI must help users diagnose, explain, search, summarize, recommend and operate. AI must be evidence-grounded, uncertainty-aware and able to say that root cause cannot be determined. |
-| BR-P05 | Friendly UI/UX | Navigation must be role-aware, readable, fast and consistent. The product must support light/dark theme and avoid unreadably small dashboard text. |
-| BR-P06 | Easy implementation | Installation, Sensor deployment, Agent enrollment, discovery, provisioning, credential testing and integration testing must be guided and diagnosable. |
-| BR-P07 | Light resource footprint | Core, Sensors and Agents must be engineered against explicit CPU/RAM/storage targets and regression-tested for resource efficiency. |
-| BR-P08 | Low latency / fast UI | Common dashboards, search, tables and operational actions must remain responsive at enterprise scale. Performance is a release gate. |
-| BR-P09 | HTTPS-only UI | Customer UI is served only over HTTPS/TLS. Platform shall not expose an application listener on TCP/80. |
-| BR-P10 | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
-| BR-P11 | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
-| BR-P12 | No-context-switch operations | An authorized NOC/operator shall verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
-| BR-P13 | Commercial product branding | Customer-facing UI surfaces display effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active) with appropriate light/dark logo contrast and aspect ratio preservation. Generated PDF reports prominently embed the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports are data-only. Internal engineering, architecture, code packages, and schemas retain Platform identity. |
+| `BR-P01` / `REQ-P-001` | Excellent product | Features must be production-grade, coherent, supportable and testable; no demo-only behavior may be represented as complete. |
+| `BR-P02` / `REQ-P-002` | Ease of use | Normal provisioning, administration, monitoring configuration, troubleshooting and reporting must be achievable through the UI without editing files, YAML, database rows or source code. |
+| `BR-P03` / `REQ-P-003` | Very low false alerts | Platform must qualify failures using multiple evidence sources, hysteresis, dependency awareness, recovery validation and correlation before escalating avoidable noise. Absolute zero false alerts cannot be guaranteed; the measurable goal is to minimize and continuously measure them. |
+| `BR-P04` / `REQ-P-004` | Meaningful AI | AI must help users diagnose, explain, search, summarize, recommend and operate. AI must be evidence-grounded, uncertainty-aware and able to say that root cause cannot be determined. |
+| `BR-P05` / `REQ-P-005` | Friendly UI/UX | Navigation must be role-aware, readable, fast and consistent. The product must support light/dark theme and avoid unreadably small dashboard text. |
+| `BR-P06` / `REQ-P-006` | Easy implementation | Installation, Sensor deployment, Agent enrollment, discovery, provisioning, credential testing and integration testing must be guided and diagnosable. |
+| `BR-P07` / `REQ-P-007` | Light resource footprint | Core, Sensors and Agents must be engineered against explicit CPU/RAM/storage targets and regression-tested for resource efficiency. |
+| `BR-P08` / `REQ-P-008` | Low latency / fast UI | Common dashboards, search, tables and operational actions must remain responsive at enterprise scale. Performance is a release gate. |
+| `BR-P09` / `REQ-P-009` | HTTPS-only UI | Customer UI is served only over HTTPS/TLS. Platform shall not expose an application listener on TCP/80. |
+| `BR-P10` / `REQ-P-010` | No silent failure | Material collection, storage, integration, HA, provisioning, authentication or workflow failures must expose what failed, evidence, impact and remediation guidance. |
+| `BR-P11` / `REQ-P-011` | Safe by default, flexible by choice | Secure/safe defaults are enabled initially; customers may customize operational behavior through UI where doing so does not violate tenant isolation, integrity or mandatory safety controls. |
+| `BR-P12` | No-context-switch operations | An authorized NOC/operator shall verify, diagnose and investigate a monitored entity from its current Platform context using safe on-demand diagnostics, browser CLI and related evidence without requiring routine external tools. Low-risk actions shall be easy; privileged or destructive actions shall retain proportionate controls and audit. |
+| `BR-P13` | Commercial product branding | Customer-facing UI surfaces display effective commercial branding (defaulting to AmrudAi, or licensed tenant/MSP branding where white-label is active) with appropriate light/dark logo contrast and aspect ratio preservation. Generated PDF reports prominently embed the effective commercial logo (defaulting to the governed AmrudAi logo, or licensed tenant/MSP logo where white-label is active); CSV reports are data-only. Internal engineering, architecture, code packages, and schemas retain Platform identity. |
 
 **Industry lessons (business intent, not proprietary copy):**
 
@@ -200,7 +200,7 @@ Platform shall provide the following capability families. Each family depends on
 | 21 | Install / upgrade | Customers install without Docker mandate; upgrades are safe | Native packages, preflight |
 | 22 | Supportability | Failures are diagnosable with support bundles | Structured logs, correlation IDs |
 | 23 | Operational diagnostics | NOC verifies without context switch | Sensor/Agent paths, RBAC |
-| 24 | Licensing | Commercial continuity is deterministic and visible | Founder-reserved grace conflict |
+| 24 | Licensing | Commercial continuity is deterministic and visible | 15-day `EXPIRED_GRACE_15D`; T-7 distinct; quantities Founder-reserved |
 | 25 | UX / accessibility | Product is usable at enterprise scale | HTTPS-only, a11y |
 | 26 | Extensibility | Customers extend via packs/studios without Core forks | Capability Pack architecture |
 
@@ -433,26 +433,13 @@ Business outcome: day-2 administration is UI-complete for tenants, sites/groups,
 
 ## 26. IAM and security (business)
 
-Platform is intended for banks, defence and global enterprises. Security architecture must be designed from Day 1 for strong enterprise controls, including:
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-- TLS everywhere appropriate and mTLS between trusted Platform components
-- HTTPS-only UI
-- OIDC/SAML/LDAP/AD/Entra integration; MFA
-- Resource-scoped RBAC and explicit deny semantics
-- Secrets encrypted at rest and never sent to browsers unnecessarily
-- Certificate/PKI lifecycle management
-- Scoped API tokens/service accounts
-- Signed software/packages and Device Packs; SBOM and dependency provenance
-- Vulnerability and licence scanning
-- Tamper-evident audit capabilities (target)
-- Break-glass and temporary elevation controls
-- NCM/CLI maker-checker and command guardrails
-- Sensitive-data masking before storage/AI where configured
+- **`REQ-SEC-001`**: Platform SHALL enforce: Security-by-design for banks/defence/global enterprises.
+- **`REQ-SEC-002`**: Platform SHALL enforce: Design for ISO27001/SOC2/PCI/RBI/FIPS/STIG/CIS readiness; no certification claim before achieved.
 
-Architecture must support alignment with high-assurance expectations (ISO 27001 controls, SOC 2 control families, PCI-oriented controls, RBI/BFSI expectations, defence hardening, FIPS-capable cryptography where required). **No certification may be claimed until formally achieved.** Exact certification roadmap is TBD.
-
----
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 27. Audit and governance (business)
 
 Business outcome: material actions across auth, RBAC, provisioning, credentials, policies, alerts, NCM/CLI, IPAM, AI, Sensors, HA, licence, retention, backup and upgrade are attributable, queryable and exportable to SIEM where configured.
@@ -768,7 +755,7 @@ Phase-1 business outcomes are:
 1. **Useful out of box:** common enterprise technologies use Official Certified Capability Pack targets so discovery/onboarding can identify technology, preflight access, select a compatible monitoring profile and produce useful inventory, telemetry, topology, dashboards, alerts and diagnostics without weeks of manual monitor construction.
 2. **No-context-switch investigation:** the existing Incident/RCA/Unified Operations Timeline experience is productized as an Investigation Workbench combining authorized metrics, alerts/incidents, Flow, logs/events, path/topology, configuration/change, Sensor health, synthetics, ITSM and other available evidence with common time/scope context.
 3. **Operational service telemetry, not full APM:** Phase 1 accepts OTLP metrics and structured logs and preserves trace/span correlation context. Bounded sampled spans are Phase 1.5 subject to performance, privacy, cardinality, sampling and retention certification.
-4. **Network Change & Configuration Assurance:** NCM must progress beyond backup/push into planned, approved, staged, validated and auditable change with explicit risk/blast-radius evidence, exact approval binding and certified rollback only where supported.
+4. **Network Change & Configuration Assurance:** Phase 1 provides the read-only/low-risk NCM and audited manual CLI subset in §18 and PRD §24. Phase 1.5 adds governed privileged change automation: planned, approved, staged and validated change with explicit risk/blast-radius evidence, exact approval binding and certified rollback only where supported. A Phase-1 investigation may use change evidence without gaining Phase-1.5 execution authority.
 5. **Platform-wide enterprise workflow integration:** ITSM/CMDB integration reduces duplicate operational work across incidents, problems, changes, maintenance, approvals, NCM, remediation, RCA/PIR and inventory/business-service context while preserving Platform monitoring truth.
 
 Phase-1.5 specialist outcomes include endpoint/switch-port intelligence, browser journey synthetics, deeper DB performance intelligence, virtualization optimization, NCM firmware lifecycle and the second-wave ITSM connector certification set. Deep VoIP specialist depth is Phase 2.

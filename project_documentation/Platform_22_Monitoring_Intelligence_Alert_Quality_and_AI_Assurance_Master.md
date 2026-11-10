@@ -103,6 +103,15 @@ Nothing in this document selects a commercial model/provider, vector database, m
 
 ## 4. Alert Evidence Contracts
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-004`**: Platform SHALL enforce: Alert qualification state machine; failed SNMP poll != device down.
+- **`REQ-ALT-005`**: Platform SHALL enforce: Multi-protocol/multi-vantage validation and confidence.
+- **`REQ-ALT-007`**: Platform SHALL enforce: Alert storm protection/dedup/rate-limit/compression.
+- **`REQ-ALT-010`**: Platform SHALL enforce: Recovery qualification before auto-resolution.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 An Alert Evidence Contract is versioned policy for a specific alert class. Each contract shall define: monitored subject and scope; required primary evidence; corroborating evidence where applicable; contradictory evidence; telemetry freshness/quality prerequisites; maintenance/expected-state handling; severity logic; confidence logic; suppression/dedup/storm behavior; recovery evidence; active-validation options; and audit/version metadata.
 
 The following classes require explicit contracts before production activation:
@@ -126,13 +135,46 @@ No contract may encode a universal “two signals always required” rule. Requi
 
 ### 4.1 Downstream dependency correlation and reversible suppression safety
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-009`**: Platform SHALL enforce: Maintenance, notification mute and dependency suppression separated.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+
 Topology-based qualification uses incident-time, versioned, tenant-scoped graph edges with type, direction, source protocol, first/last observation and freshness/quality. LLDP/CDP supplies L2 adjacency; parent-child failure propagation requires corroborated routing/path/service/CMDB evidence and redundancy-aware reachability. A failed parent may explain child UNREACHABLE symptoms, but must not automatically mark all children DEVICE_DOWN or assert a confirmed root from timing alone.
 
 Suppress only redundant child **notifications/ticket fan-out**, never raw events, inspectable child alerts, actual availability, service impact or SLA evidence. Every suppression has a versioned policy, incident/root candidate, graph revision, reason, evidence/contradictions, expiry, audit and unsuppression path. Contradictory alternate-path success, stale/one-sided neighbors, Sensor failure, independent child fault, manual override or parent recovery with ongoing child failure require explicit reevaluation. Anomalies and LLM narrative do not authorize suppression.
 
+### 4.2 Alert ownership, assignment, escalation and shift handover
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-011`**: Platform SHALL enforce: Alert ownership/assignment/escalation/shift handover.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+Alert ownership is an operational workflow contract, distinct from model-learning feedback:
+
+- every active alert/incident SHALL support authorized **assignment** to a user, team or on-call roster reference (`assignee_ref` / owner) with actor, timestamp and reason/ticket where required by policy;
+- **acknowledgement** and **assignment** are separate lifecycle transitions; acknowledging does not imply ownership transfer unless explicitly combined by an authorized action;
+- **escalation** policies define time-based or severity-based promotion paths (primary → secondary → management) with freeze/maintenance awareness; escalation MUST NOT mutate alert severity or semantic state solely to force paging;
+- **shift handover** SHALL transfer open owned alerts/incidents to the incoming roster with auditable from/to actors, retained investigation context and no silent drop of ownership; unresolved items remain visible in the incoming queue;
+- ownership/escalation actions are tenant-scoped, RBAC-enforced and audited; they MUST NOT invoke privileged remediation or rewrite RCA conclusions;
+- Notification Center delivery of ownership/escalation events follows `Platform_20` dedupe/rate-limit rules and remains distinct from the underlying Alert/Incident object.
+
+This section does not authorize LLM/GNN output to assign owners, escalate or perform shift handover. Learning/feedback governance remains in §9 and cannot substitute for this operational contract.
+
 ## 5. Telemetry quality, evidence coverage and semantic state
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
+- **`REQ-ALT-006`**: Platform SHALL enforce: Event vs Alert vs Incident distinction.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Before operational assertion, the evaluation path shall score whether expected evidence is present, fresh, schema-valid, time-aligned and produced by healthy collectors. Missing or degraded evidence lowers confidence and may change the state to `MONITORING_DEGRADED`, `UNKNOWN` or `STALE` instead of asserting target failure.
 
 **Evidence Coverage** shall expose enough machine-readable information to answer: what evidence was expected; what arrived; what is missing/stale/degraded; whether active validation ran; which contradictions exist; and how the evidence affected confidence.
@@ -145,19 +187,224 @@ For eBPF process-network and active-path domains, telemetry trust evaluation mus
 
 ## 6. Alert-policy lifecycle and false-alert quality gates
 
-Alert policy changes follow `DRAFT → BACKTEST → SHADOW → ACTIVE`.
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-- **DRAFT:** authoring/validation only; no production customer alert effect.
-- **BACKTEST:** replay against deterministic historical/synthetic fixtures and labelled incidents where available.
-- **SHADOW:** evaluate live evidence without authoritative customer alerting; compare to active policy and operator outcomes.
-- **ACTIVE:** only after required review/evidence gates; version remains rollback-capable.
+- **`REQ-ALT-001`**: Platform SHALL enforce: Hierarchical policy inheritance Platform→Tenant→Region/BU→Site→Group→Device→Metric.
+- **`REQ-ALT-002`**: Platform SHALL enforce: Static/duration/consecutive/rate/baseline/missing/composite/dependency/business-time thresholds.
+- **`REQ-ALT-008`**: Platform SHALL enforce: Flapping detection and reopen windows.
+- **`REQ-ALT-012`**: Platform SHALL enforce: Alert-policy effectiveness analytics.
 
-Promotion evidence is class-specific. It shall include representative positive/negative cases, maintenance/expected-state cases, collection-degradation cases, storm conditions where relevant and known difficult edge cases. Metrics may include false-positive rate, false-negative/missed-event rate, precision/recall, detection latency, alert volume/cardinality, correlation compression and operator-confirmation rate. This document does not invent a universal numeric acceptance threshold; release criteria must be justified per class and deployment risk.
+<!-- END P0-1 NORMATIVE BINDINGS -->
 
----
+Alert policies are versioned authoritative configuration under hierarchical inheritance (`REQ-ALT-001`): Platform → Tenant → Region/BU → Site → Group → Device → Metric. Effective policy for evaluation is the resolved inheritance result identified by `policy_id` + `policy_version` (and Core-issued assignment/control-generation provenance where assignments apply). New or changed policies progress through governed `DRAFT → BACKTEST → SHADOW → ACTIVE` with approval, rollback and class-appropriate false-alert / missed-detection evidence before promotion; no universal numeric quality threshold is invented by this master. Flapping detection and reopen windows (`REQ-ALT-008`) operate on ACTIVE evaluation outcomes. Policy-effectiveness analytics (`REQ-ALT-012`) consume reproducible evaluation evidence without silently mutating ACTIVE policy.
+
+Threshold evaluation defined in §6.1–§6.10 is the authoritative `REQ-ALT-002` contract. It does not replace Alert Evidence Contracts (§4), telemetry-quality gates (§5) or severity/confidence separation. Evaluation output feeds qualification; it does not by itself assert Device Down.
+
+### 6.1 Alert threshold evaluation contract (`REQ-ALT-002`)
+
+`REQ-ALT-002` requires Platform to evaluate static, duration, consecutive, rate, baseline, missing, composite, group/cross-entity, dependency and business-time thresholds under one common envelope. Type-specific rules in §6.1.2–§6.1.11 refine that envelope; they do not create a second threshold authority. Persisted/authoring representation of these expressions is owned by `Platform_17` **`AlertPolicyDefinitionV1`** / **`ThresholdExprV1`** (referenced here; do not invent a second schema).
+
+#### 6.1.1 Common threshold evaluation envelope
+
+Every threshold definition SHALL specify:
+
+1. **Metric/evidence input identity** — canonical metric, observation family, or evidence reference (entity/monitor scope, units, quality fields).
+2. **Operator / evaluation type** — one of the typed families in §6.1.2–§6.1.11 (or an explicit composition of those families).
+3. **Evaluation window** — the time or sample window over which the condition is assessed.
+4. **Qualified sample requirements** — minimum usable samples and which quality states count as qualified.
+5. **Evidence-quality prerequisites** — collector health, freshness, schema/time validity and other §5 trust gates that must pass before a TRUE failure assertion is eligible.
+6. **Threshold parameters** — typed parameters for the selected evaluation family (limits, N, duration, rate bounds, baseline identity, calendar identity, child condition refs, group aggregation).
+7. **Clear / reset / hysteresis behavior** — how TRUE clears to FALSE, reset conditions and any hysteresis band distinct from the fire threshold.
+8. **Missing / stale behavior** — explicit outcome when expected evidence is absent, late or stale (`UNKNOWN`, suppress fire, extend window, or other documented rule — never silent DOWN).
+9. **Schedule / business-time applicability** — whether evaluation is always-on or bound to a versioned business calendar/timezone (§6.1.10).
+10. **Evaluation result** — exactly one of `TRUE | FALSE | UNKNOWN` per evaluation tick.
+11. **Versioned policy authority** — `policy_id` / `policy_version` (and assignment/generation where applicable) that authorized the evaluation.
+12. **Deterministic evaluation** — identical qualified inputs + policy version produce identical results; no hidden randomness or silent self-learning mutation of ACTIVE parameters.
+13. **Audit / provenance** — retain enough evidence to reconstruct inputs used, quality gates, result and policy version.
+14. **Test / acceptance linkage** — finite positive and negative fixtures for the threshold type, including UNKNOWN/stale/collector-failure cases.
+
+`UNKNOWN`, stale evidence, collector failure, or missing monitoring-path evidence MUST NOT silently evaluate as monitored-object failure. Such conditions may yield `UNKNOWN`, `MONITORING_DEGRADED` / `STALE` semantic state, or withhold fire under the applicable Alert Evidence Contract; they MUST NOT coerce to Device Down solely by absence of a qualified TRUE/FALSE sample.
+
+#### 6.1.2 Static threshold
+
+A static threshold compares one qualified numeric (or ordered enum) observation to configured limit(s).
+
+- **Operators (normative set):** `GT`, `GE`, `LT`, `LE`, `EQ`, `NE`, and closed/open range forms `INSIDE` / `OUTSIDE` with inclusive/exclusive bound flags.
+- **Units:** comparison MUST use the metric’s declared unit; unit conversion is forbidden unless an explicit versioned unit-conversion rule is part of the policy parameters. Boolean/enum metrics use their declared enum order, not ad-hoc string inequality.
+- **Result:** `TRUE` when the qualified sample satisfies the operator; `FALSE` when it does not; `UNKNOWN` when the sample is missing, stale, or fails evidence-quality prerequisites.
+- **Hysteresis:** optional clear threshold distinct from fire threshold; clear evaluation uses the same unit/operator discipline.
+
+#### 6.1.3 Duration threshold
+
+A duration threshold requires a child condition (typically static or composite) to remain `TRUE` **continuously** for a configured duration `D`.
+
+- The duration clock starts when the child first becomes qualified `TRUE` and advances only while consecutive qualified evaluations remain `TRUE`.
+- **Interruption / reset:** any qualified `FALSE` resets the duration clock. `UNKNOWN` or stale/unqualified samples **do not** advance the clock; policy SHALL declare whether they **pause** (preserve elapsed) or **reset**, with the exact choice and grace persisted on `Platform_17` `DurationThresholdV1.unknown_behavior` / `unknown_grace_seconds` (PAUSE preserves elapsed only while UNKNOWN/stale ≤ grace; else reset). Unconfigured pause/reset MUST fail closed as `UNKNOWN` rather than fire.
+- Fire occurs only when continuous qualified `TRUE` time ≥ `D`. Clear/hysteresis follow the common envelope.
+
+#### 6.1.4 Consecutive threshold
+
+A consecutive threshold requires `N` **qualified consecutive** evaluations of a child condition to be `TRUE`.
+
+- Only samples that pass evidence-quality prerequisites count toward `N`.
+- A qualified `FALSE` resets the consecutive counter to 0.
+- `UNKNOWN`, stale, or otherwise unqualified samples **do not** increment `N` and **do not** count as `TRUE`; policy SHALL declare whether they reset the counter or skip without reset, persisted as `Platform_17` `ConsecutiveThresholdV1.unknown_behavior` (`RESET` | `SKIP`). Unconfigured UNKNOWN behavior MUST fail closed rather than silently accumulate across evidence gaps.
+- Fire when the counter reaches `N`; clear/reset/hysteresis follow the common envelope.
+
+#### 6.1.5 Rate threshold
+
+A rate threshold evaluates change over elapsed time: `rate = Δvalue / Δt` (or an explicitly declared numerator/delta over an elapsed-time denominator).
+
+- **Numerator / delta:** computed from successive qualified observations of the same counter/gauge identity.
+- **Denominator:** elapsed time between the observation timestamps used for the delta (not wall-clock since last scheduler tick alone).
+- **Minimum valid interval:** if `Δt` is below the configured minimum valid interval, result is `UNKNOWN` (insufficient interval), not a fabricated high rate.
+- **Reset / wrap / discontinuity:** Counter reset, wrap, reboot or source discontinuity evidence MUST be applied before rate derivation. A decrease is not automatically a wrap; discontinuity evidence is evaluated first (aligned with Platform_17 Counter64 rules).
+- **Authoritative Counter64 path:** exact unsigned Counter64 delta/reset processing MUST complete before any floating-point rate/utilization field is derived. Authoritative Counter64 rate logic MUST NOT pass through Float64 (or Java `double` / JSON unsafe-number) coercion before exact delta/reset handling.
+- **Unavailable-rate outcome:** when either endpoint sample is missing/stale/unqualified, or discontinuity makes delta unsafe, result is `UNKNOWN` / unavailable-rate — never a silent TRUE failure.
+
+#### 6.1.6 Baseline threshold
+
+A baseline threshold compares a qualified observation (or short window aggregate) to a versioned baseline.
+
+- **Baseline identity / version:** every evaluation binds `baseline_id` + `baseline_version` via persisted `Platform_17` `BaselineRefV1` (immutable reference once published for that version).
+- **Training / reference window:** parameters declare the reference window, aggregation and any seasonality key (`BaselineThresholdV1.reference_window_seconds` / `aggregation` / `seasonality_key`); training artifacts are versioned.
+- **Sample sufficiency:** if the baseline lacks the configured `minimum_qualified_samples`, result is `UNKNOWN` (insufficient baseline), not an invented deviation.
+- **Deviation operator:** absolute, relative-percent or σ-multiple deviation with `ABOVE`/`BELOW`/`OUTSIDE_BAND` and explicit units as persisted on `BaselineThresholdV1`; operator parameters are part of the versioned policy, not runtime-mutable weights.
+- **Stale baseline behavior:** if the baseline version is expired, superseded without replacement, or older than `max_baseline_age_seconds`, evaluation yields `UNKNOWN` or `USE_FALLBACK_POLICY` with an explicit immutable `PolicyVersionRefV1` fallback (no invented fallback).
+- **No silent self-learning policy mutation:** operator feedback or online learning MUST NOT silently mutate ACTIVE baseline parameters or promote a new baseline version without the governed policy lifecycle.
+
+#### 6.1.7 Missing threshold
+
+A missing threshold detects absence of expected observations.
+
+- **Expected observation cadence** and **freshness deadline** are mandatory parameters (e.g. expected every `P`, stale after `T`).
+- Result is `TRUE` only when no qualified observation arrives within the freshness deadline under healthy monitoring-path prerequisites that make absence attributable to the monitored signal path under policy — still as a **missing/no-data** condition, not Device Down.
+- Missing telemetry is evidence-quality / semantic-state information (`NO_DATA`, `STALE`, `MONITORING_DEGRADED`, or `UNKNOWN` as applicable) and MUST NOT automatically mean endpoint DOWN. Downstream Device-Down qualification remains owned by Alert Evidence Contracts and BUILD-082.
+
+#### 6.1.8 Composite threshold
+
+A composite threshold combines child conditions with deterministic Boolean operators over tri-state values.
+
+- **Operators:** `AND`, `OR`, `NOT` (and parenthesized grouping). No short-circuit that drops audit of evaluated children when those children were assessed.
+- **Tri-state logic (normative):**
+  - `AND`: `TRUE` iff all children `TRUE`; `FALSE` if any child `FALSE`; else `UNKNOWN`.
+  - `OR`: `TRUE` if any child `TRUE`; `FALSE` iff all children `FALSE`; else `UNKNOWN`.
+  - `NOT`: `NOT TRUE = FALSE`; `NOT FALSE = TRUE`; `NOT UNKNOWN = UNKNOWN`.
+- UNKNOWN handling is deterministic per the table above; policies MUST NOT treat UNKNOWN as FALSE (or TRUE) unless an explicit, versioned coercion operator is declared — default coercion is forbidden.
+
+#### 6.1.9 Dependency threshold
+
+A dependency threshold binds evaluation to qualified dependency/topology authority (canonical entity graph relationship with provenance/confidence/freshness). Persisted representation is `Platform_17` `DependencyThresholdV1` with required `dependency_ref`, `activation` (`DependencyActivationV1`) and immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}`.
+
+**Qualified dependency evidence** MUST satisfy all of:
+
+- canonical relationship identity;
+- confidence threshold (`DependencyRefV1.min_confidence`);
+- max-age / freshness (`DependencyRefV1.max_age_seconds`);
+- current `as_of` graph authority.
+
+Stale, No Data, low-confidence or otherwise unqualified dependency evidence remains `UNKNOWN` / **no dependency action**. Dependency evidence never proves child technical health/failure by itself. Child technical evidence remains independently qualified.
+
+**Activation** (`DependencyActivationV1`) freezes when the dependency action applies and requires an explicit combination operator. Persisted fields: `semantic_states: SemanticStateV1[]`, `maintenance_active: boolean`, and required `combine: ANY | ALL`. `SemanticStateV1` MUST reuse the existing canonical Platform semantic-state vocabulary (`Platform_22` §5 / `alert_current.semantic_state`); do not create another state model.
+
+Criterion enablement and match:
+
+- semantic-state criterion ENABLED iff `semantic_states` is non-empty; MATCHES iff current qualified dependency semantic state ∈ `semantic_states`;
+- maintenance criterion ENABLED iff `maintenance_active = true`; MATCHES iff the dependency is under qualified active maintenance per the authoritative maintenance contract;
+- at least one criterion MUST be enabled;
+- `combine=ANY` ⇒ activation TRUE when ≥1 ENABLED criterion matches;
+- `combine=ALL` ⇒ activation TRUE only when every ENABLED criterion matches;
+- if only one criterion is enabled, `combine` MUST be `ANY` (`ALL` with one enabled criterion is invalid);
+- no hidden/default combination behavior is permitted.
+
+Quality gate precedes combination: stale, missing, low-confidence or unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action and cannot activate `SUPPRESS`/`DEFER`. The combination operator determines only whether activation is TRUE; once TRUE, immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}` governs behavior below. The dependency `action` is immutable within a policy version; action/activation changes require a new policy version. Dependency disappearance/revocation removes the effect reversibly. Finite ANY/ALL fixtures are owned with the schema in `Platform_17` `DependencyActivationV1`.
+
+##### SUPPRESS
+
+When activation is TRUE:
+
+- the child expression is still evaluated and evidence retained;
+- dependency suppression overlays the child alert;
+- suppression MUST NOT rewrite child semantic state to `UP`;
+- suppression MUST NOT clear an already-active alert solely because the dependency became active;
+- notifications/incident effects follow the separately governed suppression contract (`REQ-ALT-009` / §4.1);
+- when dependency activation clears, suppression is removed and current child evidence is immediately re-evaluated;
+- no historical child evidence is deleted.
+
+If the child clears independently, normal clear behavior still applies.
+
+##### DEFER
+
+When dependency activation is TRUE:
+
+- a newly TRUE child condition does not emit a new firing transition yet;
+- evidence is retained as dependency-deferred;
+- no false healthy state is emitted;
+- if the child becomes FALSE while deferred, no delayed alert is emitted;
+- when dependency activation clears, re-evaluate CURRENT qualified child evidence;
+- fire only if the child is still TRUE;
+- do not backdate a new alert to the original deferred time.
+
+An already-active alert is not silently cleared by `DEFER`.
+
+##### ANNOTATE
+
+Dependency activation:
+
+- does not alter child fire/clear evaluation;
+- attaches dependency relationship/provenance/confidence evidence;
+- may influence RCA/correlation downstream;
+- cannot independently suppress or clear the child alert.
+
+##### Common dependency rules
+
+- No Data / stale graph evidence cannot activate `SUPPRESS`/`DEFER`.
+- Suppression or dependency-conditioned fire/clear overlays MUST be reversible when the dependency evidence clears or is revoked.
+- A dependency assertion (parent down, path loss, maintenance on upstream) does **not** automatically prove child failure.
+
+#### 6.1.10 Business-time threshold
+
+A business-time threshold restricts when another threshold family is eligible to fire/clear. Schema V1 has **exactly one** representation: an explicit `Platform_17` `BusinessTimeThresholdV1` (`ThresholdExprV1.kind=BUSINESS_TIME`). Root `AlertPolicyDefinitionV1.business_calendar_ref` is forbidden; there is no second calendar path.
+
+- **Timezone:** IANA timezone identifiers only (e.g. `Asia/Kolkata`); offsets-without-zone are rejected. The IANA zone is owned by the bound primary calendar version.
+- **Primary calendar:** `calendar_ref` binds an exact immutable same-tenant calendar ID + version.
+- **Optional blackout / freeze calendar:** `blackout_calendar_ref` binds optional freeze/blackout policy identity as an exact immutable same-tenant calendar ID + version when present.
+- **Blackout behavior (V1):** **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1**: `HOLD_STATE`. When the current instant is inside the blackout calendar: do not newly fire the wrapped child; do not clear an already-active alert solely because blackout started; preserve prior alert state; retain an auditable `BLACKOUT_HOLD` evaluation result/overlay; child evidence may continue to be collected/evaluated for visibility; after blackout ends, re-evaluate current qualified child evidence; do not backdate a new firing transition.
+- **DST behavior:** transitions use the IANA zone rules for the bound calendar version; ambiguous local times (fold) and non-existent local times (gap) MUST resolve by an explicit persisted policy rule on `Platform_17` `BusinessTimeThresholdV1` (`gap_behavior=OUTSIDE_WINDOW`; `fold_behavior=EARLIER_OFFSET|LATER_OFFSET`) and MUST be fixture-tested. Immutable evaluation MUST NOT depend on an unwritten implementation default.
+- **Missing / invalid primary calendar:** if the calendar version is missing, invalid, or timezone unknown, evaluation result is `UNKNOWN` and MUST NOT fire. Fallback to “always evaluate” is forbidden.
+- **Missing / invalid configured blackout calendar:** evaluation result is `UNKNOWN`, not silently “no blackout”. Do not fall back to always-on evaluation.
+
+#### 6.1.11 GROUP / cross-entity threshold (`ThresholdExprV1.kind=GROUP`)
+
+PRD §19 requires cross-device/group conditions. A GROUP threshold evaluates a child `ThresholdExprV1` across a canonical inventory/group/service membership set and aggregates the qualified child results.
+
+Frozen contract:
+
+1. **Selector** — canonical inventory/group/service selector only (tenant-scoped group, dynamic group, service membership, or explicit entity-set reference owned by Inventory). Opaque ad-hoc device lists outside inventory authority are rejected.
+2. **Membership resolution** — membership is resolved from authoritative inventory at the evaluation `as_of` instant for that tick.
+3. **Membership evidence** — evaluation evidence SHALL record membership snapshot/revision (selector identity, `as_of`, membership revision/hash, member entity IDs counted).
+4. **Child expression** — exactly one typed child `ThresholdExprV1` (any non-GROUP family, or COMPOSITE of non-GROUP families). Nested GROUP is forbidden at any depth in the child expression tree unless a later schema major explicitly authorizes it; `Platform_17` rejects nested GROUP recursively with `NESTED_GROUP_NOT_SUPPORTED_V1`.
+5. **Aggregation operator** — exactly one of `ANY | ALL | COUNT | PERCENT`.
+6. **Minimum qualified member count** — mandatory; if the count of members that produced a qualified child result (`TRUE` or `FALSE`) is below this minimum, the GROUP result is `UNKNOWN`.
+7. **Count / percentage threshold** — required when operator is `COUNT` or `PERCENT` (absolute count or percentage of qualified members whose child result is `TRUE`).
+8. **Common evaluation window and alignment tolerance** — all members share one evaluation window; per-member sample timestamps may differ only within a configured alignment tolerance. Outside tolerance ⇒ that member is unqualified for this tick.
+9. **Missing / stale members** — members with missing, stale, or evidence-quality-failed child inputs are **unqualified**; they do not count as `TRUE` or `FALSE`. Unqualified members do not satisfy ALL/ANY by silence.
+10. **Insufficient qualified membership** — when qualified members < minimum ⇒ `UNKNOWN` (never Device Down).
+11. **Tick isolation** — membership changes during an evaluation tick do not retroactively change that tick’s result; the tick binds the membership snapshot taken at evaluation start/`as_of`.
+12. **Historical immutability** — dynamic membership MUST NOT silently rewrite historical evaluation evidence; later membership changes create new ticks/evidence only.
+13. **No Data ≠ Device Down** — GROUP `UNKNOWN` / insufficient membership / collector failure remains monitoring-quality evidence and MUST NOT coerce Device Down.
+
+Persisted shape is the `GROUP` variant of `Platform_17` `ThresholdExprV1`.
 
 ## 7. Active Evidence Acquisition
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-ALT-003`**: Platform SHALL enforce: Adaptive polling with triggers, cooldown and capacity guardrails.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Active evidence acquisition is an investigation capability, not unrestricted probing. Each action must specify purpose, allowed target/scope, expected information gain, protocol/tool, credential need, rate/time/resource budget, potential impact and stop conditions. RBAC, tenant policy, maintenance constraints and audit apply. Unsafe or disruptive evidence collection requires explicit approval or is forbidden.
 
 The base PRD/UI additionally requires **operator-triggered** bounded diagnostics (for example Ping, traceroute/path, SNMP/TCP/DNS/SSH/API tests), multi-vantage verification, Live Evidence and deterministic `Verify Now` packs. Those manual NOC actions use the same evidence/safety model but are not dependent on an AI/planner. Planner-selected/autonomous evidence acquisition remains governed by this section and its release priority; manual safe diagnostics may be implemented earlier as base product workflow.
@@ -176,7 +423,7 @@ Every non-trivial RCA hypothesis shall retain: supporting evidence IDs; contradi
 
 Causal contradiction testing should ask whether expected downstream/upstream effects are present. If predicted effects are absent or another dependency better explains the observation set, confidence must fall or the hypothesis must be rejected.
 
-Process-to-network facts (TCP RTT spikes, retransmission storms, connection resets) and active-path facts (hop latency shifts, path divergence events) feed deterministic RCA as corroborating evidence alongside temporal topology, change telemetry, and contradiction testing. If eBPF reports backend connection failures while the target database reports a healthy listener and low CPU, contradiction testing identifies transit/firewall drops rather than database service failure. If evidence is contradictory or incomplete, RCA emits `INCONCLUSIVE`.
+Process-to-network facts (TCP RTT spikes, retransmission storms, connection resets) and active-path facts (hop latency shifts, path divergence events) feed deterministic RCA as corroborating evidence alongside temporal topology, change telemetry, and contradiction testing. If eBPF reports backend connection failures while the target database reports a healthy listener and low CPU, contradiction testing may raise a transit/firewall/path hypothesis and weaken only the database-failure hypotheses actually contradicted by those observations. Those facts alone do not establish transit/firewall causality: preserve endpoint, name-resolution, route, policy, capacity and vantage alternatives; promote a cause only with independent authorized supporting evidence and the applicable expected-effect/contradiction checks. If evidence is contradictory or incomplete, RCA emits `INCONCLUSIVE`.
 
 ---
 
@@ -187,7 +434,6 @@ Existing BUILD-100/Core RCA must support graph propagation, expert-system if/the
 The regression corpus must include parent-link-down with child UNREACHABLE, redundant uplink survival without false impact/suppression, unrelated child failure, multiple simultaneous causes, Sensor-path outage, source-auth and spoofed-trap failures, stale/contradictory LLDP/CDP, codebook false-match/no-match/unknown, unstable timestamps/replay, silent/traceroute-filtered hops and recovery/unsuppression with child still failing. Track false-root cause, inappropriate suppression, precision/recall, compression and evidence completeness, without making fixed percentage success claims.
 
 ## 9. Operator feedback and learning governance
-
 
 Operator feedback is structured evidence, not an automatic production-policy mutation. Supported feedback may include confirmed/rejected cause, alert useful/not useful, false-positive reason, suppression reason, remediation success/failure and missing evidence. Feedback records actor, tenant, incident/policy/model version and timestamp.
 
@@ -637,3 +883,24 @@ ECRP-P2-v1 must prove deterministic operation with external AI unavailable and m
 Phase-2 requirement closure SHALL preserve evidence quality, contradiction handling and INCONCLUSIVE outcomes.
 
 Phase 2.5 trace/profile/packet evidence may be additional deterministic/observational evidence classes for qualification and RCA, but packet or trace absence is not automatic proof of device/service down, sampled evidence must carry sampling/capture context, AI may rank/explain but may not invent missing packet/trace facts, and privacy-sensitive deep evidence must not be exposed to external models unless an explicitly certified deployment policy permits it.
+
+## Executable intelligence ownership and plan gaps — 2026-11-06
+
+The thirty entries in §15.1 are logical responsibilities, not thirty services or completed implementation plans. The following allocation uses existing BUILD owners; it creates no subsystem, model choice, database or new BUILD ID. Each dispatched slice must satisfy the Platform_13 executable-plan contract and the all-six-capability documentation gate. Current `analytics/src/main.py` supplies common runtime/health/logging foundation, not production implementation of the logical algorithms below.
+
+| §15.1 logical modules | Existing BUILD ownership and phase boundary | Required contract/acceptance before implementation or activation |
+|---|---|---|
+| 1–3 Orchestrator, Telemetry Quality, Feature/Evidence Builder | 062–065/074/080–084/100 for deterministic first-GA evidence; optional model invocation adds 102/103. | Typed source identity/quality/freshness, replay and bounded aggregation, alert-class evidence inputs, partial/missing/contradictory states, resource priority and finite acceptance. No model dependency in protected monitoring. |
+| 4–8 Baseline, Anomaly, Multivariate, Peer/Cohort, Forecast | Existing 070/080/095/100/101 owners where deterministic/statistical behavior is required; learned/advanced optional profiles gated by 102/103 and their requirement phase. | Versioned feature/window/cohort sufficiency, counter/reset semantics, UNKNOWN on insufficient evidence, calibrated evaluation and workload/budget definition. A module label does not select an OSS/model artifact. |
+| 9–13 Graph, GNN, RCA Fusion, Contradiction, Active Evidence | 072/084/085/100/101 deterministic graph/RCA; 012/015 and governed diagnostic/transport contracts for EDS; 102 for advisory GNN. | As-of graph/provenance, hypothesis and immutable revision contract, expected-effect counterexamples, redundancy, authorization/fan-out/budget, missing/contradictory evidence and INCONCLUSIVE. GNN is not a first-GA blocker or causal authority. |
+| 14–16 Similar Incident Memory, Change Intelligence, Flight Recorder | Existing 073/084/085/097/100/101 plus applicable Platform_19 requirements. | Bounded authorized references, historical retention/evidence window, independent current incident reasoning, no copied causal verdict, change timing versus causality, replay/revision and tenant isolation. |
+| 17–23 Embeddings, Retrieval/RAG, LLM Adapter, Copilot, Context, Tool Firewall, Injection Defense | 097/103 with existing security/diagnostic owners; optional future AI profile. | Admitted exact runtime/model/license, protected context/data/egress, retrieval authorization, bounded tokens/concurrency, prompt/tool separation, no privileged proposal execution, AI-disabled fallback and adversarial tests. No mandatory local model in Phase 1. |
+| 24–30 Model Registry, Resource Governor, Evaluation, Drift, Champion/Challenger, Provenance, Self-Monitoring | 100/101 and 074 for deterministic rule/evidence quality where applicable; 102/103 for model-specific lifecycle. | Version/approval/checksum, benchmark corpus/ground truth, signed promotion/rollback, calibrated confidence, resource isolation, audit/feedback separation and quality/regression observability. Model artifact gates remain deferred with their model profile. |
+
+### First-GA design dependencies separated from optional model spikes
+
+First Alert Evidence Contract schemas, per-class activation envelopes, deterministic qualification transitions, hypothesis/revision contracts and negative/ground-truth fixtures are required design work for BUILD-080–084/100/101 before those behaviors can be activated or certified. Link concrete schemas/API/event ownership through Platform_17, physical flow through Platform_06, user evidence/contradiction states through Platform_09 and executable acceptance through Platform_14. Class-specific thresholds and sample sufficiency require explicit evidence/policy; no universal invented number closes a plan gap.
+
+Exact local LLM/GNN/embedding artifacts, inference package/build options, training labels, hardware throughput and future model context/concurrency remain separately phased optional design/admission work. Their incompleteness does not block the deterministic first-GA scope; it does block claims or activation of their own profile. The existing §19 unresolved-spike list must be read with this split.
+
+Plan state remains **DESIGN_GAPS_RECORDED / NOT_EXECUTABLE_AS_A_COMPLETE_MODULE_SET** until each applicable module has the filled source/contract/dependency/failure-test/rollout record required by Platform_13. This honest gap ledger does not clear `DOC_P0_BLOCKED`, certify algorithms or authorize a writer to invent missing interfaces.
