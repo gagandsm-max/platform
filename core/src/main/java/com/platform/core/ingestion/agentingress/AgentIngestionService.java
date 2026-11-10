@@ -79,6 +79,7 @@ public class AgentIngestionService {
 
         validator.validateImmutableBatch(rawBody, request, scope);
         SensorIngestionService.requireIdempotencyKey(idempotencyKey, request.batchId());
+        String requestSha256 = sha256(rawBody);
 
         ReplayReservation reservation = watermarkStore.reserveBatchWithBody(
                 scope.tenantId(),
@@ -88,7 +89,7 @@ public class AgentIngestionService {
                 request.lastIngressSequence(),
                 request.checksum(),
                 request.batchId(),
-                request.correlationId(), sha256(rawBody)
+                request.correlationId(), requestSha256
         );
 
         if (reservation.status() == ReplayReservation.Status.TERMINALLY_REJECTED) {
@@ -138,24 +139,31 @@ public class AgentIngestionService {
         } catch (IngestionException validationFailure) {
             if (!"ERR_AGENT_IDENTITY_CONFLICT".equals(validationFailure.getCode())
                     || request.records().size() != 1) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
                 throw validationFailure;
             }
             AgentIngressRecord record = request.records().get(0);
             if (record.records() == null || record.records().size() != 1) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
                 throw validationFailure;
             }
-            EntityAgentBinding binding = validator.validateCurrentTerminalAuthority(record, scope);
-            ReplayReservation terminal = watermarkStore.terminallyRejectIdentityConflict(
-                    scope.tenantId(), scope.sensorId(), request.sensorAgentSpoolStreamId(),
-                    record.sensorIngressSequence(), request.checksum(), request.batchId(),
-                    request.correlationId(), record, binding.entityId(), binding.reinstallGeneration());
-            if (terminal.status() != ReplayReservation.Status.TERMINALLY_REJECTED) {
-                throw new IngestionException(HttpStatus.CONFLICT,
-                        terminal.rejectionCode(), terminal.rejectionMessage());
+            try {
+                EntityAgentBinding binding = validator.validateCurrentTerminalAuthority(record, scope);
+                ReplayReservation terminal = watermarkStore.terminallyRejectIdentityConflict(
+                        scope.tenantId(), scope.sensorId(), request.sensorAgentSpoolStreamId(),
+                        record.sensorIngressSequence(), request.checksum(), request.batchId(),
+                        request.correlationId(), record, binding.entityId(), binding.reinstallGeneration());
+                if (terminal.status() != ReplayReservation.Status.TERMINALLY_REJECTED) {
+                    throw new IngestionException(HttpStatus.CONFLICT,
+                            terminal.rejectionCode(), terminal.rejectionMessage());
+                }
+                log.warn("Agent-ingress identity conflict durably terminally settled tenant={} sensor={} sequence={} disposition={}",
+                        scope.tenantId(), scope.sensorId(), record.sensorIngressSequence(), terminal.terminalDispositionId());
+                return terminalResponse(scope, request, terminal);
+            } catch (IngestionException terminalAuthorityFailure) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
+                throw terminalAuthorityFailure;
             }
-            log.warn("Agent-ingress identity conflict durably terminally settled tenant={} sensor={} sequence={} disposition={}",
-                    scope.tenantId(), scope.sensorId(), record.sensorIngressSequence(), terminal.terminalDispositionId());
-            return terminalResponse(scope, request, terminal);
         }
 
         PublisherClaimResult claim = watermarkStore.claimPublisherLease(
@@ -249,6 +257,36 @@ public class AgentIngestionService {
             return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body));
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private void releaseRejectedPending(SensorScope scope, AgentTelemetryBatchRequest request,
+            String requestSha256, ReplayReservation reservation) {
+        boolean released;
+        try {
+            released = watermarkStore.releaseUnpublishedPending(
+                    scope.tenantId(), scope.sensorId(), request.sensorAgentSpoolStreamId(),
+                    request.firstIngressSequence(), request.lastIngressSequence(), request.checksum(),
+                    request.batchId(), request.correlationId(), requestSha256,
+                    reservation.pendingReservationId());
+        } catch (RuntimeException releaseFailure) {
+            metrics.recordBatchRejected("ERR_AGENT_PENDING_RELEASE_UNCERTAIN");
+            log.warn("code=ERR_AGENT_PENDING_RELEASE_UNCERTAIN tenant={} sensor={} range=[{}..{}] release failed",
+                    scope.tenantId(), scope.sensorId(), request.firstIngressSequence(),
+                    request.lastIngressSequence(), releaseFailure);
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_PENDING_RELEASE_UNCERTAIN",
+                    "Agent-ingress pending cleanup is unconfirmed; retain and retry the exact batch",
+                    releaseFailure);
+        }
+        if (!released) {
+            metrics.recordBatchRejected("ERR_AGENT_PENDING_RELEASE_UNCERTAIN");
+            log.warn("code=ERR_AGENT_PENDING_RELEASE_UNCERTAIN tenant={} sensor={} range=[{}..{}] exact unclaimed release not proven",
+                    scope.tenantId(), scope.sensorId(), request.firstIngressSequence(),
+                    request.lastIngressSequence());
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_PENDING_RELEASE_UNCERTAIN",
+                    "Agent-ingress pending cleanup is unconfirmed; retain and retry the exact batch");
         }
     }
 

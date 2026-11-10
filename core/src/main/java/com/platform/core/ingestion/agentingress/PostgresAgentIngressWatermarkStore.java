@@ -233,6 +233,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        SET settled_through_sequence = ?,
                            pending_first_sequence = NULL, pending_last_sequence = NULL,
                            pending_checksum = NULL, pending_request_sha256 = NULL,
+                           pending_reservation_id = NULL, pending_publication_attempted = FALSE,
                            pending_batch_id = NULL,
                            pending_correlation_id = NULL, pending_reserved_at = NULL,
                            pending_publisher_owner = NULL, pending_publisher_claimed_at = NULL,
@@ -312,7 +313,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        last_checksum, last_batch_id, last_request_sha256,
                        pending_first_sequence, pending_last_sequence,
                        pending_checksum, pending_request_sha256,
-                       pending_batch_id, pending_correlation_id
+                       pending_batch_id, pending_correlation_id, pending_reservation_id
                   FROM platform.sensor_agent_ingress_watermark
                  WHERE tenant_id = ? AND sensor_id = ?
                  FOR UPDATE
@@ -331,7 +332,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         rs.getString("pending_checksum"),
                         rs.getString("pending_request_sha256"),
                         rs.getString("pending_batch_id"),
-                        rs.getString("pending_correlation_id")
+                        rs.getString("pending_correlation_id"),
+                        (UUID) rs.getObject("pending_reservation_id")
                 ),
                 tenantId,
                 sensorId
@@ -346,6 +348,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                                 + firstSeq
                 );
             }
+            UUID pendingReservationId = UUID.randomUUID();
             jdbcTemplate.update(
                     """
                     INSERT INTO platform.sensor_agent_ingress_watermark (
@@ -355,14 +358,15 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                         last_batch_id, last_request_sha256, updated_at,
                         pending_first_sequence, pending_last_sequence,
                         pending_checksum, pending_request_sha256,
-                        pending_batch_id, pending_correlation_id, pending_reserved_at
+                        pending_batch_id, pending_correlation_id, pending_reserved_at,
+                        pending_reservation_id, pending_publication_attempted
                     ) VALUES (?, ?, ?, 0, 0, 0, 0, '', NULL, NULL,
-                              CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                              CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, ?, FALSE)
                     """,
                     tenantId, sensorId, streamId, firstSeq, lastSeq, checksum,
-                    requestSha256, batchId, correlationId
+                    requestSha256, batchId, correlationId, pendingReservationId
             );
-            return ReplayReservation.reserved(0);
+            return ReplayReservation.reserved(0, pendingReservationId);
         }
 
         ReplayRow row = rows.get(0);
@@ -416,7 +420,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 if (checksum.equalsIgnoreCase(row.pendingChecksum())
                         && batchIdEquals(row.pendingBatchId(), batchId)
                         && batchIdEquals(row.pendingCorrelationId(), correlationId)) {
-                    return ReplayReservation.retryPending(row.ackedThroughSequence());
+                    return ReplayReservation.retryPending(row.ackedThroughSequence(),
+                            row.pendingReservationId());
                 }
                 return ReplayReservation.rejected(
                         row.ackedThroughSequence(),
@@ -454,6 +459,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
 
         bindStreamIfNeeded(tenantId, sensorId, streamId, legacyUnboundStream);
 
+        UUID pendingReservationId = UUID.randomUUID();
         int updated = jdbcTemplate.update(
                 """
                 UPDATE platform.sensor_agent_ingress_watermark
@@ -464,6 +470,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_batch_id = ?,
                        pending_correlation_id = ?,
                        pending_reserved_at = CURRENT_TIMESTAMP,
+                       pending_reservation_id = ?,
+                       pending_publication_attempted = FALSE,
                        pending_publisher_owner = NULL,
                        pending_publisher_claimed_at = NULL,
                        pending_publisher_lease_until = NULL,
@@ -471,12 +479,55 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                  WHERE tenant_id = ? AND sensor_id = ?
                 """,
                 firstSeq, lastSeq, checksum, requestSha256, batchId, correlationId,
+                pendingReservationId,
                 tenantId, sensorId
         );
         if (updated != 1) {
             throw new IllegalStateException("Failed to reserve agent-ingress replay watermark for Sensor");
         }
-        return ReplayReservation.reserved(row.ackedThroughSequence());
+        return ReplayReservation.reserved(row.ackedThroughSequence(), pendingReservationId);
+    }
+
+    @Override
+    public boolean releaseUnpublishedPending(
+            UUID tenantId, String sensorId, String streamId, long firstSeq, long lastSeq,
+            String checksum, String batchId, String correlationId, String requestSha256,
+            UUID pendingReservationId
+    ) {
+        if (pendingReservationId == null || requestSha256 == null) return false;
+        Boolean released = transactionTemplate.execute(status -> {
+            acquireSensorLock(tenantId, sensorId);
+            return jdbcTemplate.update(
+                    """
+                    UPDATE platform.sensor_agent_ingress_watermark
+                       SET pending_first_sequence = NULL, pending_last_sequence = NULL,
+                           pending_checksum = NULL, pending_request_sha256 = NULL,
+                           pending_batch_id = NULL, pending_correlation_id = NULL,
+                           pending_reserved_at = NULL, pending_reservation_id = NULL,
+                           pending_publication_attempted = FALSE,
+                           updated_at = CURRENT_TIMESTAMP
+                     WHERE tenant_id = ? AND sensor_id = ? AND stream_id = ?
+                       AND settled_through_sequence = ?
+                       AND pending_first_sequence = ? AND pending_last_sequence = ?
+                       AND lower(pending_checksum) = lower(?)
+                       AND pending_batch_id = ? AND pending_correlation_id = ?
+                       AND pending_request_sha256 = ? AND pending_reservation_id = ?
+                       AND pending_publisher_owner IS NULL
+                       AND pending_publisher_claimed_at IS NULL
+                       AND pending_publisher_lease_until IS NULL
+                       AND pending_publication_attempted = FALSE
+                       AND NOT EXISTS (
+                           SELECT 1 FROM platform.sensor_agent_ingress_terminal_disposition d
+                            WHERE d.tenant_id = ? AND d.sensor_id = ? AND d.stream_id = ?
+                              AND d.first_sequence = ?
+                       )
+                    """,
+                    tenantId, sensorId, streamId, firstSeq - 1, firstSeq, lastSeq,
+                    checksum, batchId, correlationId, requestSha256, pendingReservationId,
+                    tenantId, sensorId, streamId, firstSeq
+            ) == 1;
+        });
+        return Boolean.TRUE.equals(released);
     }
 
     @Override
@@ -566,6 +617,7 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                 UPDATE platform.sensor_agent_ingress_watermark
                    SET pending_publisher_owner = ?,
                        pending_publisher_epoch = ?,
+                       pending_publication_attempted = TRUE,
                        pending_publisher_claimed_at = clock_timestamp(),
                        pending_publisher_lease_until = clock_timestamp() + make_interval(secs => ?),
                        updated_at = CURRENT_TIMESTAMP
@@ -736,6 +788,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
                        pending_last_sequence = NULL,
                        pending_checksum = NULL,
                        pending_request_sha256 = NULL,
+                       pending_reservation_id = NULL,
+                       pending_publication_attempted = FALSE,
                        pending_batch_id = NULL,
                        pending_correlation_id = NULL,
                        pending_reserved_at = NULL,
@@ -830,7 +884,8 @@ public class PostgresAgentIngressWatermarkStore implements AgentIngressWatermark
             String pendingChecksum,
             String pendingRequestSha256,
             String pendingBatchId,
-            String pendingCorrelationId
+            String pendingCorrelationId,
+            UUID pendingReservationId
     ) {}
 
     private record TerminalRow(UUID id, long lastSequence, String checksum, String requestSha256,

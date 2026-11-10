@@ -238,9 +238,14 @@ class AgentIngestionValidatorTest {
         KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
         AgentIngestionService service = new AgentIngestionService(realValidator, watermarks, kafka, metrics);
         byte[] rawBody = objectMapper.writeValueAsBytes(batch);
+        UUID pendingReservationId = UUID.randomUUID();
 
         when(watermarks.reserveBatchWithBody(any(), anyString(), anyString(), anyLong(), anyLong(),
-                anyString(), anyString(), anyString(), anyString())).thenReturn(ReplayReservation.reserved(0));
+                anyString(), anyString(), anyString(), anyString()))
+                .thenReturn(ReplayReservation.reserved(0, pendingReservationId));
+        when(watermarks.releaseUnpublishedPending(any(), anyString(), anyString(), anyLong(), anyLong(),
+                anyString(), anyString(), anyString(), anyString(), eq(pendingReservationId)))
+                .thenReturn(true);
         if ("ERR_AGENT_IDENTITY_CONFLICT".equals(code)) {
             UUID dispositionId = UUID.randomUUID();
             when(watermarks.terminallyRejectIdentityConflict(any(), anyString(), anyString(), anyLong(),
@@ -256,6 +261,8 @@ class AgentIngestionValidatorTest {
                     service.ingestAgentTelemetry(rawBody, batch, batch.batchId(), cert));
             assertEquals(code, ex.getCode());
             assertEquals(status, ex.getStatus());
+            verify(watermarks).releaseUnpublishedPending(any(), anyString(), anyString(), anyLong(),
+                    anyLong(), anyString(), anyString(), anyString(), anyString(), eq(pendingReservationId));
         }
 
         verify(authority).resolve(cert);

@@ -607,6 +607,7 @@ func TestDrainRetainsSpoolOnAuthorityAndContinuityErrors(t *testing.T) {
 	}{
 		{"previous_batch_pending", "ERR_PREVIOUS_BATCH_PENDING", 409, true},
 		{"publication_in_progress", "ERR_BATCH_PUBLICATION_IN_PROGRESS", 429, true},
+		{"pending_release_uncertain", "ERR_AGENT_PENDING_RELEASE_UNCERTAIN", 503, true},
 		{"stream_changed", "ERR_SENSOR_STREAM_CHANGED", 409, false},
 		{"idempotency_conflict", "ERR_IDEMPOTENCY_CONFLICT", 409, false},
 		{"sequence_regression", "ERR_SEQUENCE_REGRESSION", 409, false},

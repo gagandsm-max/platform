@@ -39,6 +39,7 @@ class AgentIngestionServiceTest {
     private final UUID ownerToken = UUID.fromString("018f0e0a-0000-7000-8000-00000000beef");
     private static final long PUBLISHER_EPOCH = 1L;
     private static final String BODY_SHA = "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a";
+    private static final UUID PENDING_ID = UUID.fromString("018f0e0a-0000-7000-8000-00000000cafe");
 
     @BeforeEach
     void setUp() {
@@ -71,6 +72,73 @@ class AgentIngestionServiceTest {
                 tenantId.toString(), entityId.toString(), "cpu.util", "sensor-infra-01",
                 Instant.now(), 1.0, 1, 0, "seq-1", "AGENT_HOST"
         ));
+    }
+
+    @Test
+    void deterministicAssignmentRejectionReleasesExactUnpublishedPending() {
+        X509Certificate c = cert();
+        AgentTelemetryBatchRequest request = req(6, 6, "chk-stale");
+        when(validator.resolveAuthority(c)).thenReturn(scope);
+        when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA))
+                .thenReturn(ReplayReservation.reserved(5, PENDING_ID));
+        when(watermarkStore.releaseUnpublishedPending(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA, PENDING_ID))
+                .thenReturn(true);
+        when(validator.validateAndExtract(any(), eq(request), eq(scope)))
+                .thenThrow(new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_ASSIGNMENT_UNKNOWN", "stale assignment"));
+
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
+        assertEquals("ERR_AGENT_ASSIGNMENT_UNKNOWN", failure.getCode());
+        verify(watermarkStore).releaseUnpublishedPending(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA, PENDING_ID);
+        verify(watermarkStore, never()).claimPublisherLease(any(), anyString(), anyString(),
+                anyLong(), anyLong(), anyString(), anyString(), anyString());
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void unprovenPendingReleaseReturnsRetryableFailure() {
+        X509Certificate c = cert();
+        AgentTelemetryBatchRequest request = req(6, 6, "chk-stale");
+        when(validator.resolveAuthority(c)).thenReturn(scope);
+        when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA))
+                .thenReturn(ReplayReservation.reserved(5, PENDING_ID));
+        when(validator.validateAndExtract(any(), eq(request), eq(scope)))
+                .thenThrow(new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_ASSIGNMENT_UNKNOWN", "stale assignment"));
+
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, failure.getStatus());
+        assertEquals("ERR_AGENT_PENDING_RELEASE_UNCERTAIN", failure.getCode());
+        verifyNoInteractions(kafkaProducer);
+    }
+
+    @Test
+    void pendingReleaseTransactionFailureDoesNotReturnFinalRejection() {
+        X509Certificate c = cert();
+        AgentTelemetryBatchRequest request = req(6, 6, "chk-stale");
+        when(validator.resolveAuthority(c)).thenReturn(scope);
+        when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA))
+                .thenReturn(ReplayReservation.reserved(5, PENDING_ID));
+        when(validator.validateAndExtract(any(), eq(request), eq(scope)))
+                .thenThrow(new IngestionException(HttpStatus.FORBIDDEN,
+                        "ERR_AGENT_ASSIGNMENT_UNKNOWN", "stale assignment"));
+        when(watermarkStore.releaseUnpublishedPending(tenantId, "sensor-infra-01", STREAM,
+                6L, 6L, "chk-stale", "batch-1", "corr-1", BODY_SHA, PENDING_ID))
+                .thenThrow(new IllegalStateException("injected PostgreSQL failure"));
+
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c));
+        assertEquals(HttpStatus.SERVICE_UNAVAILABLE, failure.getStatus());
+        assertEquals("ERR_AGENT_PENDING_RELEASE_UNCERTAIN", failure.getCode());
+        assertNotNull(failure.getCause());
+        verifyNoInteractions(kafkaProducer);
     }
 
     @Test

@@ -86,6 +86,173 @@ class PostgresAgentIngressWatermarkStoreTest {
         return "agent-" + sensorId;
     }
 
+    @Test
+    void deterministicRejectionReleasesOnlyExactUnpublishedGeneration() {
+        String sensorId = "sensor-pending-release";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation stale = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "stale-batch", "stale-corr", digest);
+        assertEquals(ReplayReservation.Status.RESERVED, stale.status());
+        assertNotNull(stale.pendingReservationId());
+        assertTrue(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "stale-batch", "stale-corr", digest, stale.pendingReservationId()));
+        Map<String, Object> cleared = pg.jdbc().queryForMap("""
+                SELECT acked_through_sequence, settled_through_sequence, pending_first_sequence,
+                       pending_request_sha256, pending_reservation_id, pending_publisher_owner,
+                       pending_publisher_lease_until, pending_publication_attempted
+                  FROM platform.sensor_agent_ingress_watermark WHERE tenant_id=? AND sensor_id=?
+                """, tenantId, sensorId);
+        assertEquals(0L, ((Number) cleared.get("acked_through_sequence")).longValue());
+        assertEquals(0L, ((Number) cleared.get("settled_through_sequence")).longValue());
+        assertNull(cleared.get("pending_first_sequence"));
+        assertNull(cleared.get("pending_request_sha256"));
+        assertNull(cleared.get("pending_reservation_id"));
+        assertNull(cleared.get("pending_publisher_owner"));
+        assertNull(cleared.get("pending_publisher_lease_until"));
+        assertEquals(false, cleared.get("pending_publication_attempted"));
+
+        ReplayReservation corrected = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, "b".repeat(64), "corrected-batch", "corrected-corr", "e".repeat(64));
+        assertEquals(ReplayReservation.Status.RESERVED, corrected.status());
+        assertNotEquals(stale.pendingReservationId(), corrected.pendingReservationId());
+        assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "stale-batch", "stale-corr", digest, stale.pendingReservationId()));
+        assertEquals(corrected.pendingReservationId(), pg.jdbc().queryForObject("""
+                SELECT pending_reservation_id FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, UUID.class, tenantId, sensorId));
+    }
+
+    @Test
+    void pendingReleaseCannotErasePublisherOwnedAttemptedOrFinalizedBatch() {
+        String sensorId = "sensor-pending-owned";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        PublisherClaimResult claim = store.claimPublisherLease(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr");
+        assertEquals(PublisherClaimResult.Status.CLAIMED, claim.status());
+        assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+        store.releasePublisherLease(tenantId, sensorId, streamId, 1, 1, checksum, "batch", "corr",
+                claim.ownerToken(), claim.publisherEpoch());
+        assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()),
+                "released lease does not prove Kafka was never attempted");
+        PublisherClaimResult retry = store.claimPublisherLease(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr");
+        store.finalizeReservedBatch(tenantId, sensorId, streamId, 1, 1, checksum, "batch", "corr",
+                retry.ownerToken(), retry.publisherEpoch());
+        assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+        assertEquals(1L, pg.jdbc().queryForObject("""
+                SELECT settled_through_sequence FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, Long.class, tenantId, sensorId));
+    }
+
+    @Test
+    void pendingReleaseCannotEraseTerminalDisposition() {
+        String sensorId = "sensor-pending-terminal";
+        UUID entityId = UUID.randomUUID();
+        seedTerminalAuthority(sensorId, entityId);
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        ReplayReservation terminal = store.terminallyRejectIdentityConflict(tenantId, sensorId, streamId,
+                1, checksum, "batch", "corr", terminalRecord(sensorId, 1), entityId, 1L);
+        assertEquals(ReplayReservation.Status.TERMINALLY_REJECTED, terminal.status());
+        assertFalse(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+        assertEquals(1L, pg.jdbc().queryForObject("""
+                SELECT settled_through_sequence FROM platform.sensor_agent_ingress_watermark
+                 WHERE tenant_id=? AND sensor_id=?
+                """, Long.class, tenantId, sensorId));
+    }
+
+    @Test
+    void concurrentPublisherClaimAndPendingReleaseSerializeWithoutErasingClaim() throws Exception {
+        String sensorId = "sensor-pending-race";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        CountDownLatch start = new CountDownLatch(1);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            var release = pool.submit(() -> {
+                start.await();
+                return store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                        1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId());
+            });
+            var claim = pool.submit(() -> {
+                start.await();
+                return store.claimPublisherLease(tenantId, sensorId, streamId,
+                        1, 1, checksum, "batch", "corr");
+            });
+            start.countDown();
+            boolean released = release.get(10, TimeUnit.SECONDS);
+            PublisherClaimResult claimed = claim.get(10, TimeUnit.SECONDS);
+            if (released) {
+                assertEquals(PublisherClaimResult.Status.REJECTED, claimed.status());
+                assertNull(pg.jdbc().queryForObject("""
+                        SELECT pending_first_sequence FROM platform.sensor_agent_ingress_watermark
+                         WHERE tenant_id=? AND sensor_id=?
+                        """, Long.class, tenantId, sensorId));
+            } else {
+                assertEquals(PublisherClaimResult.Status.CLAIMED, claimed.status());
+                assertEquals(claimed.ownerToken(), pg.jdbc().queryForObject("""
+                        SELECT pending_publisher_owner FROM platform.sensor_agent_ingress_watermark
+                         WHERE tenant_id=? AND sensor_id=?
+                        """, UUID.class, tenantId, sensorId));
+                assertEquals(pending.pendingReservationId(), pg.jdbc().queryForObject("""
+                        SELECT pending_reservation_id FROM platform.sensor_agent_ingress_watermark
+                         WHERE tenant_id=? AND sensor_id=?
+                        """, UUID.class, tenantId, sensorId));
+            }
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void pendingReleaseDatabaseFailureRollsBackAndExactRetryCanRecover() {
+        String sensorId = "sensor-pending-fault";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        pg.jdbc().execute("""
+                CREATE FUNCTION platform.test_pending_release_failure() RETURNS trigger
+                LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected release failure'; END; $$
+                """);
+        pg.jdbc().execute("""
+                CREATE TRIGGER test_pending_release_failure BEFORE UPDATE
+                ON platform.sensor_agent_ingress_watermark FOR EACH ROW
+                WHEN (OLD.pending_first_sequence IS NOT NULL AND NEW.pending_first_sequence IS NULL)
+                EXECUTE FUNCTION platform.test_pending_release_failure()
+                """);
+        try {
+            assertThrows(RuntimeException.class, () -> store.releaseUnpublishedPending(
+                    tenantId, sensorId, streamId, 1, 1, checksum, "batch", "corr", digest,
+                    pending.pendingReservationId()));
+            assertEquals(pending.pendingReservationId(), pg.jdbc().queryForObject("""
+                    SELECT pending_reservation_id FROM platform.sensor_agent_ingress_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, UUID.class, tenantId, sensorId));
+            assertEquals(ReplayReservation.Status.RETRY_PENDING, store.reserveBatchWithBody(
+                    tenantId, sensorId, streamId, 1, 1, checksum, "batch", "corr", digest).status());
+        } finally {
+            pg.jdbc().execute("DROP TRIGGER test_pending_release_failure ON platform.sensor_agent_ingress_watermark");
+            pg.jdbc().execute("DROP FUNCTION platform.test_pending_release_failure()");
+        }
+        assertTrue(store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+    }
+
     private static String terminalFingerprint(String sensorId) {
         try {
             return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")

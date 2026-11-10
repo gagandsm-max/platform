@@ -40,7 +40,11 @@ class Matrix:
 
     def watermark(self):
         rows = self.sql("SELECT row_to_json(t) FROM (SELECT stream_id, acked_through_sequence, "
-                        "settled_through_sequence, pending_first_sequence, last_batch_id "
+                        "settled_through_sequence, pending_first_sequence, pending_last_sequence, "
+                        "pending_checksum, pending_request_sha256, pending_batch_id, "
+                        "pending_correlation_id, pending_reservation_id, pending_publisher_owner, "
+                        "pending_publisher_epoch, pending_publisher_claimed_at, "
+                        "pending_publisher_lease_until, pending_publication_attempted, last_batch_id "
                         "FROM platform.sensor_agent_ingress_watermark WHERE tenant_id='" + TENANT +
                         "' AND sensor_id='" + SENSOR + "') t")
         return json.loads(rows) if rows else None
@@ -291,8 +295,132 @@ class Matrix:
         stale = self.direct_batch(6, stream, "p0.sequence.stale.6", generation=999)
         code, denied = self.core(stale)
         assert code == 403 and denied["code"] == "ERR_AGENT_ASSIGNMENT_UNKNOWN", (code, denied)
-        assert self.watermark()["settled_through_sequence"] == 5 and self.terminal(6) is None
-        self.mark("J", denied)
+        after_stale = self.watermark()
+        assert after_stale["acked_through_sequence"] == before_negative["acked_through_sequence"]
+        assert after_stale["settled_through_sequence"] == before_negative["settled_through_sequence"]
+        assert after_stale["pending_first_sequence"] is None
+        assert after_stale["pending_request_sha256"] is None
+        assert after_stale["pending_reservation_id"] is None
+        assert after_stale["pending_publisher_owner"] is None
+        assert after_stale["pending_publisher_lease_until"] is None
+        assert after_stale["pending_publication_attempted"] is False
+        assert self.terminal(6) is None
+        assert not self.kafka_metric("p0.sequence.stale.6")
+        assert self.clickhouse_count("p0.sequence.stale.6") == 0
+        self.mark("J", {"response": denied, "watermark": after_stale,
+                        "terminal": None, "kafka_hits": 0, "clickhouse_rows": 0})
+
+        code, denied_again = self.core(stale)
+        after_repeat = self.watermark()
+        assert code == 403 and denied_again["code"] == "ERR_AGENT_ASSIGNMENT_UNKNOWN", (code, denied_again)
+        assert after_repeat == after_stale and self.terminal(6) is None
+        assert not self.kafka_metric("p0.sequence.stale.6")
+        assert self.clickhouse_count("p0.sequence.stale.6") == 0
+        self.mark("J3", {"response": denied_again, "watermark": after_repeat,
+                         "terminal": None, "kafka_hits": 0, "clickhouse_rows": 0})
+
+        corrected = self.direct_batch(6, stream, "p0.sequence.corrected.6", generation=1)
+        code, accepted = self.core(corrected)
+        assert code == 200 and accepted["status"] == "ACCEPTED", (code, accepted)
+        after_corrected = self.wait_watermark(2, 6)
+        assert after_corrected["pending_first_sequence"] is None
+        assert self.terminal(6) is None
+        corrected_hits = self.kafka_metric("p0.sequence.corrected.6")
+        assert len(corrected_hits) == 1
+        until = time.monotonic() + 30
+        while time.monotonic() < until and self.clickhouse_count("p0.sequence.corrected.6") != 1:
+            time.sleep(1)
+        assert self.clickhouse_count("p0.sequence.corrected.6") == 1
+        self.mark("J2", {"response": accepted, "watermark": after_corrected,
+                         "terminal": None, "kafka_hits": 1, "clickhouse_rows": 1})
+
+        # Failure injection targets only the exact pre-publication pending clear.
+        self.sql("CREATE FUNCTION platform.test_pending_release_failure() RETURNS trigger "
+                 "LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected pending release failure'; END; $$")
+        self.sql("CREATE TRIGGER test_pending_release_failure BEFORE UPDATE "
+                 "ON platform.sensor_agent_ingress_watermark FOR EACH ROW "
+                 "WHEN (OLD.pending_first_sequence IS NOT NULL AND NEW.pending_first_sequence IS NULL "
+                 "AND NEW.settled_through_sequence = OLD.settled_through_sequence) "
+                 "EXECUTE FUNCTION platform.test_pending_release_failure()")
+        stale_seven = self.direct_batch(7, stream, "p0.sequence.release-fault.7", generation=999)
+        try:
+            code, uncertain = self.core(stale_seven)
+            assert code == 503 and uncertain["code"] == "ERR_AGENT_PENDING_RELEASE_UNCERTAIN", (code, uncertain)
+            pending_fault = self.watermark()
+            assert pending_fault["acked_through_sequence"] == 2
+            assert pending_fault["settled_through_sequence"] == 6
+            assert pending_fault["pending_first_sequence"] == 7
+            assert pending_fault["pending_request_sha256"] is not None
+            assert pending_fault["pending_reservation_id"] is not None
+            assert pending_fault["pending_publisher_owner"] is None
+            assert pending_fault["pending_publication_attempted"] is False
+            assert self.terminal(7) is None
+            assert not self.kafka_metric("p0.sequence.release-fault.7")
+            assert self.clickhouse_count("p0.sequence.release-fault.7") == 0
+        finally:
+            self.sql("DROP TRIGGER test_pending_release_failure ON platform.sensor_agent_ingress_watermark")
+            self.sql("DROP FUNCTION platform.test_pending_release_failure()")
+        code, recovered = self.core(stale_seven)
+        assert code == 403 and recovered["code"] == "ERR_AGENT_ASSIGNMENT_UNKNOWN", (code, recovered)
+        after_fault = self.watermark()
+        assert after_fault["pending_first_sequence"] is None
+        assert after_fault["settled_through_sequence"] == 6
+        assert self.terminal(7) is None
+        self.mark("J5", {"retryable_response": uncertain, "pending_after_failure": pending_fault,
+                         "recovered_response": recovered, "watermark_after_retry": after_fault,
+                         "terminal": None, "kafka_hits": 0, "clickhouse_rows": 0,
+                         "sensor_custody_test": "TestDrainRetainsSpoolOnAuthorityAndContinuityErrors/pending_release_uncertain"})
+
+        # The DB fixture models an intervening publisher claim after reserve.
+        # Real concurrent claim/release and finalized/terminal/replaced states are
+        # exercised through the PostgreSQL store tests named below.
+        self.sql("CREATE FUNCTION platform.test_claim_pending_on_reserve() RETURNS trigger "
+                 "LANGUAGE plpgsql AS $$ BEGIN "
+                 "NEW.pending_publisher_owner := gen_random_uuid(); "
+                 "NEW.pending_publisher_epoch := OLD.pending_publisher_epoch + 1; "
+                 "NEW.pending_publisher_claimed_at := clock_timestamp(); "
+                 "NEW.pending_publisher_lease_until := clock_timestamp() + interval '60 seconds'; "
+                 "NEW.pending_publication_attempted := TRUE; RETURN NEW; END; $$")
+        self.sql("CREATE TRIGGER test_claim_pending_on_reserve BEFORE UPDATE "
+                 "ON platform.sensor_agent_ingress_watermark FOR EACH ROW "
+                 "WHEN (OLD.pending_first_sequence IS NULL AND NEW.pending_first_sequence = 7) "
+                 "EXECUTE FUNCTION platform.test_claim_pending_on_reserve()")
+        stale_claimed = self.direct_batch(7, stream, "p0.sequence.claim-race.7", generation=999)
+        try:
+            code, claim_blocked = self.core(stale_claimed)
+            assert code == 503 and claim_blocked["code"] == "ERR_AGENT_PENDING_RELEASE_UNCERTAIN", (code, claim_blocked)
+            owned_pending = self.watermark()
+            assert owned_pending["pending_first_sequence"] == 7
+            assert owned_pending["pending_reservation_id"] is not None
+            assert owned_pending["pending_publisher_owner"] is not None
+            assert owned_pending["pending_publication_attempted"] is True
+            assert owned_pending["acked_through_sequence"] == 2
+            assert owned_pending["settled_through_sequence"] == 6
+            assert self.terminal(7) is None
+            assert not self.kafka_metric("p0.sequence.claim-race.7")
+            assert self.clickhouse_count("p0.sequence.claim-race.7") == 0
+        finally:
+            self.sql("DROP TRIGGER test_claim_pending_on_reserve ON platform.sensor_agent_ingress_watermark")
+            self.sql("DROP FUNCTION platform.test_claim_pending_on_reserve()")
+        # Exact fixture teardown only: this simulated owner never published.
+        self.sql("UPDATE platform.sensor_agent_ingress_watermark SET "
+                 "pending_first_sequence=NULL, pending_last_sequence=NULL, pending_checksum=NULL, "
+                 "pending_request_sha256=NULL, pending_batch_id=NULL, pending_correlation_id=NULL, "
+                 "pending_reserved_at=NULL, pending_reservation_id=NULL, pending_publication_attempted=FALSE, "
+                 "pending_publisher_owner=NULL, pending_publisher_claimed_at=NULL, "
+                 "pending_publisher_lease_until=NULL WHERE tenant_id='" + TENANT +
+                 "' AND sensor_id='" + SENSOR + "' AND pending_reservation_id='" +
+                 owned_pending["pending_reservation_id"] + "' AND pending_publisher_owner='" +
+                 owned_pending["pending_publisher_owner"] + "' AND pending_publication_attempted=TRUE")
+        assert self.watermark()["pending_first_sequence"] is None
+        self.mark("J4", {"retryable_response": claim_blocked, "publisher_owned_pending": owned_pending,
+                         "terminal": None, "kafka_hits": 0, "clickhouse_rows": 0,
+                         "fixture_teardown": "exact simulated owner, no publication",
+                         "postgres_tests": [
+                             "concurrentPublisherClaimAndPendingReleaseSerializeWithoutErasingClaim",
+                             "pendingReleaseCannotErasePublisherOwnedAttemptedOrFinalizedBatch",
+                             "pendingReleaseCannotEraseTerminalDisposition",
+                             "deterministicRejectionReleasesOnlyExactUnpublishedGeneration"]})
 
         malformed_code, _ = self.sensor("{")
         assert malformed_code == 400
@@ -300,7 +428,7 @@ class Matrix:
         oversized["correlationId"] = "x" * (1024 * 1024)
         oversized_code, oversize_response = self.sensor(json.dumps(oversized, separators=(",", ":")))
         assert oversized_code == 413, (oversized_code, oversize_response)
-        assert self.watermark()["settled_through_sequence"] == 5
+        assert self.watermark()["settled_through_sequence"] == 6
         self.mark("K", {"malformed_http": malformed_code, "oversize_http": oversized_code})
 
         rejected_hits = self.kafka_metric("p0.sequence.rejected.3")

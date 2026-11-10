@@ -30,6 +30,13 @@ public interface AgentIngressWatermarkStore {
                 checksum, batchId, correlationId);
     }
 
+    /** Clear only this unclaimed, never-published pending generation. False means custody stays retryable. */
+    boolean releaseUnpublishedPending(
+            UUID tenantId, String sensorId, String streamId, long firstSeq, long lastSeq,
+            String checksum, String batchId, String correlationId, String requestSha256,
+            UUID pendingReservationId
+    );
+
     ReplayReservation terminallyRejectIdentityConflict(
             UUID tenantId, String sensorId, String streamId, long sequence,
             String checksum, String batchId, String correlationId,
