@@ -329,6 +329,13 @@ Admission and MWU accounting must observe CPU, RAM, spool/disk horizon, queue de
 - Inventory work is lower priority than authority/control, routine monitoring and durable telemetry.
 - Software/package names/versions are inventory dimensions, not unbounded metric-label cardinality.
 - Exact per-endpoint inventory limits are release-certified measurements, not universal documentation promises.
+- Typed inventory transport is capacity-accounted by **encoded fragment** and full snapshot: Agent queue 64-KiB default record limit, existing byte/record spool limits, Sensor/Core reassembly staging, maximum item/fragment count, total uncompressed size, restart/replay/orphan cleanup, and protected routine-metric fairness all require a declared release profile. No new queue/lane is presumed.
+
+### Agent durable spool disk I/O and source-host non-interference
+
+- The existing Agent queue's per-record file+directory synchronization is a **measurable I/O contention risk**, not proof of production impact. BUILD-016/019 shall benchmark synchronous write count/bytes/latency, host iowait, p95/p99 database WAL/journal latency, queue throughput/backlog and recovery under slow local disks, high-pressure virtual/cloud volumes and representative production database load. Reserve bounded local free space for host workload and OS recovery; do not import the Core/Sensor 80% disk rule as an undocumented Agent promise.
+- Batching is permitted **only** as a durable *batch-seal/group-commit* optimization: persist every included record, checksum/framing, segment/index and highest-contiguous durable sequence under the certified power-loss barrier before declaring it durably queued or eligible for a deletion-authorizing ACK. An atomic rename/CRC without required fsync is not by itself hard-power-loss durability. Test torn writes, kill -9, power-cut replay, sequence holes, downgrade/restart and duplicate delivery.
+- Lower-value periodic host gauges may be coalesced *before* durable admission under explicit cadence/freshness budgets, but an uncommitted volatile sample is not `durable`; no arbitrary 5–15-second loss window or weaker acknowledged-telemetry contract is approved. High-value authority/identity/EDS state transitions remain promptly durable. Optional improvement must prove lower I/O cost without silently losing observations or degrading host/database workloads.
 
 ### Process/service monitoring and Criticality-driven profiles
 

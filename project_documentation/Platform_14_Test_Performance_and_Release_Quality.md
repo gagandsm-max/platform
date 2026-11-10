@@ -358,13 +358,25 @@ Phase-1 Unified Network & Infrastructure Observability capability claims are gov
     - explicit capability states: `UNSUPPORTED`, `UNAVAILABLE`, `PRIVILEGE_DENIED`, `KERNEL_INCOMPATIBLE`, `RESOURCE_GUARDED`;
     - graceful degradation under verifier rejection, BTF/CO-RE incompatibility, or unsupported older kernels;
     - loss-accounting verification: explicit increments of `dropped`, `shed`, `sampled`, and `resource_guarded` counters under event-rate or map pressure without crashing the Agent;
-    - security and least privilege: verification that unprivileged execution fails closed, no packet payloads/TLS secrets/SQL texts/environment variables are captured, and process metadata adheres to data minimization.
+    - security and least privilege: verification that unprivileged execution fails closed, no packet payloads/TLS secrets/SQL texts/environment variables are captured, and process metadata adheres to data minimization;
+    - cross-UID/root service attribution with the actual packaged non-root systemd profile; `/proc/<pid>/exe` denied, `/proc/<pid>/cgroup` visible/hidden/missing, cgroup namespace differences, systemd and non-systemd hosts; prove `comm` collision/truncation and PID reuse cannot fabricate executable/service identity or silently retarget a selector;
+    - per-hook/per-kernel/per-privilege BPF helper + verifier/BTF capability matrix: no assumption that `bpf_get_socket_cookie`, `bpf_d_path`, kernel `exe_file` or cgroup/netns access works at every hook; explicit no-op/zero-cookie `track_state` and stale pointer-reuse negative tests;
+    - active-idle connection-pool populations exceeding the implementation's configured socket-map capacity (including a >10,000-connection synthetic case), connection churn, missed terminal events, long-lived idle sockets, restart/namespace reuse, update-failure and ring-loss counters; distinguish measured loss from a zero value; observe protected base-agent metrics surviving guarded eBPF suspension;
+    - test kernel/user-space bucket flush/reset races, aggregator overflow, map occupancy/stale-state observability and bounded memory/CPU under map pressure.
 11. **Host infrastructure, virtualization, and storage:** Validated telemetry and health representation across physical servers, VMware/hypervisors, and storage arrays without converting Platform into a DCIM/BMS suite.
 12. **Cloud and Kubernetes depth:** Validated normalization of cloud-network entities (VPCs, subnets, route tables, security policies, load balancers, NAT gateways) and Kubernetes workloads into canonical Platform graph models with connector self-health separation. Cloud/provider flow logs are SUPPORTED WHEN ENABLED/CERTIFIED subject to provider capability, cost, and rate limits; they are not a mandatory Phase-1 dependency.
 13. **SLO and error budget evidence:** Where BUILD-095 applies, error budget burn rates and compliance scorecards calculate deterministically from qualified evidence ledgers.
 14. **Telemetry overload and load-shedding:** Extreme metric, flow, and syslog surges exercise Sensor spool watermarks, Kafka consumer backpressure, and ClickHouse micro-batching without dropping high-priority control or liveness signals.
 15. **Core and Sensor interruption and replay:** Active Core crash or Sensor disconnection verifies zero duplicate authority, stateful failover within the <60s target, and idempotent replay of buffered Sensor spools upon reconnection.
 16. **Low-compute and non-interference guarantee:** Bounded Linux eBPF telemetry and active path probing must measurably operate within declared CPU, RAM, and network envelopes; if resource contention occurs, optional enrichment must yield, throttle, or suspend before primary monitoring, collection, durable transport, ingestion, alert qualification, incident processing, or deterministic RCA are degraded.
+
+---
+
+### Linux Agent filesystem collection and durable-spool non-interference (P0/P1)
+
+- Test hard-hung NFS/NFS4, SMB/CIFS, autofs and network FUSE as default-excluded, plus opt-in remote and hung *local* block-backed mounts. A stale `statfs` must not induce repeated goroutine/OS-thread growth, unbounded in-flight probes, an Agent-controlled shutdown path that waits indefinitely for a hung probe, or loss of CPU/memory/NIC/process telemetry. Do not promise termination of an uninterruptible kernel D-state task on an explicitly opted-in mount. Verify per-mount singleflight, global admission cap, partial/unknown quality and no invented `BLOCK_IO_PRESSURE` or host DOWN assertion.
+- Profile per-record vs synchronous batch-seal spool fsync on database/WAL-sensitive and storage-latency-injected hosts. Candidate batching passes only if kill/reboot/hard-power-cut/partial-write tests preserve every *durably committed* record and accepted-through/sequence/replay semantics; no undocumented volatile retention window, fsync omission or accepted-telemetry RPO relaxation is certified.
+- Non-interference and resource results are release-blocking for the affected Linux Agent profile; existing historical BUILD-011 technical certification is not blanket proof of these newly specified adversarial scenarios.
 
 ---
 
@@ -390,6 +402,9 @@ Certification requires applicable Linux and Windows tests for:
 - daily deterministic spreading and reliable change-trigger coalescing;
 - missed local event repaired by later authoritative reconciliation;
 - restart/disconnect/replay/idempotency;
+- oversized structured evidence across the current 64-KiB encoded Agent-record default: a representative 0.5–2-MiB / thousands-of-packages fixture, envelope overhead, bounded chunk/manifest validation, content digest, duplicate/conflicting chunks and encoded/uncompressed-size guards;
+- Agent crash/reboot after a middle fragment is Sensor-ACKed, with and without a durable capture checkpoint; Sensor/Core restart, late/out-of-order/orphan fragments, expiry and duplicate replay; never promote partial assembly to `COMPLETE` or infer false removal;
+- interleaved scalar host metrics during incomplete snapshot delivery are durably accepted and counted toward contiguous transport ACK progression without waiting for full inventory reassembly; no unaccounted sequence gaps or poisoned watermarks;
 - large installed-set CPU/RAM/I/O/network bounds;
 - tenant isolation and API/RBAC;
 - normalization ambiguity/false-merge negative fixtures and proof that resolver-only changes do not masquerade as package events or fabricate first/last-seen lifecycle changes;

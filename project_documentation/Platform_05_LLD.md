@@ -2906,6 +2906,8 @@ Automatic capture executes only under currently valid Core-issued authority/gene
 
 Linux EDS shall prefer bounded native reads/APIs such as `/proc`, `/sys`, stat/statfs and narrowly filtered journal/kernel evidence. Collector implementation shall be dependency-minimal and must not require spawning an unrestricted shell, `sh -c`, `bash -c` or arbitrary command strings from users/API/model output.
 
+**P0 host-safety contract (BUILD-011/012):** Filesystem discovery MUST classify mount type/source from trusted host mount metadata (e.g. `/proc/self/mountinfo`). Recurring local-capacity probes exclude NFS/NFS4, SMB/CIFS, autofs and other identified network/remote or user-space filesystem mounts (including network FUSE, Ceph and GlusterFS variants) by default; support for explicitly opted-in mounts requires a separately bounded and certified collection profile. Local iSCSI/FC mounts can also stall, so *every* allowed blocking filesystem probe requires per-mount single-flight plus an Agent-wide in-flight/worker cap, bounded scheduling and skip-on-busy; Agent-owned shutdown MUST NOT wait indefinitely for the blocked probe, but it cannot guarantee that a kernel D-state call is preemptible. A Go goroutine/context timeout alone does NOT cancel a kernel-blocked `statfs` call; an unresolved probe MUST NOT spawn an additional per-cycle call or exhaust OS threads/goroutines. When bounds are exhausted, the Agent continues independent CPU/memory/NIC/process collection and reports filesystem `PARTIAL`/`UNAVAILABLE` with a collection/timeout/resource reason. An unresponsive *measurement* is not evidence of filesystem failure or `BLOCK_IO_PRESSURE` without independent supporting telemetry. BUILD-019 proves bounded Agent-owned work, unaffected independent monitoring and explicit kernel-level opt-in limitations under indefinitely stalled mounts and reconnect/restart.
+
 Supported evidence families should include where available:
 
 - CPU user/system/iowait/steal, load/run queue and PSI;
@@ -3036,7 +3038,9 @@ The Linux Agent integrates eBPF collection within its existing Go runtime:
 1. **Compatibility Matrix & Attach Points:**
    - Relies on BTF/CO-RE where the selected implementation requires/supports it across certified Ubuntu 24.x and RHEL 9.x kernels.
    - Observes socket lifecycle, connection establishment/failures, and TCP retransmissions through bounded, low-overhead kernel attach points. Specific probe attachments and map structures are determined and benchmarked under BUILD-011 and BUILD-019.
-2. **Kernel-to-Userspace Transfer:** Streams connection events or aggregated summary deltas to userspace via bounded ring/perf buffers without lock contention.
+   - Validates each proposed kernel helper, socket-cookie or file/cgroup/netns accessor against the *actual* attach/program type, kernel/BTF/verifier and least-privilege package/systemd execution profile; unsupported combinations fail closed without promoting process-name-only attribution.
+2. **Socket-state identity and capacity:** `track_state` must receive a nonzero, reuse-safe identity only where genuinely available; neither a zero placeholder nor a raw pointer without lifecycle/reuse protection may create stable state. Map entries are reclaimed on verified lifecycle transitions or bounded under an independently tested alternative; idle established pools, missed close events, namespace/PID reuse and Agent restart are explicit cases. Map entry occupancy, update failures, drops and stale-state pressure are externally visible. In-kernel bucket aggregation may be used only if its map cardinality, flush/reset race and loss semantics are certified; userspace already provides the default bounded interval aggregator.
+3. **Kernel-to-Userspace Transfer:** Streams connection events or aggregated summary deltas to userspace via bounded ring/perf buffers without lock contention.
 
 ### 91.2 Userspace local aggregation engine
 
@@ -3057,6 +3061,7 @@ To prevent telemetry floods, the Linux Agent does NOT stream individual socket e
      - Local endpoint scope / port binding;
      - Remote endpoint (`remote_ip`, `remote_port`) and `protocol`.
    - `pid` remains an ephemeral runtime observation only and must NEVER become durable entity authority.
+   - A `comm`/process name alone cannot populate `ExecutableIdentity` or `ExecutablePath`. Native `/proc/<pid>/cgroup` is an important non-privileged service-unit candidate where accessible, but service attribution requires verified process-instance/context and unit semantics; permission-denied `/proc/<pid>/exe`, namespace differences and ambiguous cgroup paths produce explicit unavailable/ambiguous quality. Optional eBPF executable/cgroup/netns enrichment is capability-gated and cannot fabricate fields when the configured kernel hook cannot access them.
    - The exact implementation key structure and cardinality balance are owned by **BUILD-011** and certified by **BUILD-019 / BUILD-130** benchmarks without freezing premature cardinality constants.
 3. **Cardinality Budget & Heavy-Hitter Overflow:**
    - Enforces bounded active-key/cardinality ceilings per aggregation interval.
@@ -3148,6 +3153,8 @@ Default authoritative reconciliation is approximately 24 hours with deterministi
 
 Current Agent scalar collection (`HostCollector → Sample → Observation → CollectionBatch`) cannot truthfully carry this structured snapshot. BUILD-011/014 own typed source-side snapshot/evidence boundaries without claiming persistence; BUILD-016 owns physical Agent structured-envelope/delivery evolution; BUILD-062 owns Core acceptance/authority; BUILD-063/064 own streaming/history realization as required; BUILD-098 owns reconciliation/current-state/change/query integration.
 
+**P0 multi-record snapshot safety:** A complete captured installed-software set may exceed the Agent queue's current default 64-KiB *encoded record* limit (including envelope overhead). BUILD-016 MUST fragment oversized structured evidence into bounded independently durable/replayable records on the existing Agent sequence lineage, or prove an equally safe versioned encoding; it MUST NOT silently truncate, reject an otherwise supported inventory workload without explicit quality, or shoehorn packages into metric labels. A versioned manifest identifies immutable `snapshot_id`, endpoint/source/`inventory_scope`, chunk indices/count, logical item count, bounded total encoded/uncompressed bytes and content integrity. Agent restart replays durable pieces under the *same* capture identity when a restart-safe capture checkpoint is available; otherwise that attempt remains incomplete/aborted and a genuinely fresh capture uses a new identity. Sensor accepts/ACKs **durably accounted transport records**, not only fully reassembled inventory, and interleaved scalar telemetry must make independent forward progress. Core BUILD-062/098 reassembles/validates all fragments with bounded durable state, idempotency and an expiry/abort policy: a missing, corrupt, expired or orphaned fragment prevents `COMPLETE` promotion, causes explicit `PARTIAL`/`FAILED` quality, and can never infer software removal. Chunk/record ACK advancement must never conceal an unaccounted transport record or turn partial capture into authoritative state. No second queue, datastore, service, or unapproved priority lane is implied; exact limits and fairness are benchmarked by BUILD-016/019/098.
+
 ### Process/service monitoring selector
 
 ```text
@@ -3167,7 +3174,7 @@ process_service_monitor_definition
   created_by / updated_by / audit_ref
 ```
 
-Selector preference is OS service/unit identity → executable identity/path → bounded exact process-name fallback. Regex/shell expressions and arbitrary command strings are not the normal selector contract. PID is a runtime observation only and must not survive as durable authority across restart/PID reuse.
+Selector preference is OS service/unit identity → executable identity/path → bounded exact process-name fallback. Regex/shell expressions and arbitrary command strings are not the normal selector contract. PID is a runtime observation only and must not survive as durable authority across restart/PID reuse. Service ID from a parseable systemd cgroup path is a candidate subject to unit/process-instance validation, not a guaranteed world-readable authority. If the configured non-root Agent cannot resolve a stronger selector, it reports `PRIVILEGE_DENIED`/`UNAVAILABLE`/`AMBIGUOUS` as applicable and offers an explicitly identified bounded name-only fallback; it must not silently claim that `comm` is a stable executable identity or retarget to a reused PID.
 
 ### Criticality/Profile binding
 
