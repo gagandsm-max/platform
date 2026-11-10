@@ -429,6 +429,9 @@ In HA mode all external clients use a stable Core HA endpoint/VIP. Node IPs exis
 
 If nodes lose peer communication but the system cannot safely prove the Active is down, Standby does not automatically become a second writable Active. UI may remain unavailable longer while Sensors continue local collection; this is preferred to split-brain corruption.
 
+**Transport admission and HA operational boundary (2026-10-30 clarification; SPECIFIED):** Core admission overload may provide standards-compatible bounded retry guidance to existing Sensor uploader clients, with spool retention and explicit congestion/lag telemetry. No response lacking a verified durable application ACK may authorize segment deletion. Failover resumes only via the authenticated stable endpoint after externally verifiable Active authority and storage fencing; Sensor-side endpoint toggling, signer-issued epochs and TCP reachability alone are insufficient. HA Manager must expose `DEGRADED`/`SPLIT_BRAIN_PREVENTED` with a documented safe operator path when authority is ambiguous. No specific witness, fencing appliance, new service, protocol response code, 30–60s token TTL or mandatory coordination technology is selected.
+
+
 ---
 
 ## 8. PostgreSQL HLD
