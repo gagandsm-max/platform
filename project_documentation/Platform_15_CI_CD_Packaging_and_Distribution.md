@@ -78,9 +78,13 @@ Separate least-privilege service users for Core/Sensor/Agent as appropriate. No 
 
 ### 3.1 Runtime service continuity
 
-Package installation/profile activation shall register and enable every mandatory runtime service required by the selected deployment profile. Linux services use the approved `systemd` supervision contract with boot enablement, dependency-aware readiness and bounded restart on recoverable failure. When PostgreSQL, ClickHouse, Kafka or Valkey are packaged/deployed as separate mandatory Core services, their service definitions and enablement are part of the Core distribution contract rather than a manual post-install step. Packaging/enablement must preserve component authority/role/fencing/replication/durability/rejoin contracts and must not invent HA failover supervisors or select Patroni/repmgr/Keeper/etcd/Consul/Raft/witness/third-Core mechanisms; BUILD-120–124 own exactly-two-Core HA fencing/failover/rejoin.
+**Staged package installation versus deliberate activation are separate states.** A staged/unconfigured native package install places binaries, unit/service definitions, filesystem layout and least-privilege identities on disk in a disabled/inactive state. Staged packages must not silently enable mandatory services, enroll identity, join Sensor pools, or claim an active deployment profile. After a supported host reboot, a staged/unconfigured install remains staged/inactive until valid authorized configuration/enrollment deliberately activates a certified profile. Intentional maintenance/disablement by an authorized operator must also be respected and must not be overridden by package scripts or unsupervised boot enablement.
 
-Package scripts must be idempotent and must not require a customer to run ad-hoc start commands after a supported reboot or recoverable process crash. Automatic restart must not force-start known-unsafe/corrupt/incompatible local state or treat process existence as recovery success; if safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable evidence and a governed operator/runbook path. Optional, scheduled or on-demand workers may remain disabled/inactive until their capability or workload requires them. Repeated crash loops must remain observable and diagnosable.
+Once valid authorized configuration/enrollment deliberately activates a certified deployment profile, packaging shall register and enable every mandatory runtime service required by that profile. Linux services use the approved `systemd` supervision contract with boot enablement, dependency-aware readiness and bounded restart on recoverable failure. When PostgreSQL, ClickHouse, Kafka or Valkey are packaged/deployed as separate mandatory Core services, their service definitions and enablement are part of the Core distribution contract rather than a manual post-install step.
+
+**Phase envelope packaging (Issue #200 / #204):** Phase 1 packaging/enablement obligations apply to one authoritative standalone Core plus Sensors/Agents under that standalone topology—including standalone durability, security, Sensor assignment fencing, backup/restore and site-loss DR continuity owners cross-referenced in `Platform_03`, `Platform_16` and `Platform_14`. Phase 1.5 packaging/enablement obligations additionally cover exactly-two-Core Active/Standby HA promotion, fencing, peer-partition fail-closed behavior, former-Active rejoin and survivor-durability contracts. Packaging/enablement must preserve component authority/role/fencing/replication/durability/rejoin contracts and must not invent HA failover supervisors or select Patroni/repmgr/Keeper/etcd/Consul/Raft/witness/third-Core mechanisms; BUILD-120–124 own exactly-two-Core HA fencing/failover/rejoin. A Phase 1 standalone package certificate must not imply Phase 1.5 HA continuity.
+
+Package scripts must be idempotent and must not require a customer to run ad-hoc start commands after a supported reboot or recoverable process crash **once a certified profile is deliberately activated**. Automatic restart must not force-start known-unsafe/corrupt/incompatible local state or treat process existence as recovery success; if safe automatic recovery cannot be established, the component remains FAILED/DEGRADED/RECOVERING with actionable evidence and a governed operator/runbook path. Optional, scheduled or on-demand workers may remain disabled/inactive until their capability or workload requires them. Repeated crash loops must remain observable and diagnosable.
 
 ## 4. Windows Agent
 
@@ -111,6 +115,46 @@ When OSS-124 (or another formally approved eBPF loader dependency) is implemente
 - **Signing and provenance:** eBPF probe objects and Go loader binaries are built reproducibly in CI, signed with the release signing key, and catalogued in the release SBOM (SPDX/CycloneDX). No compilation from C sources is required or performed on the target customer host during installation. Engineering admission does not claim these release signing/SBOM gates are already complete.
 - **Air-gapped offline distribution:** The offline release bundle includes all necessary kernel compatibility assets; no external internet repository access is attempted or required at runtime.
 
+### 7.1 Native base-Linux Agent legacy qualification targets (Issue #189)
+
+Issue #189 (2026-11-04 Linux-only sequencing decision) promotes the following **native base-Agent** legacy qualification targets into the current Linux completion campaign while retaining modern certification profiles. Status for each exact profile remains **`TARGET` / `CERTIFICATION_PENDING`** until dimensional evidence closes the profile. These statements do **not** claim blanket old-Linux support, do **not** require eBPF on legacy systems, do **not** substitute agentless monitoring for native-Agent completion, do **not** weaken TLS/certificate validation or modern service hardening, and do **not** authorize installing obsolete compilers/toolchains on the developer host.
+
+| Profile | Arch | Status | Notes |
+|---|---|---|---|
+| Ubuntu 16.04 LTS | amd64 | `TARGET` / `CERTIFICATION_PENDING` | Native base-Agent qualification target; eBPF not required and remains `UNSUPPORTED`/`KERNEL_INCOMPATIBLE` where applicable. |
+| RHEL/CentOS 7.x | amd64 | `TARGET` / `CERTIFICATION_PENDING` | Individually pinned and tested distro minors and vendor revisions only; family-level naming is not a certificate. |
+
+**Modern profiles retained (not replaced):** existing modern Linux Agent certification targets remain required, including Ubuntu 22.04 LTS / 24.x and RHEL 8.x / 9.x base/eBPF separation above. Broader legacy distribution coverage from the Issue #189 Phase 1.5 Legacy Agent family remains explicit and unclaimed until each profile passes its own dimensional gate. Cross-reference dimensional certification ownership in `Platform_23` / BUILD-018 packaging / BUILD-019 compatibility; do not duplicate those matrices here.
+
+**Profile dimensions that must appear in each result:** OS family/release; exact pinned minor/image identity and provenance; kernel; libc/runtime; architecture/ISA (conservative amd64 baseline); init/service manager and package-manager versions; filesystem/proc interfaces exercised; TLS/crypto posture; privilege/service-hardening controls actually supported and tested on that profile; vendor maintenance/extended-support condition (recorded as fact, not an external support promise).
+
+**Unresolved exact minor/image blockers (must remain explicit until closed):**
+- exact RHEL 7.x and CentOS 7.x minor/image pins and provenance for each candidate result;
+- Ubuntu 16.04 LTS exact image/kernel/libc/service-manager pin for each candidate result;
+- legacy `systemd` directive compatibility assessment (modern unit directives vs controls actually enforced on the profile; an old manager ignoring an option is not proof of safe sandboxing);
+- verified binary dependency set on the conservative amd64 baseline (static compilation alone is not a compatibility certificate);
+- signed-package, upgrade/rollback, identity/certificate/spool continuity and mTLS/revocation evidence on each pinned image.
+
+Container fixtures may assist packaging smoke tests but do not replace isolated native VM gates required by Issue #189 for old-kernel service parsing, clean install/configured activation, reboot/crash, upgrade/rollback/remove/reinstall, identity/certificate/spool preservation and end-to-end delivery/recovery.
+
+
+---
+
+## 7.2 Native package acceptance evidence binding
+
+Native `.deb` / `.rpm` / Windows MSI acceptance evidence for Core, Sensor and Agent packages must bind, for the exact artifact under test:
+
+- source commit SHA and tree SHA of the package inputs;
+- builder identity (CI job/runner/image digest or governed equivalent);
+- binary and package hashes (and signatures where the release-signing gate applies);
+- exact commands executed, true exit codes and sanitized logs;
+- staged-install versus deliberately activated lifecycle evidence (see §3.1);
+- upgrade and supported rollback paths with identity/certificate continuity and unacknowledged spool continuity;
+- permissions/hardening posture for service identity, config, spool and credential paths;
+- resource behavior under the declared profile (including non-interference with protected monitoring workloads where applicable);
+- relevant failure/recovery evidence (crash-loop visibility, safe-recovery refusal, reboot auto-start after activation).
+
+Container fixtures and staged-only evidence remain bounded helpers and do not by themselves constitute native lifecycle certification. Unsigned internal development package evidence is not release signing certification. Release promotion remains governed by `Platform_14`; operational install/upgrade/rollback runbooks remain owned by `Platform_16`. BUILD-018 remains packaging authority; BUILD-019 remains compatibility certification authority.
 
 ---
 
