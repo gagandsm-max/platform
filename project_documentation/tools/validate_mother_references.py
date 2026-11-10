@@ -2059,6 +2059,13 @@ class MotherReferenceValidator:
             "0xffffffff → 0",
             "EXPORTER_RESTART_OR_DISCONTINUITY",
             "do not calculate datagram loss across the boundary",
+            "current exporter uptime < previous exporter uptime",
+            "ALWAYS",
+            "NOT** legal when a trusted uptime decrease is present",
+            "When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal",
+            "uptime is absent, unavailable or explicitly untrusted",
+            "trusted uptime decrease",
+            "MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`",
             "SEQUENCE_DISCONTINUITY_UNKNOWN",
             "Duplicate and reorder do not become loss",
             "Stream epoch state",
@@ -2079,6 +2086,16 @@ class MotherReferenceValidator:
                     "Platform_10 sFlow v5 datagram sequence contract missing "
                     f"{needle!r}"
                 )
+        # Fixture 8 must not regress to UNKNOWN on trusted uptime decrease.
+        if (
+            "uptime decrease with otherwise plausible modular progression = "
+            "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`"
+            in p10
+        ):
+            self.fail(
+                "Platform_10 fixture 8 must not classify trusted uptime "
+                "decrease as SEQUENCE_DISCONTINUITY_UNKNOWN"
+            )
 
         # Build Register must cross-reference S5 ownership without promoting
         # maturity, and retain the primary-authority / wrap / epoch pins.
@@ -2157,6 +2174,9 @@ class MotherReferenceValidator:
                 for required in (
                     "sFlow v5 datagram sequence / discontinuity authority",
                     "EXPORTER_RESTART_OR_DISCONTINUITY",
+                    "current exporter uptime < previous exporter uptime",
+                    "ALWAYS classifies `EXPORTER_RESTART_OR_DISCONTINUITY`",
+                    "NOT** legal when a trusted uptime decrease is present",
                     "prefer possible false discontinuity over fabricated giant loss",
                     "NOT_IMPLEMENTED",
                 ):
@@ -2295,8 +2315,22 @@ class MotherReferenceValidator:
             "CUTOVER-RACE-2",
             "CUTOVER-RACE-3",
             "CUTOVER-RACE-4",
-            "database-level migration/cutover exclusion",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-2",
+            "CUTOVER-LOCK-3",
+            "CUTOVER-LOCK-4",
+            "CUTOVER-LOCK-5",
+            "CUTOVER-LOCK-6",
+            "CUTOVER-LOCK-7",
+            "CUTOVER-LOCK-8",
+            "CUTOVER-LOCK-9",
+            "CUTOVER-LOCK-10",
             "per-Sensor lock alone does **not** fence",
+            "both Cores must honor the same PostgreSQL global cutover lock",
         )
         for needle in required_p17:
             if needle not in p17:
@@ -2345,6 +2379,8 @@ class MotherReferenceValidator:
                 "STAGE 1 drain mode",
                 "STAGE 2 hard cutover fence",
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
                 "No Core partial-schema state is valid",
             ):
                 if needle not in p06:
@@ -2370,7 +2406,11 @@ class MotherReferenceValidator:
                 "STAGE 2 — HARD CUTOVER FENCE",
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
                 "check-then-unlock-then-migrate gap is forbidden",
-                "database-level migration/cutover exclusion",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+                "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+                "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+                "Do not introduce a third witness/coordinator",
             ):
                 if needle not in p16:
                     self.fail(
@@ -2392,8 +2432,11 @@ class MotherReferenceValidator:
                 "zero-pending",
                 "crash after mutable-validation failure before pending release",
                 "CUTOVER-RACE-1",
+                "CUTOVER-LOCK-1",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
                 "hard cutover fence",
+                "UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
             ):
                 if needle not in register:
                     self.fail(
@@ -2439,6 +2482,23 @@ class MotherReferenceValidator:
                 self.fail(
                     "BUILD-062 must own hard-cutover fence admission "
                     "(ERR_PLATFORM_UPGRADE_IN_PROGRESS)"
+                )
+            if summary_062 and "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own runtime SHARED participation in "
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1"
+                )
+            if (
+                summary_127
+                and "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" not in summary_127
+            ):
+                self.fail(
+                    "BUILD-127 must own EXCLUSIVE "
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 cutover fence"
+                )
+            if summary_127 and "CUTOVER-LOCK-1" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own CUTOVER-LOCK-1..10 acceptance fixtures"
                 )
             # Preserve prior Network/Flow status truth closures.
             for build_id, required in (
@@ -2498,6 +2558,11 @@ class MotherReferenceValidator:
             "agent-e2e-*",
             "CODEX Desktop heavy E2E",
             "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
         ):
             if required not in p13:
                 self.fail(
@@ -2520,12 +2585,27 @@ class MotherReferenceValidator:
                     "always()",
                     "runtime-busy",
                     "agent-e2e-*",
+                    "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+                    ".github/workflows/platform-ci.yml",
+                    "PENDING_IMPLEMENTATION",
+                    "SPECIFIED / NOT YET EXECUTED",
+                    "Do **not** describe the lock as currently active in GitHub Actions",
                 ):
                     if required not in p15:
                         self.fail(
                             "Platform_15 §3.8 Integration runtime-lock "
                             f"binding missing {required!r}"
                         )
+                # Source-status table must record exact workflow path state.
+                if (
+                    "| `.github/workflows/platform-ci.yml` |" not in p15
+                    or "PENDING_IMPLEMENTATION" not in p15
+                ):
+                    self.fail(
+                        "Platform_15 source-status table must record "
+                        ".github/workflows/platform-ci.yml as "
+                        "PENDING_IMPLEMENTATION"
+                    )
 
         p14_path = (
             self.docs_root
@@ -2545,6 +2625,9 @@ class MotherReferenceValidator:
                     "CI cleanup never deletes foreign `agent-e2e-*`",
                     "Same-inode independent nonblocking acquisition",
                     "Two GitHub Integration jobs cannot become simultaneous",
+                    "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+                    "SPECIFIED / NOT YET EXECUTED",
+                    "PENDING_IMPLEMENTATION",
                 ):
                     if required not in p14:
                         self.fail(

@@ -213,6 +213,21 @@ It MAY wait within its bounded job/session timeout. If it cannot obtain the lock
 
 Lock ownership MUST be process-bound so process or job death releases the kernel lock automatically. Cleanup that runs after cancellation MUST clean only positively owned resources, terminate the caller's lock-holder process when this workload was the owner, and independently verify the lock is free afterwards. Foreign resources remain untouched.
 
+### 22.6 Source maturity (CI workflow) — FROZEN contract / PENDING implementation
+
+```text
+SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION
+```
+
+- The host-global runtime-exclusion **contract** in this section (and the Platform_15 §3.8 / Platform_14 acceptance bindings) is **FROZEN**.
+- Current workflow source path: `.github/workflows/platform-ci.yml`.
+- Current workflow state: **`PENDING_IMPLEMENTATION`**.
+- Current canonical `main` does **not** yet acquire `/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock` in the self-hosted Integration job.
+- Do **not** describe the lock as currently active in GitHub Actions.
+- The eight Platform_14 acceptance fixtures are **SPECIFIED / NOT YET EXECUTED** against the workflow.
+- No certification claim exists from documentation of this contract alone.
+- The requirement is **not** weakened by pending workflow implementation.
+
 ---
 
 ## Phase 2 Enterprise RFP Readiness Reconciliation — Issue #269

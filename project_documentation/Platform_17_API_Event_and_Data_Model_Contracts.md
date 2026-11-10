@@ -487,31 +487,148 @@ Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous histo
 
 **STAGE 2 — HARD CUTOVER FENCE** before the final zero-pending check:
 
-1. Activate a hard Agent-ingress cutover fence.
-2. Reject ALL new Agent-ingress requests, including exact retries, with retryable `ERR_PLATFORM_UPGRADE_IN_PROGRESS` (or repository-equivalent). Agent/Sensor retains custody. MUST create no reservation, no terminal disposition, no deletion authorization, and no watermark change.
-3. Wait for all in-flight Agent-ingress request handlers/transactions to drain.
-4. Wait for publisher-claim/finalize/release transactions to drain.
-5. Acquire the database-level migration/cutover exclusion mechanism (existing PostgreSQL advisory/exclusive migration lock or another proven database exclusion primitive; do not invent a new service). A per-Sensor lock alone does **not** fence all Agent-ingress writers. The implementation plan MUST name and prove the actual global cutover mechanism before certification.
-6. While that exclusion remains held: recheck pending reservations == 0; recheck publisher owners/leases == 0; recheck no Agent-ingress writer transaction is eligible to create state.
-7. Apply the schema migration.
-8. Commit migration.
-9. Release the database exclusion only after migration commit.
-10. Start/enable upgraded Agent ingress.
-11. Verify continuity/health.
+##### 7.1.9.1 Global fence authority — `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1`
 
-The final zero-state check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap.
+Use **one** PostgreSQL transaction-scoped advisory lock namespace dedicated to Agent-ingress schema cutover.
+
+Stable symbolic identity (frozen):
+
+```text
+AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1
+```
+
+Do **not** freeze a numeric lock value in documentation unless existing source already owns one. Numeric/hash encoding remains an implementation detail, but every participant MUST derive the **same** lock identity from this symbolic name.
+
+This lock is distinct from, and complementary to:
+
+- per-Sensor ingress serialization locks;
+- ordinary migration-runner serialization;
+- publisher lease ownership.
+
+A per-Sensor lock alone does **not** fence all Agent-ingress writers.
+
+```text
+AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+```
+
+This global acquisition protocol is now **SPECIFIED**. Current canonical `main` does **NOT** yet implement it. Docs must not claim runtime closure until source/tests implement it.
+
+##### 7.1.9.2 Required participants
+
+Every transaction capable of creating or mutating Agent-ingress durable state MUST participate in the global cutover protocol. At minimum:
+
+1. new reservation creation;
+2. exact pending retry/reservation reconciliation;
+3. publisher lease claim;
+4. publisher lease release;
+5. accepted finalization;
+6. conditional pending release;
+7. terminal disposition creation;
+8. migration/cutover transaction.
+
+##### 7.1.9.3 Normal runtime lock order
+
+For ordinary Agent-ingress state-changing transactions:
+
+1. acquire `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` in **SHARED** mode;
+2. acquire existing per-Sensor advisory/row locks as currently required;
+3. perform reservation/claim/finalize/release/terminal operation;
+4. commit/rollback;
+5. transaction automatically releases locks.
+
+Lock order is therefore always:
+
+```text
+GLOBAL CUTOVER SHARED → PER-SENSOR / ROW
+```
+
+Never reverse this order. This avoids lock-order inversion.
+
+##### 7.1.9.4 HARD CUTOVER order
+
+The migration/cutover path:
+
+1. enter product-level HARD CUTOVER state so HTTP admission rejects all new Agent-ingress requests retryably;
+2. wait for existing request handlers to drain;
+3. acquire `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` in **EXCLUSIVE** mode;
+4. exclusive acquisition waits until all transactions holding SHARED mode have completed;
+5. after EXCLUSIVE is acquired: no new state-changing Agent-ingress transaction can enter;
+6. inside the same database transaction / exclusive fenced interval:
+   - verify pending reservations = 0;
+   - verify publisher ownership/leases = 0;
+   - verify no unresolved publication-attempt state;
+   - verify migration preconditions;
+7. apply migration;
+8. commit schema transaction;
+9. release EXCLUSIVE lock only via transaction completion;
+10. start/activate upgraded runtime;
+11. exit HARD CUTOVER state.
+
+There MUST be no release between final zero check and migration commit. The final zero-state check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap.
+
+##### 7.1.9.5 HTTP admission fence
+
+During HARD CUTOVER:
+
+all Agent-ingress HTTP requests, including exact retries, fail **before** any durable reservation/disposition lookup or mutation with retryable:
+
+```text
+ERR_PLATFORM_UPGRADE_IN_PROGRESS
+```
+
+(or repository-canonical equivalent). Agent/Sensor retains custody. MUST create no reservation, no terminal disposition, no deletion authorization, and no watermark change.
+
+Response:
+
+- does not ACK deletion;
+- does not create reservation;
+- does not create terminal disposition;
+- does not advance accepted/settled watermark;
+- Sensor retains custody.
+
+##### 7.1.9.6 Old-version participation (supported-origin preflight)
+
+A direct supported upgrade origin is allowed **ONLY** when the pre-upgrade Core version already implements `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` participation.
+
+If the installed old version does **NOT** participate in the shared global fence:
+
+```text
+PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER
+```
+
+That origin requires a certified intermediate release that introduces the shared-lock protocol first. Do not pretend a new migration lock can fence binaries that never acquire it. Supported-origin/preflight semantics are owned by `Platform_16` §5 / §5.1.
+
+##### 7.1.9.7 Phase 1.5 / two-Core participation
+
+For Phase 1.5:
+
+- both Cores must honor the same PostgreSQL global cutover lock identity;
+- no Core may remain capable of Agent-ingress mutation while the other migrates;
+- standby-first application/package sequencing does **not** override shared database fencing;
+- active/standby authority/fencing must first ensure only the governed upgrade actor enters hard cutover;
+- database migration is single-authority;
+- migration EXCLUSIVE lock fences state-changing Agent-ingress transactions from either Core.
+
+Do **not** introduce a third witness/coordinator.
+
+##### 7.1.9.8 Abort
 
 **Fail-closed migration behavior.**
 
 - If the zero-pending precondition is violated, migration MUST abort; no partial-apply is valid.
 - Migration apply MUST be transactional such that failure leaves the prior schema and data authoritative.
-- If final fenced verification sees a pending reservation, publisher owner, unresolved writer, or migration precondition failure: abort migration; preserve old schema/data; release the cutover database fence; return Core to old-version recovery/drain mode; reconcile outstanding work; retry cutover later.
-- No direct DB delete/reset of pending rows is an accepted remediation path for the gate.
-- No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted.
-- Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1).
-- Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure under BUILD-127.
 
-Finite acceptance owned across BUILD-062 (runtime fence/admission) and BUILD-127 (upgrade/cutover certification):
+If pending != 0; publisher state remains; migration validation fails; or exclusive cutover lock cannot be acquired within bounded operation deadline:
+
+- migration does not commit;
+- old schema remains authoritative;
+- cutover lock is released by rollback;
+- operator returns to compatible old-version recovery/drain flow;
+- no manual DB deletion/reset.
+
+No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted. Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1). Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure under BUILD-127.
+
+Finite acceptance owned across BUILD-062 (runtime fence/admission + SHARED participation) and BUILD-127 (upgrade/cutover certification + EXCLUSIVE fence):
 
 1. V020-equivalent (pre-release-guard) zero-pending → migration succeeds under hard fence.
 2. One pre-existing pending row → migration aborts with old schema/data intact.
@@ -528,6 +645,28 @@ Mandatory race fixtures (BUILD-127 acceptance; BUILD-062 runtime proof points):
 **CUTOVER-RACE-3 — publisher lease.** Publisher lease exists at cutover. Migration must not proceed.
 
 **CUTOVER-RACE-4 — post-commit resume.** After migration commit and fence release: exact retained Sensor request retries normally under the upgraded runtime; no duplicate deletion-authorizing ACK or false sequence gap.
+
+Mandatory global-lock fixtures (SPECIFIED / NOT YET EXECUTED; BUILD-062 runtime SHARED participation + BUILD-127 EXCLUSIVE cutover certification):
+
+**CUTOVER-LOCK-1:** ordinary reservation holds SHARED; migration EXCLUSIVE waits.
+
+**CUTOVER-LOCK-2:** migration EXCLUSIVE held; new reservation cannot acquire SHARED and HTTP admission remains upgrade-in-progress.
+
+**CUTOVER-LOCK-3:** publisher claim/finalize transaction drains before EXCLUSIVE acquisition succeeds.
+
+**CUTOVER-LOCK-4:** conditional release participates in SHARED lock and cannot race migration.
+
+**CUTOVER-LOCK-5:** terminal disposition transaction participates in SHARED lock.
+
+**CUTOVER-LOCK-6:** lock-order test proves GLOBAL-before-PER-SENSOR and no inversion.
+
+**CUTOVER-LOCK-7:** old-version binary without global-lock support is rejected as unsupported direct upgrade origin (`PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER`).
+
+**CUTOVER-LOCK-8:** two-Core profile proves neither Core can mutate Agent-ingress while EXCLUSIVE migration fence is held.
+
+**CUTOVER-LOCK-9:** migration failure rolls back schema and releases EXCLUSIVE lock.
+
+**CUTOVER-LOCK-10:** post-commit upgraded retry proceeds normally.
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 

@@ -272,21 +272,44 @@ Normal datagram sequence wrap `0xffffffff → 0` is valid forward progress with 
 
 #### Exporter uptime
 
-sFlow v5 datagram header carries exporter uptime in milliseconds. Use uptime only as continuity/discontinuity evidence. Because the uptime field itself is bounded/wrapping, a decrease MUST NOT by itself be claimed as a confirmed reboot.
+sFlow v5 datagram header carries exporter uptime in milliseconds. Use uptime only as continuity/discontinuity evidence. Because the uptime field itself is bounded/wrapping, a decrease MUST NOT by itself be claimed as a confirmed reboot. It is an **epoch-boundary classification**.
 
-**Master decision:** when exporter uptime decreases or otherwise conflicts with established stream continuity, classify `EXPORTER_RESTART_OR_DISCONTINUITY` unless independent authoritative restart/session evidence proves a more specific state. For this transition:
+**Master decision (V1):** when `current exporter uptime < previous exporter uptime` for the same authoritative sFlow stream, the result is **ALWAYS**:
 
+```text
+EXPORTER_RESTART_OR_DISCONTINUITY
+```
+
+unless independent authoritative restart/session evidence proves a more specific state. This does **NOT** assert that a reboot definitely occurred. It means continuity cannot safely span that uptime decrease.
+
+Consequences for this transition:
+
+- close the previous sequence epoch;
+- current accepted datagram establishes the new baseline;
 - do not calculate datagram loss across the boundary;
-- close the old sequence epoch;
-- establish the current accepted datagram as the baseline of a new continuity epoch;
-- retain raw previous/current sequence and uptime for audit;
+- retain previous/current sequence and uptime evidence for audit;
 - no Device Down inference.
+
+`SEQUENCE_DISCONTINUITY_UNKNOWN` is **NOT** legal when a trusted uptime decrease is present.
 
 This conservative behavior accepts possible false discontinuity rather than fabricating a huge loss count.
 
-#### Sequence reset without uptime confidence
+#### When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal
 
-If datagram sequence appears to reset/backtrack and there is insufficient reliable uptime/restart evidence, classify `SEQUENCE_DISCONTINUITY_UNKNOWN` (or repository-equivalent quality state):
+`SEQUENCE_DISCONTINUITY_UNKNOWN` is reserved for sequence discontinuity/backtrack cases where:
+
+- uptime is absent, unavailable or explicitly untrusted;
+  **OR**
+- uptime does not itself indicate an epoch boundary;
+  **AND**
+- no stronger authoritative restart/discontinuity evidence exists.
+
+Examples:
+
+- sequence regression while uptime is non-decreasing but identity/ordering evidence is insufficient;
+- ambiguous old/reordered packet where no reliable uptime evidence exists.
+
+For those weaker-evidence cases:
 
 - do not infer a large gap;
 - do not infer reboot as fact;
@@ -345,8 +368,8 @@ BUILD-051 S5 acceptance MUST include:
 5. `103 → 102` = `OUT_OF_ORDER_OR_OLD_DATAGRAM`; high-water remains `103`.
 6. `0xffffffff → 0` = valid uint32 wrap, contiguous.
 7. sequence reset + uptime decrease = `EXPORTER_RESTART_OR_DISCONTINUITY` epoch; no gap counted across boundary.
-8. uptime decrease with otherwise plausible modular progression = discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`, not confirmed reboot.
-9. sequence regression with insufficient restart evidence = `SEQUENCE_DISCONTINUITY_UNKNOWN`; no fabricated giant loss.
+8. trusted uptime decrease (`current < previous`) with otherwise plausible modular progression = ALWAYS `EXPORTER_RESTART_OR_DISCONTINUITY` (epoch boundary; not confirmed reboot; MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`).
+9. sequence regression with insufficient restart evidence (uptime absent/unavailable/untrusted, or uptime non-decreasing without stronger restart evidence) = `SEQUENCE_DISCONTINUITY_UNKNOWN`; no fabricated giant loss.
 10. collector restart = first valid datagram establishes new collector-side sequence baseline.
 11. two different `sub_agent_id` values maintain independent datagram sequence state.
 12. same source IP but different authoritative exporter binding does not collide.

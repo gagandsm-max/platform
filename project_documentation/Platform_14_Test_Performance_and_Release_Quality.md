@@ -638,9 +638,15 @@ The release evidence ledger must pair each requirement with an actual executed c
 
 Canonical lock semantics are owned by `Platform_13` §22; CI hold/release ownership is owned by `Platform_15` §3.8. This subsection owns acceptance fixtures only.
 
+```text
+SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION
+```
+
+Contract = **FROZEN**. Workflow source `.github/workflows/platform-ci.yml` = **`PENDING_IMPLEMENTATION`**. Current canonical `main` does **not** yet acquire the lock. The eight fixtures below are **SPECIFIED / NOT YET EXECUTED** against the workflow. No certification claim exists. Do not describe the lock as currently active in GitHub Actions.
+
 **Test 20 invariant (do not weaken):** `Persistence, Structured JSON Logs, and Workstation Isolation` remains a legitimate failure when foreign container state changes during the Platform Compose restart. Foreign `agent-e2e-*` containers changing during Test 20 remain a correct failure. The remediation is host-global runtime exclusion, **not** an allowlist for `agent-e2e-*` or any other foreign name pattern.
 
-Required acceptance fixtures:
+Required acceptance fixtures (SPECIFIED / NOT YET EXECUTED):
 
 1. Local E2E owns the lock → CI Integration job cannot mutate runtime concurrently.
 2. CI owns the lock → local heavy runner cannot acquire it.

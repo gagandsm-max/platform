@@ -4042,12 +4042,17 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "STAGE 2 — HARD CUTOVER FENCE",
             "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
             "check-then-unlock-then-migrate gap",
-            "database-level migration/cutover exclusion",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
             "per-Sensor lock alone does **not** fence",
             "CUTOVER-RACE-1",
             "CUTOVER-RACE-2",
             "CUTOVER-RACE-3",
             "CUTOVER-RACE-4",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-10",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
             "final zero-state check and migration MUST share one uninterrupted",
             "create no reservation",
             "no terminal disposition",
@@ -4093,14 +4098,21 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
             "check-then-unlock-then-migrate gap is forbidden",
             "while fenced",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "Do not introduce a third witness/coordinator",
         ):
             self.assertIn(needle, p16, needle)
 
         self.assertIn("STAGE 2 hard cutover fence", p06)
         self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
         self.assertIn("CUTOVER-RACE abort", p06)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p06)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", p06)
 
         self.assertIn("CUTOVER-RACE-1", register)
+        self.assertIn("CUTOVER-LOCK-1", register)
         self.assertIn("hard cutover fence", register)
         row_127 = next(
             line
@@ -4108,12 +4120,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             if line.startswith("| BUILD-127 |")
         )
         self.assertIn("hard cutover fence", row_127)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", row_127)
+        self.assertIn("CUTOVER-LOCK-1", row_127)
         row_062 = next(
             line
             for line in register.splitlines()
             if line.startswith("| BUILD-062 |")
         )
         self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", row_062)
 
         # Prior P0 closures must remain intact.
         self.assertIn("sFlow v5", register)
@@ -4179,6 +4194,108 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 "HARD CUTOVER" in joined
                 or "CUTOVER-RACE" in joined
                 or "ERR_PLATFORM_UPGRADE_IN_PROGRESS" in joined,
+                joined,
+            )
+
+    def test_99g_agent_ingress_global_cutover_lock_protocol(self) -> None:
+        """Global AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 protocol must stay frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "both Cores must honor the same PostgreSQL global cutover lock",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-2",
+            "CUTOVER-LOCK-3",
+            "CUTOVER-LOCK-4",
+            "CUTOVER-LOCK-5",
+            "CUTOVER-LOCK-6",
+            "CUTOVER-LOCK-7",
+            "CUTOVER-LOCK-8",
+            "CUTOVER-LOCK-9",
+            "CUTOVER-LOCK-10",
+            "ordinary reservation holds SHARED",
+            "old-version binary without global-lock support",
+            "two-Core profile proves neither Core can mutate",
+            "migration failure rolls back schema and releases EXCLUSIVE",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        for needle in (
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "Do not introduce a third witness/coordinator",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+        ):
+            self.assertIn(needle, p16, needle)
+
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p06)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", p06)
+        self.assertIn("CUTOVER-LOCK-1", register)
+        self.assertIn("UNSUPPORTED_DIRECT_SCHEMA_CUTOVER", register)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+    def test_99h_agent_ingress_global_cutover_lock_regression_fails(self) -> None:
+        """Dropping AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 must fail closed."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17_full = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        stripped = p17_full.replace(
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", "LOCK_REMOVED"
+        ).replace("CUTOVER-LOCK-1", "LOCKFIX-REMOVED-1")
+        self.assertNotIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", stripped)
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            for name in (
+                "Platform_05_LLD.md",
+                "Platform_06_Dataflow.md",
+                "Platform_16_Installation_Upgrade_Rollback_and_Operations.md",
+            ):
+                (tmp_docs / name).write_text(
+                    (docs / name).read_text(encoding="utf-8"),
+                    encoding="utf-8",
+                )
+            (
+                Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md"
+            ).write_text(
+                (
+                    root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+                ).read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected global cutover lock failures")
+            self.assertTrue(
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" in joined
+                or "CUTOVER-LOCK" in joined,
                 joined,
             )
 
@@ -4500,6 +4617,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "0xffffffff → 0",
             "EXPORTER_RESTART_OR_DISCONTINUITY",
             "do not calculate datagram loss across the boundary",
+            "current exporter uptime < previous exporter uptime",
+            "NOT** legal when a trusted uptime decrease is present",
+            "When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal",
+            "trusted uptime decrease",
+            "MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`",
             "SEQUENCE_DISCONTINUITY_UNKNOWN",
             "Duplicate and reorder do not become loss",
             "first valid datagram establishes a fresh collector-side baseline",
@@ -4511,6 +4633,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "NOT_IMPLEMENTED",
         ):
             self.assertIn(needle, p10, needle)
+        self.assertNotIn(
+            "uptime decrease with otherwise plausible modular progression = "
+            "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`",
+            p10,
+        )
 
         for needle in (
             "datagram-sequence primary loss authority",
@@ -4541,6 +4668,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         for needle in (
             "sFlow v5 datagram sequence / discontinuity authority",
             "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "current exporter uptime < previous exporter uptime",
+            "ALWAYS classifies `EXPORTER_RESTART_OR_DISCONTINUITY`",
+            "NOT** legal when a trusted uptime decrease is present",
             "prefer possible false discontinuity over fabricated giant loss",
             "NOT_IMPLEMENTED",
         ):
@@ -4550,6 +4680,48 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         validator.errors = []
         validator.validate_sflow_v5_datagram_sequence_contract()
         self.assertEqual(validator.errors, [])
+
+    def test_101e_sflow_uptime_decrease_must_not_be_unknown(self) -> None:
+        """Trusted uptime decrease must not classify as SEQUENCE_DISCONTINUITY_UNKNOWN."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            docs_tmp = tmp_root / "project_documentation"
+            docs_tmp.mkdir()
+            p10_src = (
+                docs / "Platform_10_Protocol_Security_Connector_Master.md"
+            ).read_text(encoding="utf-8")
+            # Regress fixture 8 to the contradictory UNKNOWN classification.
+            p10_bad = p10_src.replace(
+                "trusted uptime decrease (`current < previous`) with otherwise "
+                "plausible modular progression = ALWAYS "
+                "`EXPORTER_RESTART_OR_DISCONTINUITY` (epoch boundary; not "
+                "confirmed reboot; MUST NOT produce "
+                "`SEQUENCE_DISCONTINUITY_UNKNOWN`).",
+                "uptime decrease with otherwise plausible modular progression = "
+                "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`, not confirmed reboot.",
+            )
+            self.assertIn(
+                "uptime decrease with otherwise plausible modular progression = "
+                "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`",
+                p10_bad,
+            )
+            (docs_tmp / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+                p10_bad, encoding="utf-8"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                (root / "Platform_Master_Build_Sequence_Register_v1.0.md").read_text(
+                    encoding="utf-8"
+                ),
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(docs_tmp, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_sflow_v5_datagram_sequence_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected fixture-8 UNKNOWN regression failure")
+            self.assertIn("SEQUENCE_DISCONTINUITY_UNKNOWN", joined)
 
     def test_101d_sflow_sequence_regression_detects_loss(self) -> None:
         """Dropping datagram-sequence primary authority must fail validation."""
@@ -4626,6 +4798,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "CODEX Desktop heavy E2E",
             "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
             "agent-e2e-*",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
         ):
             self.assertIn(needle, p13, needle)
 
@@ -4638,6 +4815,12 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "always()",
             "runtime-busy",
             "agent-e2e-*",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
+            "| `.github/workflows/platform-ci.yml` |",
         ):
             self.assertIn(needle, p15, needle)
 
@@ -4652,6 +4835,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "CI cleanup never deletes foreign `agent-e2e-*`",
             "Same-inode independent nonblocking acquisition",
             "Two GitHub Integration jobs cannot become simultaneous",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "PENDING_IMPLEMENTATION",
         ):
             self.assertIn(needle, p14, needle)
 
