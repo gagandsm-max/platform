@@ -69,6 +69,32 @@ Measure at least: time-to-evidence-loss; time-to-qualified-semantic-state; time-
 
 Preserve: `No Data != Device Down`; monitoring-path failure != monitored-object Down.
 
+### 3.2 Agent-ingress authority-checkpoint / schema-cutover acceptance
+
+For Agent-ingress pending-release / authority-checkpoint schema evolution (`Platform_17` §7.1.9–§7.1.15; `Platform_16` §5.1; BUILD-062/BUILD-127), freeze the following documentation-acceptance obligations. Maturity remains:
+
+```text
+AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+```
+
+Do not treat presence here as current-`main` runtime certification.
+
+Mandatory upgrade matrix:
+
+- **U1** clean migration;
+- **U2** dormant legacy pending migration preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN`;
+- **U3** multi-tenant legacy pending;
+- **U4** active publisher blocks migration;
+- **U5** legacy historically-valid replay recovery;
+- **U6** insufficient historical proof remains `LEGACY_PENDING_RECONCILIATION_REQUIRED` (stream-local only);
+- **U7** accepted/settled history unchanged.
+
+Mandatory continuity case **J7**: publication uncertain + later authority change remains recoverable under at-least-once physical Kafka republish with once-only canonical customer-visible telemetry.
+
+Security negatives: changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; checkpoint cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; authority checkpoint cannot authorize new sequences.
+
+Global `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` race/lock fixtures (CUTOVER-RACE-1..4, CUTOVER-LOCK-1..10) remain mandatory and are not removed by the zero-pending supersession.
+
 ## 5. Packaging/reboot tests
 
 Every `.deb`/`.rpm` package is installed on clean certified OS images, rebooted, upgraded, rolled back where supported and uninstalled.

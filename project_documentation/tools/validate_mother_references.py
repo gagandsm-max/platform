@@ -2246,9 +2246,11 @@ class MotherReferenceValidator:
         A deterministic pre-publication non-terminal rejection must not leave an
         unpublished durable pending reservation blocking continuity. Bindings in
         Platform_05/06 and BUILD-062/024 must reference §7.1 without dropping the
-        frozen invariant phrase. Also pins the zero-pending upgrade/migration
-        gate (Platform_16 §5.1 / §7.1.9 / BUILD-127) and crash/restart exact
-        retry fixture under BUILD-062. Skipped when Platform_17 is absent.
+        frozen invariant phrase. Also pins the Agent-ingress upgrade/migration
+        cutover gate after supersession of zero-pending-as-mandatory-migration-
+        blocker (Platform_16 §5.1 / §7.1.9–§7.1.15 / BUILD-127), authority-
+        checkpoint recovery, and crash/restart exact retry fixture under
+        BUILD-062. Skipped when Platform_17 is absent.
         """
         p17_path = (
             self.docs_root
@@ -2304,7 +2306,12 @@ class MotherReferenceValidator:
             "Sensor retains custody",
             "same unsettled sequence",
             "Historical pending publication state is **not inferable**",
-            "zero-pending",
+            "SUPERSEDED contract — zero-pending as mandatory migration blocker",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "LEGACY_UNKNOWN",
+            "AUTHORITY_VALIDATED",
+            "UNVALIDATED",
+            "LEGACY_PENDING_RECONCILIATION_REQUIRED",
             "Crash after mutable validation failure, before pending release",
             "Manual pending deletion/reset is **not** accepted remediation",
             "STAGE 1 — DRAIN MODE",
@@ -2331,6 +2338,16 @@ class MotherReferenceValidator:
             "CUTOVER-LOCK-10",
             "per-Sensor lock alone does **not** fence",
             "both Cores must honor the same PostgreSQL global cutover lock",
+            "#### 7.1.10 Durable authority checkpoint",
+            "#### 7.1.11 Historical temporal authority",
+            "#### 7.1.12 AUTHORITY_VALIDATED retry",
+            "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
+            "#### 7.1.14 Publication-uncertain authority change — mandatory case J7",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U4 active publisher blocks migration",
+            "U6 insufficient historical proof",
+            "U7 accepted/settled history unchanged",
         )
         for needle in required_p17:
             if needle not in p17:
@@ -2375,18 +2392,21 @@ class MotherReferenceValidator:
                 "Platform_17` §7.1",
                 frozen,
                 "### 119.21 Upgrade / rollback",
-                "pending Agent-ingress = non-zero",
+                "active Agent-ingress publisher/writer ownership = non-zero",
+                "LEGACY_UNKNOWN",
                 "STAGE 1 drain mode",
                 "STAGE 2 hard cutover fence",
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
                 "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
                 "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
                 "No Core partial-schema state is valid",
+                "AUTHORITY_CHECKPOINT_RECOVERY",
             ):
                 if needle not in p06:
                     self.fail(
                         f"Platform_06 must bind Platform_17 §7.1 / "
-                        f"zero-pending upgrade preflight (missing {needle!r})"
+                        f"authority-checkpoint upgrade preflight "
+                        f"(missing {needle!r})"
                     )
 
         p16_path = (
@@ -2398,10 +2418,12 @@ class MotherReferenceValidator:
             for needle in (
                 "### 5.1 Phase-1 standalone preflight — Agent-ingress "
                 "pending-reservation upgrade gate",
-                "pending Agent-ingress = non-zero",
+                "SUPERSEDED: zero-pending as mandatory migration blocker",
+                "active Agent-ingress publisher/writer ownership = non-zero",
+                "LEGACY_UNKNOWN",
                 "MUST NOT delete pending Agent-ingress rows manually",
-                "Verify all Agent-ingress pending reservations are zero",
                 "Verify no active Agent-ingress publisher leases remain",
+                "Verify no in-flight Agent-ingress writers",
                 "STAGE 1 — DRAIN MODE",
                 "STAGE 2 — HARD CUTOVER FENCE",
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
@@ -2410,12 +2432,13 @@ class MotherReferenceValidator:
                 "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
                 "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
                 "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+                "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
                 "Do not introduce a third witness/coordinator",
             ):
                 if needle not in p16:
                     self.fail(
-                        "Platform_16 must freeze Agent-ingress zero-pending "
-                        f"upgrade gate (missing {needle!r})"
+                        "Platform_16 must freeze Agent-ingress "
+                        f"authority-checkpoint upgrade gate (missing {needle!r})"
                     )
 
         register_path = (
@@ -2429,7 +2452,9 @@ class MotherReferenceValidator:
                 "BUILD-062",
                 "BUILD-024",
                 "BUILD-127",
-                "zero-pending",
+                "LEGACY_UNKNOWN",
+                "AUTHORITY_CHECKPOINT_RECOVERY",
+                "supersedes zero-pending-as-mandatory-migration-blocker",
                 "crash after mutable-validation failure before pending release",
                 "CUTOVER-RACE-1",
                 "CUTOVER-LOCK-1",
@@ -2437,6 +2462,8 @@ class MotherReferenceValidator:
                 "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
                 "hard cutover fence",
                 "UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+                "U1",
+                "U4",
             ):
                 if needle not in register:
                     self.fail(
@@ -2469,14 +2496,27 @@ class MotherReferenceValidator:
                     "BUILD-062 must own runtime pending/replay behavior for "
                     "Agent-ingress pending-reservation safety"
                 )
-            if summary_127 and "zero-pending" not in summary_127:
+            if summary_127 and "LEGACY_UNKNOWN" not in summary_127:
                 self.fail(
-                    "BUILD-127 must own zero-pending Agent-ingress migration "
-                    "preflight acceptance"
+                    "BUILD-127 must own LEGACY_UNKNOWN Agent-ingress migration "
+                    "preserve acceptance"
+                )
+            if (
+                summary_127
+                and "zero-pending-as-mandatory-migration-blocker" not in summary_127
+            ):
+                self.fail(
+                    "BUILD-127 must record supersession of "
+                    "zero-pending-as-mandatory-migration-blocker"
                 )
             if summary_127 and "hard cutover fence" not in summary_127:
                 self.fail(
                     "BUILD-127 must own race-safe hard cutover fence acceptance"
+                )
+            if summary_062 and "AUTHORITY_CHECKPOINT_RECOVERY" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own AUTHORITY_CHECKPOINT_RECOVERY runtime "
+                    "maturity honesty"
                 )
             if summary_062 and "ERR_PLATFORM_UPGRADE_IN_PROGRESS" not in summary_062:
                 self.fail(

@@ -372,8 +372,8 @@ Logical ordering for authenticated Agent-ingress admission:
 3. Validate immutable request structure, stream identity, sequence range and checksum/body identity.
 4. Perform exact durable prior-disposition / replay lookup for the request identity.
 5. If an exact previous `ACCEPTED` or `TERMINALLY_REJECTED` disposition exists, return that exact durable result. Current mutable state MUST NOT rewrite historical durable outcomes.
-6. For genuinely new/unsettled work only, perform mutable assignment / entity / binding validation (including current assignment generation, Sensor binding, revocation/fencing and entity resolution).
-7. Proceed to publication and finalize (`ACCEPTED`), governed terminal settlement (`TERMINALLY_REJECTED` where explicitly authorized), or deterministic non-terminal rejection with pending-reservation safety below.
+6. For genuinely new/unsettled work only, perform mutable assignment / entity / binding validation (including current assignment generation, Sensor binding, revocation/fencing and entity resolution). New reservations begin `UNVALIDATED`; only after this full exact-request validation may the durable authority checkpoint become `AUTHORITY_VALIDATED` (§7.1.10). Historical `AUTHORITY_VALIDATED` / `LEGACY_UNKNOWN` recovery paths follow §7.1.11–§7.1.13 and MUST NOT invent a reusable Agent-wide grant.
+7. Proceed to publication and finalize (`ACCEPTED`), governed terminal settlement (`TERMINALLY_REJECTED` where explicitly authorized), or deterministic non-terminal rejection with pending-reservation safety below. Publisher claim is permitted only when exact pending authority state is `AUTHORITY_VALIDATED`.
 
 Do **not** move historical disposition lookup behind mutable current-identity validation. Cross-tenant or unauthorized callers MUST fail before they can learn disposition state.
 
@@ -456,36 +456,56 @@ Applicable Agent / shared-ingress BUILD owners (principally BUILD-062 ingestion 
 4. **Cleanup race.** Conditional cleanup cannot delete publisher-owned, finalized or settled state.
 5. **Cleanup failure.** Cleanup failure remains retryable, preserves Sensor custody and advances neither accepted nor settled watermarks.
 6. **Crash after mutable validation failure, before pending release.** Core crashes after a deterministic mutable-validation failure has been decided but before conditional unpublished pending release commits. Prove: no deletion-authorizing response exists so Sensor retains custody; exact retry after Core restart reconciles/releases that exact unpublished pending reservation; corrected authority may then use the same unsettled sequence; no Kafka/customer duplicate and no fabricated watermark advance.
+7. **Authority checkpoint negatives.** Changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; `AUTHORITY_VALIDATED` cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; checkpoint cannot authorize new sequences.
+8. **J7 publication-uncertain + later authority change.** Prove §7.1.14 expected recovery under at-least-once physical republish with once-only canonical customer-visible telemetry.
 
-These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them. Fixture 6 is a required BUILD-062 failure fixture.
+These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them. Fixture 6 is a required BUILD-062 failure fixture. Fixtures 7–8 and U1–U7 (§7.1.15) remain `AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` until runtime evidence exists.
 
 #### 7.1.9 Schema migration / release-guard upgrade precondition
 
-**Authority.** This subsection freezes upgrade/schema-migration safety for Agent-ingress pending-release semantics. Runtime pending/replay and cutover-fence admission behavior remain BUILD-062; upgrade/canary/rollback acceptance of the race-safe zero-pending cutover remains BUILD-127. Operations sequence lives in `Platform_16` §5.1; application-flow transitions live in `Platform_06` §119.21.
+**Authority.** This subsection freezes upgrade/schema-migration safety for Agent-ingress pending-release semantics. Runtime pending/replay, authority-checkpoint, and cutover-fence admission behavior remain BUILD-062; upgrade/canary/rollback acceptance of the race-safe cutover (active-writer drain + dormant `LEGACY_UNKNOWN` preserve) remains BUILD-127. Operations sequence lives in `Platform_16` §5.1; application-flow transitions live in `Platform_06` §119.21.
 
-**Root problem.** A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch:
+```text
+AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+```
+
+Current canonical `main` does **NOT** implement authority-checkpoint recovery. Docs must not claim runtime closure until a runtime candidate merges and independent evidence exists.
+
+**SUPERSEDED contract — zero-pending as mandatory migration blocker.** The prior contract that all dormant Agent-ingress pending rows must be zero before a V021-like schema evolution is **superseded**. Reason: a legacy pending request may be impossible to drain through the old runtime after mutable authority changes, causing one Sensor stream to block the entire Core schema upgrade indefinitely.
+
+**New rule (frozen):**
+
+- active publisher/writer ownership MUST drain before schema migration;
+- dormant legacy pending reservations MAY cross the schema migration;
+- migration preserves them explicitly as `LEGACY_UNKNOWN` (authority) with publication history `UNKNOWN`;
+- no accepted/settled watermark is advanced;
+- no pending row is deleted;
+- publication history is not guessed (`TRUE`/`FALSE` fabrication is forbidden).
+
+**Root problem (retained).** A schema migration cannot safely infer whether a pre-migration pending Agent-ingress batch:
 
 - was never published;
 - was publisher-claimed;
 - was published to Kafka but not finalized;
 - is merely a stale-assignment orphan.
 
-Therefore an upgrade MUST NOT automatically clear or reinterpret ambiguous historical pending state. Historical pending publication state is **not inferable** from schema alone. Migration MUST NOT label an unknown pending row as safe-to-release.
+Therefore an upgrade MUST NOT automatically clear or invent terminal settlement for ambiguous historical pending state. Historical pending publication state is **not inferable** from schema alone. Migration MUST NOT label an unknown pending row as safe-to-release or as never-published. Migration MUST mark unknown publication history `UNKNOWN` and unknown authority checkpoint `LEGACY_UNKNOWN`.
 
-**Race class (forbidden).** A sequence that only (1) quiesces/drains, (2) observes pending=0, (3) leaves a window where an old-version exact retry creates a new reservation, then (4) commits migration, is forbidden. Apparent pending=0 before hard fence is not a migration authorization.
+**Race class (forbidden).** A sequence that only (1) quiesces/drains, (2) observes active writers drained, (3) leaves a window where an old-version exact retry creates a new reservation or publisher claim, then (4) commits migration, is forbidden. Apparent quiescence before hard fence is not a migration authorization. The earlier zero-pending race wording remains historically informative; the superseding fence still forbids check-then-unlock-then-migrate gaps against concurrent writers.
 
-**FROZEN two-phase cutover precondition.** Any Agent-ingress schema migration that introduces or changes pending-release / pending-replay semantics (a release-guard schema transition; cross-reference the current V021-equivalent Flyway migration when present in the catalogue, without treating that filename as eternal product terminology) MUST apply the race-safe two-phase protocol:
+**FROZEN two-phase cutover precondition.** Any Agent-ingress schema migration that introduces or changes pending-release / pending-replay / authority-checkpoint semantics (a release-guard schema transition; cross-reference the current V021-equivalent Flyway migration when present in the catalogue, without treating that filename as eternal product terminology) MUST apply the race-safe two-phase protocol:
 
 **STAGE 1 — DRAIN MODE** under the pre-upgrade Core:
 
 - reject creation of NEW Agent-ingress work/reservations;
-- permit only bounded reconciliation/retry necessary to resolve ALREADY-EXISTING pending reservations;
+- permit only bounded reconciliation/retry necessary to resolve ALREADY-EXISTING pending reservations that the old runtime can still settle safely;
 - allow existing publisher/finalize/release work to complete;
-- continue until pending approaches zero;
+- continue until active publisher/writer ownership approaches zero;
+- dormant legacy pending that cannot safely settle under old mutable authority MAY remain;
 - a retry that would create a brand-new reservation MUST NOT be admitted;
 - if the current/previous GA pair cannot enforce drain mode, that upgrade origin is NOT certified and requires a compatible intermediate release.
 
-**STAGE 2 — HARD CUTOVER FENCE** before the final zero-pending check:
+**STAGE 2 — HARD CUTOVER FENCE** before the final active-writer / publisher-lease check:
 
 ##### 7.1.9.1 Global fence authority — `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1`
 
@@ -554,17 +574,17 @@ The migration/cutover path:
 4. exclusive acquisition waits until all transactions holding SHARED mode have completed;
 5. after EXCLUSIVE is acquired: no new state-changing Agent-ingress transaction can enter;
 6. inside the same database transaction / exclusive fenced interval:
-   - verify pending reservations = 0;
-   - verify publisher ownership/leases = 0;
-   - verify no unresolved publication-attempt state;
-   - verify migration preconditions;
-7. apply migration;
+   - verify active publisher ownership/leases = 0;
+   - verify no in-flight Agent-ingress writers / unresolved active publication-attempt ownership;
+   - inventory dormant legacy pending reservations (may be non-zero);
+   - verify migration preconditions (including request-identity support for supported upgrade origins);
+7. apply migration, preserving each dormant pending row as authority=`LEGACY_UNKNOWN` and publication history=`UNKNOWN` without deleting rows or advancing watermarks;
 8. commit schema transaction;
 9. release EXCLUSIVE lock only via transaction completion;
 10. start/activate upgraded runtime;
 11. exit HARD CUTOVER state.
 
-There MUST be no release between final zero check and migration commit. The final zero-state check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap.
+There MUST be no release between final active-writer/publisher check and migration commit. The final active-ownership check and migration MUST share one uninterrupted fenced cutover interval. There must be no check-then-unlock-then-migrate gap. The previously frozen phrase “final zero-state check” for pending rows is superseded for dormant legacy pending; it remains conceptually applicable only to active publisher/writer ownership (must be zero).
 
 ##### 7.1.9.5 HTTP admission fence
 
@@ -588,15 +608,18 @@ Response:
 
 ##### 7.1.9.6 Old-version participation (supported-origin preflight)
 
-A direct supported upgrade origin is allowed **ONLY** when the pre-upgrade Core version already implements `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` participation.
+A direct supported upgrade origin is allowed **ONLY** when **both**:
 
-If the installed old version does **NOT** participate in the shared global fence:
+1. the pre-upgrade Core version already implements `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` participation; and
+2. the pre-upgrade version/schema already contains exact request body digest / request identity and enough legacy pending identity (tenant/Sensor/stream/sequence/checksum/batch/reservation) for safe post-upgrade historical replay under §7.1.10–§7.1.13.
+
+If the installed old version does **NOT** participate in the shared global fence, or lacks exact request identity for safe post-upgrade replay:
 
 ```text
 PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER
 ```
 
-That origin requires a certified intermediate release that introduces the shared-lock protocol first. Do not pretend a new migration lock can fence binaries that never acquire it. Supported-origin/preflight semantics are owned by `Platform_16` §5 / §5.1.
+That origin requires a certified intermediate release that introduces the shared-lock protocol and/or request-identity pending fields first. Do not pretend a new migration lock can fence binaries that never acquire it. Do not claim safe migration from arbitrary historical schemas lacking request identity. Supported-origin/preflight semantics are owned by `Platform_16` §5 / §5.1.
 
 ##### 7.1.9.7 Phase 1.5 / two-Core participation
 
@@ -615,10 +638,11 @@ Do **not** introduce a third witness/coordinator.
 
 **Fail-closed migration behavior.**
 
-- If the zero-pending precondition is violated, migration MUST abort; no partial-apply is valid.
+- If the active-writer / active-publisher-lease drain precondition is violated, migration MUST abort; no partial-apply is valid.
+- Dormant legacy pending alone MUST NOT abort migration when active ownership is drained and the migration can preserve those rows as `LEGACY_UNKNOWN` / publication `UNKNOWN`.
 - Migration apply MUST be transactional such that failure leaves the prior schema and data authoritative.
 
-If pending != 0; publisher state remains; migration validation fails; or exclusive cutover lock cannot be acquired within bounded operation deadline:
+If active publisher/writer ownership remains; migration validation fails; exclusive cutover lock cannot be acquired within bounded operation deadline; or the origin lacks required request identity for supported cutover:
 
 - migration does not commit;
 - old schema remains authoritative;
@@ -626,25 +650,31 @@ If pending != 0; publisher state remains; migration validation fails; or exclusi
 - operator returns to compatible old-version recovery/drain flow;
 - no manual DB deletion/reset.
 
-No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted. Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1). Upgrade may resume only after old-version reconciliation drains pending to zero, or after a separately governed recovery procedure under BUILD-127.
+No guessed publication state, fabricated Kafka/customer duplicate, or fabricated watermark advance is permitted. Operator manual pending-row deletion to bypass the gate is prohibited (`Platform_16` §5.1). Upgrade may resume after active ownership is drained (dormant legacy pending may remain for post-upgrade `LEGACY_UNKNOWN` recovery), or after a separately governed recovery procedure under BUILD-127.
 
-Finite acceptance owned across BUILD-062 (runtime fence/admission + SHARED participation) and BUILD-127 (upgrade/cutover certification + EXCLUSIVE fence):
+Finite acceptance owned across BUILD-062 (runtime fence/admission + SHARED participation + authority-checkpoint recovery) and BUILD-127 (upgrade/cutover certification + EXCLUSIVE fence + U1–U7):
 
-1. V020-equivalent (pre-release-guard) zero-pending → migration succeeds under hard fence.
-2. One pre-existing pending row → migration aborts with old schema/data intact.
-3. After old-version drain to pending=0 and hard fence → migration succeeds.
-4. Manual pending deletion/reset is **not** accepted remediation.
-5. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
+1. U1 clean migration (no pending / no active leases) under hard fence → succeeds.
+2. U2 dormant legacy pending migration → succeeds; rows preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN`; watermarks unchanged; no row deleted.
+3. U3 multi-tenant legacy pending → same preserve semantics; no cross-tenant bleed.
+4. U4 active publisher blocks migration → abort with old schema/data intact.
+5. U5 legacy historically-valid replay recovery after upgrade → `LEGACY_UNKNOWN → AUTHORITY_VALIDATED →` publisher claim → publish/re-publish → finalize → ACK.
+6. U6 insufficient historical proof → remains `LEGACY_PENDING_RECONCILIATION_REQUIRED`; no ACK/release/terminal settlement; only affected stream blocked; schema upgrade itself not globally blocked.
+7. U7 accepted/settled history unchanged across migration.
+8. Manual pending deletion/reset is **not** accepted remediation.
+9. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
+
+The superseded historical fixtures “V020-equivalent zero-pending → migration succeeds” and “One pre-existing pending row → migration aborts” are replaced by U1–U4 above. Do not reinstate zero-pending-as-mandatory-migration-blocker.
 
 Mandatory race fixtures (BUILD-127 acceptance; BUILD-062 runtime proof points):
 
-**CUTOVER-RACE-1 — exact retry at cutover transition.** Setup: preflight/drain reaches apparent pending=0; exact retry races at the transition into hard cutover. Prove either (A) retry enters before hard fence and becomes visible pending work, causing final fenced zero check to fail and migration to abort; OR (B) hard fence wins first and retry receives retryable `ERR_PLATFORM_UPGRADE_IN_PROGRESS` without creating a reservation. Forbidden: migration commits while the retry creates or owns Agent-ingress pending state.
+**CUTOVER-RACE-1 — exact retry at cutover transition.** Setup: preflight/drain reaches apparent active-ownership drained; exact retry races at the transition into hard cutover. Prove either (A) retry enters before hard fence and becomes visible active pending/writer work, causing final fenced active-ownership check to fail and migration to abort; OR (B) hard fence wins first and retry receives retryable `ERR_PLATFORM_UPGRADE_IN_PROGRESS` without creating a reservation. Forbidden: migration commits while the retry creates or owns Agent-ingress pending state as an active writer.
 
-**CUTOVER-RACE-2 — in-flight writer.** An Agent-ingress writer is already active when hard fence begins. Prove: cutover waits for it to terminate/commit/rollback; final zero check occurs afterward; migration does not race the writer.
+**CUTOVER-RACE-2 — in-flight writer.** An Agent-ingress writer is already active when hard fence begins. Prove: cutover waits for it to terminate/commit/rollback; final active-ownership check occurs afterward; migration does not race the writer.
 
 **CUTOVER-RACE-3 — publisher lease.** Publisher lease exists at cutover. Migration must not proceed.
 
-**CUTOVER-RACE-4 — post-commit resume.** After migration commit and fence release: exact retained Sensor request retries normally under the upgraded runtime; no duplicate deletion-authorizing ACK or false sequence gap.
+**CUTOVER-RACE-4 — post-commit resume.** After migration commit and fence release: exact retained Sensor request retries normally under the upgraded runtime (including `LEGACY_UNKNOWN` historical recovery where applicable); no duplicate deletion-authorizing ACK or false sequence gap for customer-visible canonical telemetry.
 
 Mandatory global-lock fixtures (SPECIFIED / NOT YET EXECUTED; BUILD-062 runtime SHARED participation + BUILD-127 EXCLUSIVE cutover certification):
 
@@ -667,6 +697,163 @@ Mandatory global-lock fixtures (SPECIFIED / NOT YET EXECUTED; BUILD-062 runtime 
 **CUTOVER-LOCK-9:** migration failure rolls back schema and releases EXCLUSIVE lock.
 
 **CUTOVER-LOCK-10:** post-commit upgraded retry proceeds normally.
+
+#### 7.1.10 Durable authority checkpoint
+
+Freeze explicit pending authority state (exact field names may follow implementation conventions; persisted semantics are mandatory):
+
+| State | Meaning |
+|---|---|
+| `NONE` | No pending authority checkpoint is present |
+| `UNVALIDATED` | New reservation created; request authority/entity validation not yet completed |
+| `AUTHORITY_VALIDATED` | Exact-request authority/entity validation completed; publisher claim is eligible |
+| `LEGACY_UNKNOWN` | Pre-checkpoint legacy pending preserved across schema migration; historical validation required before claim |
+
+**New reservations** MUST start as `UNVALIDATED`.
+
+After full request authority/entity validation and **before** publisher claim, state MUST become `AUTHORITY_VALIDATED`.
+
+Publisher claim MUST NOT occur unless exact pending state is `AUTHORITY_VALIDATED`.
+
+##### 7.1.10.1 Exact-request scope
+
+The authority checkpoint is bound to the exact:
+
+- tenant;
+- authenticated Sensor;
+- stream;
+- sequence range;
+- checksum;
+- batch/request identity;
+- request body digest;
+- reservation identity.
+
+It is **NOT**:
+
+- an Agent-wide permission;
+- a reusable assignment grant;
+- authority for different telemetry;
+- permission for future sequences.
+
+Security negatives (mandatory):
+
+- changed body/checksum/tenant/Sensor/stream cannot consume the checkpoint;
+- checkpoint cannot be created before validation (`AUTHORITY_VALIDATED` before validation is forbidden);
+- publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN` state;
+- authority checkpoint cannot authorize new sequences.
+
+#### 7.1.11 Historical temporal authority
+
+Telemetry durably accepted by the Sensor under a then-valid assignment remains recoverable after later reassignment/revocation.
+
+Historical validation uses:
+
+- tenant;
+- `agentId`;
+- `assignmentGeneration`;
+- authoritative Sensor;
+- Sensor `acceptedAt`;
+- retained assignment created/revoked interval.
+
+A `REVOKED` assignment generation may remain valid **historical** authority when Sensor acceptance occurred within its authoritative interval.
+
+Current `ACTIVE` state MUST NOT retroactively discard already-custodied telemetry.
+
+New telemetry after revocation remains prohibited.
+
+#### 7.1.12 AUTHORITY_VALIDATED retry
+
+If exact pending request state is `AUTHORITY_VALIDATED`:
+
+- exact retry does **not** require current `ACTIVE` assignment/binding as a continuity prerequisite;
+- server Sensor/tenant authentication remains mandatory;
+- exact body/reservation identity remains mandatory;
+- canonical authority must be reproduced from the previously validated immutable/historical snapshot;
+- republish/finalize is permitted.
+
+At-least-once physical Kafka duplication is allowed in the Kafka-commit / PostgreSQL-finalize uncertainty window.
+
+Customer-visible canonical telemetry must remain deduplicated by stable logical observation identity.
+
+#### 7.1.13 LEGACY_UNKNOWN migration and recovery
+
+##### Migration preserve contract
+
+For pre-checkpoint legacy pending rows, migration SHALL preserve:
+
+- sequence;
+- stream;
+- checksum;
+- batch/correlation identity;
+- request body digest;
+- reservation time;
+- tenant/Sensor identity.
+
+Migration marks the pending state `LEGACY_UNKNOWN` and publication history `UNKNOWN`.
+
+Migration MUST NOT fabricate `FALSE` or `TRUE` publication history.
+
+Migration MUST NOT clear the row.
+
+##### Post-upgrade recovery
+
+Exact Sensor retry after upgrade performs historical temporal authority validation (§7.1.11).
+
+If historical authority validates:
+
+```text
+LEGACY_UNKNOWN → AUTHORITY_VALIDATED → publisher claim → transactional publish/re-publish → PostgreSQL finalize → ACK
+```
+
+This is safe regardless of unknown prior Kafka publication because delivery remains at-least-once and logical identity/dedupe is authoritative downstream.
+
+If historical authority cannot be proven:
+
+- no ACK;
+- no release;
+- no terminal settlement;
+- stable `LEGACY_PENDING_RECONCILIATION_REQUIRED` operational state;
+- Sensor retains custody;
+- only the affected stream remains blocked.
+
+The schema upgrade itself is not globally blocked by such a stream.
+
+#### 7.1.14 Publication-uncertain authority change — mandatory case J7
+
+Freeze mandatory J7 case:
+
+```text
+Authority validated
+→ publisher claim
+→ Kafka commit
+→ PostgreSQL finalize failure
+→ assignment/binding later revoked/reassigned
+→ exact retry
+```
+
+Expected:
+
+- previously validated exact request remains recoverable;
+- current mutable revocation does not strand it;
+- physical Kafka replay may occur;
+- canonical customer-visible telemetry remains once;
+- pending clears after finalization;
+- corrected continuity proceeds.
+
+#### 7.1.15 Authority-checkpoint / upgrade acceptance matrix (U1–U7 + J7)
+
+`AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` until runtime candidate merges.
+
+| ID | Obligation | Owner |
+|---|---|---|
+| U1 | Clean migration (no pending / no active leases) succeeds under hard fence | BUILD-127 |
+| U2 | Dormant legacy pending migrates preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN` | BUILD-127 |
+| U3 | Multi-tenant legacy pending preserve without cross-tenant bleed | BUILD-127 |
+| U4 | Active publisher blocks migration | BUILD-127 |
+| U5 | Legacy historically-valid replay recovers after upgrade | BUILD-062 + BUILD-127 |
+| U6 | Insufficient historical proof → `LEGACY_PENDING_RECONCILIATION_REQUIRED`; stream-local block only | BUILD-062 + BUILD-127 |
+| U7 | Accepted/settled history unchanged across migration | BUILD-127 |
+| J7 | Publication uncertain + later authority change remains recoverable | BUILD-062 |
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 

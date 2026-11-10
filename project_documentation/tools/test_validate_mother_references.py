@@ -3736,7 +3736,10 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "### 7.1.8 Mandatory acceptance tests / fixtures",
             "### 7.1.9 Schema migration / release-guard upgrade precondition",
             "Historical pending publication state is **not inferable**",
-            "zero-pending",
+            "SUPERSEDED contract — zero-pending as mandatory migration blocker",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "LEGACY_UNKNOWN",
+            "AUTHORITY_VALIDATED",
             "Crash after mutable validation failure, before pending release",
             "Manual pending deletion/reset is **not** accepted remediation",
         ):
@@ -3744,20 +3747,32 @@ class MotherReferenceValidatorTests(unittest.TestCase):
 
         self.assertIn(frozen, p05)
         self.assertIn("`Platform_17` §7.1", p05)
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", p05)
         self.assertIn(frozen, p06)
         self.assertIn("`Platform_17` §7.1", p06)
         self.assertIn("`Platform_17` §7.1", register)
         self.assertIn("pending-reservation", register)
         self.assertIn("does **not** reopen this certified record", register)
 
-        # Zero-pending upgrade gate + ownership split + race-safe cutover.
-        self.assertIn("pending Agent-ingress = non-zero", p16)
+        # Authority-checkpoint upgrade gate + ownership split + race-safe cutover.
+        self.assertIn(
+            "SUPERSEDED: zero-pending as mandatory migration blocker",
+            p16,
+        )
+        self.assertIn(
+            "active Agent-ingress publisher/writer ownership = non-zero",
+            p16,
+        )
         self.assertIn("MUST NOT delete pending Agent-ingress rows manually", p16)
         self.assertIn("STAGE 1 — DRAIN MODE", p16)
         self.assertIn("STAGE 2 — HARD CUTOVER FENCE", p16)
         self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p16)
         self.assertIn("check-then-unlock-then-migrate gap is forbidden", p16)
-        self.assertIn("pending Agent-ingress = non-zero", p06)
+        self.assertIn(
+            "active Agent-ingress publisher/writer ownership = non-zero",
+            p06,
+        )
+        self.assertIn("LEGACY_UNKNOWN", p06)
         self.assertIn("STAGE 2 hard cutover fence", p06)
         self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", p06)
         self.assertIn("No Core partial-schema state is valid", p06)
@@ -3781,23 +3796,26 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "crash-after-mutable-validation-before-pending-release",
             row_062,
         )
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", row_062)
         row_127 = next(
             line
             for line in register.splitlines()
             if line.startswith("| BUILD-127 |")
         )
-        self.assertIn("zero-pending", row_127)
+        self.assertIn("LEGACY_UNKNOWN", row_127)
+        self.assertIn(
+            "zero-pending-as-mandatory-migration-blocker",
+            row_127,
+        )
         self.assertIn("BUILD-127", register)
         ledger_127 = next(
             line
             for line in register.splitlines()
             if line.startswith("| 127 |")
         )
-        self.assertIn("V020-equivalent zero-pending", ledger_127)
-        self.assertIn(
-            "one pre-existing Agent-ingress pending row → migration aborts",
-            ledger_127,
-        )
+        self.assertIn("U1 clean migration", ledger_127)
+        self.assertIn("U2 dormant legacy pending", ledger_127)
+        self.assertIn("U4 active publisher", ledger_127)
         self.assertIn(
             "manual pending deletion/reset is **not** accepted remediation",
             ledger_127,
@@ -3862,7 +3880,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertIn("MUST NOT", joined)
 
     def test_99c_agent_ingress_zero_pending_upgrade_gate(self) -> None:
-        """Zero-pending upgrade gate + crash recovery + BUILD-127 ownership."""
+        """Authority-checkpoint upgrade gate + crash recovery + BUILD-127 ownership."""
         docs = Path(__file__).resolve().parents[1]
         root = docs.parent
         p17 = (
@@ -3876,16 +3894,20 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             root / "Platform_Master_Build_Sequence_Register_v1.0.md"
         ).read_text(encoding="utf-8")
 
-        # Migration abort on pending state; fail closed; transactional.
+        # Migration abort on active ownership; dormant legacy may preserve.
         for needle in (
-            "If the zero-pending precondition is violated, migration MUST abort",
+            "If the active-writer / active-publisher-lease drain precondition is violated, migration MUST abort",
             "Migration apply MUST be transactional",
-            "V020-equivalent (pre-release-guard) zero-pending → migration succeeds under hard fence",
-            "One pre-existing pending row → migration aborts with old schema/data intact",
-            "After old-version drain to pending=0 and hard fence → migration succeeds",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U4 active publisher blocks migration",
+            "Dormant legacy pending alone MUST NOT abort migration",
             "Failure is observable/audited",
             "CUTOVER-RACE-1",
             "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "LEGACY_UNKNOWN",
+            "J7",
         ):
             self.assertIn(needle, p17, needle)
 
@@ -3907,14 +3929,18 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertIn("exact retry reconciles/releases unpublished pending", ledger_062)
 
         # BUILD-127 owns the upgrade/cutover gate; BUILD-062 owns runtime fence.
-        self.assertIn("zero-pending cutover", register)
+        self.assertIn("LEGACY_UNKNOWN", register)
         row_127 = next(
             line
             for line in register.splitlines()
             if line.startswith("| BUILD-127 |")
         )
-        self.assertIn("zero-pending cutover", row_127)
+        self.assertIn("LEGACY_UNKNOWN", row_127)
         self.assertIn("hard cutover fence", row_127)
+        self.assertIn(
+            "zero-pending-as-mandatory-migration-blocker",
+            row_127,
+        )
         self.assertIn("CUTOVER-RACE-1", register)
         row_062 = next(
             line
@@ -3922,11 +3948,12 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             if line.startswith("| BUILD-062 |")
         )
         self.assertIn(
-            "Zero-pending **upgrade/migration cutover certification**",
+            "Active-writer-drain **upgrade/migration cutover certification**",
             row_062,
         )
         self.assertIn("ERR_PLATFORM_UPGRADE_IN_PROGRESS", row_062)
         self.assertIn("BUILD-127", row_062)
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", row_062)
 
         # Platform_16 / §119.21 preflight surface + hard cutover fence.
         self.assertIn("Enter STAGE 1 drain mode", p16)
@@ -3962,7 +3989,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
     def test_99d_agent_ingress_zero_pending_upgrade_gate_regression_fails(
         self,
     ) -> None:
-        """Dropping zero-pending upgrade gate / BUILD-127 ownership fails closed."""
+        """Dropping authority-checkpoint upgrade gate / BUILD-127 ownership fails closed."""
         docs = Path(__file__).resolve().parents[1]
         root = docs.parent
         p17_full = (
@@ -3992,7 +4019,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                     (docs / name).read_text(encoding="utf-8"),
                     encoding="utf-8",
                 )
-            # Register without BUILD-127 zero-pending ownership.
+            # Register without BUILD-127 LEGACY_UNKNOWN / supersession ownership.
             register_bad = (
                 "# Register\n\n"
                 "| BUILD-003 | transport | x | y | CERTIFIED — does **not** "
@@ -4014,11 +4041,15 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             validator.errors = []
             validator.validate_agent_ingress_pending_reservation_safety()
             joined = "\n".join(validator.errors)
-            self.assertTrue(validator.errors, "expected zero-pending gate failures")
+            self.assertTrue(
+                validator.errors, "expected authority-checkpoint gate failures"
+            )
             self.assertTrue(
                 "7.1.9" in joined
-                or "zero-pending" in joined.lower()
-                or "BUILD-127" in joined,
+                or "LEGACY_UNKNOWN" in joined
+                or "AUTHORITY_CHECKPOINT" in joined
+                or "BUILD-127" in joined
+                or "zero-pending" in joined.lower(),
                 joined,
             )
 
@@ -4053,7 +4084,7 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "CUTOVER-LOCK-1",
             "CUTOVER-LOCK-10",
             "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
-            "final zero-state check and migration MUST share one uninterrupted",
+            "final active-ownership check and migration MUST share one uninterrupted",
             "create no reservation",
             "no terminal disposition",
             "no deletion authorization",
@@ -4061,9 +4092,9 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         ):
             self.assertIn(needle, p17, needle)
 
-        # CUTOVER-RACE-1: either abort on visible pending OR fence reject.
+        # CUTOVER-RACE-1: either abort on visible active ownership OR fence reject.
         self.assertIn(
-            "retry enters before hard fence and becomes visible pending work",
+            "retry enters before hard fence and becomes visible active pending/writer work",
             p17,
         )
         self.assertIn(
@@ -4298,6 +4329,88 @@ class MotherReferenceValidatorTests(unittest.TestCase):
                 or "CUTOVER-LOCK" in joined,
                 joined,
             )
+
+    def test_99i_agent_ingress_authority_checkpoint_recovery_contract(self) -> None:
+        """Authority checkpoint + LEGACY_UNKNOWN supersession must stay frozen."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p16 = (
+            docs / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        for needle in (
+            "#### 7.1.10 Durable authority checkpoint",
+            "UNVALIDATED",
+            "AUTHORITY_VALIDATED",
+            "LEGACY_UNKNOWN",
+            "#### 7.1.11 Historical temporal authority",
+            "assignmentGeneration",
+            "#### 7.1.12 AUTHORITY_VALIDATED retry",
+            "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
+            "LEGACY_PENDING_RECONCILIATION_REQUIRED",
+            "#### 7.1.14 Publication-uncertain authority change — mandatory case J7",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U3 multi-tenant legacy pending",
+            "U4 active publisher blocks migration",
+            "U5 legacy historically-valid replay recovery",
+            "U6 insufficient historical proof",
+            "U7 accepted/settled history unchanged",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN`",
+            "authority checkpoint cannot authorize new sequences",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        self.assertIn(
+            "SUPERSEDED: zero-pending as mandatory migration blocker",
+            p16,
+        )
+        self.assertIn("LEGACY_UNKNOWN", p16)
+        self.assertIn("### 3.2 Agent-ingress authority-checkpoint", p14)
+        self.assertIn("### 29.10 Agent-ingress authority-checkpoint", p12)
+        self.assertIn(
+            "supersedes zero-pending-as-mandatory-migration-blocker",
+            register,
+        )
+        self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", register)
+        # Preserve prior closures.
+        self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p17)
+        self.assertIn("sFlow v5", register)
+        for build_id, required in (
+            ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-051", "NOT_IMPLEMENTED"),
+        ):
+            row = next(
+                line
+                for line in register.splitlines()
+                if line.startswith(f"| {build_id} |")
+            )
+            self.assertIn(required, row, build_id)
+        row_042 = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-042 |")
+        )
+        self.assertIn("PARTIAL", row_042)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
 
     def test_99g_build_042_counter_leaf_source_truth(self) -> None:
         """BUILD-042 must reflect PR #304 leaf without certification claims."""
