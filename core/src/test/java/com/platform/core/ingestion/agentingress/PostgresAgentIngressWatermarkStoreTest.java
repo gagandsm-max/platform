@@ -23,6 +23,8 @@ import java.util.List;
 import java.util.UUID;
 import java.time.Instant;
 import java.security.cert.X509Certificate;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.util.Set;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -216,6 +218,96 @@ class PostgresAgentIngressWatermarkStoreTest {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    @Test
+    void publisherClaimQueuedFirstBlocksReleaseUntilClaimCommits() throws Exception {
+        String sensorId = "sensor-pending-claim-first";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try (Connection gate = holdSensorAdvisoryLock(sensorId)) {
+            var claim = pool.submit(() -> store.claimPublisherLease(tenantId, sensorId, streamId,
+                    1, 1, checksum, "batch", "corr"));
+            awaitAdvisoryWaiters(1);
+            var release = pool.submit(() -> store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                    1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+            awaitAdvisoryWaiters(2);
+            assertFalse(claim.isDone());
+            assertFalse(release.isDone());
+            gate.commit();
+            PublisherClaimResult claimed = claim.get(10, TimeUnit.SECONDS);
+            assertEquals(PublisherClaimResult.Status.CLAIMED, claimed.status());
+            assertFalse(release.get(10, TimeUnit.SECONDS));
+            assertEquals(claimed.ownerToken(), pg.jdbc().queryForObject("""
+                    SELECT pending_publisher_owner FROM platform.sensor_agent_ingress_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, UUID.class, tenantId, sensorId));
+            assertEquals(true, pg.jdbc().queryForObject("""
+                    SELECT pending_publication_attempted FROM platform.sensor_agent_ingress_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, Boolean.class, tenantId, sensorId));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    @Test
+    void pendingReleaseQueuedFirstPreventsLaterPublisherClaim() throws Exception {
+        String sensorId = "sensor-pending-release-first";
+        String checksum = "a".repeat(64);
+        String digest = "d".repeat(64);
+        ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensorId, streamId,
+                1, 1, checksum, "batch", "corr", digest);
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try (Connection gate = holdSensorAdvisoryLock(sensorId)) {
+            var release = pool.submit(() -> store.releaseUnpublishedPending(tenantId, sensorId, streamId,
+                    1, 1, checksum, "batch", "corr", digest, pending.pendingReservationId()));
+            awaitAdvisoryWaiters(1);
+            var claim = pool.submit(() -> store.claimPublisherLease(tenantId, sensorId, streamId,
+                    1, 1, checksum, "batch", "corr"));
+            awaitAdvisoryWaiters(2);
+            assertFalse(release.isDone());
+            assertFalse(claim.isDone());
+            gate.commit();
+            assertTrue(release.get(10, TimeUnit.SECONDS));
+            assertEquals(PublisherClaimResult.Status.REJECTED, claim.get(10, TimeUnit.SECONDS).status());
+            assertNull(pg.jdbc().queryForObject("""
+                    SELECT pending_first_sequence FROM platform.sensor_agent_ingress_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, Long.class, tenantId, sensorId));
+            assertNull(pg.jdbc().queryForObject("""
+                    SELECT pending_publisher_owner FROM platform.sensor_agent_ingress_watermark
+                     WHERE tenant_id=? AND sensor_id=?
+                    """, UUID.class, tenantId, sensorId));
+        } finally {
+            pool.shutdownNow();
+        }
+    }
+
+    private Connection holdSensorAdvisoryLock(String sensorId) throws Exception {
+        Connection connection = pg.dataSource().getConnection();
+        connection.setAutoCommit(false);
+        try (PreparedStatement statement = connection.prepareStatement(
+                "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))")) {
+            statement.setString(1, "sensor_agent_ingress_watermark:" + tenantId + ":" + sensorId);
+            statement.execute();
+        }
+        return connection;
+    }
+
+    private void awaitAdvisoryWaiters(int expected) throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            Integer blocked = pg.jdbc().queryForObject("""
+                    SELECT count(*) FROM pg_locks WHERE locktype='advisory' AND NOT granted
+                    """, Integer.class);
+            if (blocked != null && blocked == expected) return;
+            Thread.sleep(10);
+        }
+        fail("Expected " + expected + " PostgreSQL advisory-lock waiters");
     }
 
     @Test

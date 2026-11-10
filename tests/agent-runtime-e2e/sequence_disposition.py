@@ -422,13 +422,66 @@ class Matrix:
                              "pendingReleaseCannotEraseTerminalDisposition",
                              "deterministicRejectionReleasesOnlyExactUnpublishedGeneration"]})
 
+        # Model the committed reservation after Core died between mutable
+        # assignment rejection and release. Restart the real Core before retry.
+        crash_stale = self.direct_batch(7, stream, "p0.sequence.crash-stale.7", generation=999)
+        crash_body = json.dumps(crash_stale, separators=(",", ":"))
+        crash_digest = hashlib.sha256(crash_body.encode()).hexdigest()
+        self.sql("UPDATE platform.sensor_agent_ingress_watermark SET "
+                 "pending_first_sequence=7, pending_last_sequence=7, "
+                 "pending_checksum='" + crash_stale["checksum"] + "', "
+                 "pending_request_sha256='" + crash_digest + "', "
+                 "pending_batch_id='" + crash_stale["batchId"] + "', "
+                 "pending_correlation_id='" + crash_stale["correlationId"] + "', "
+                 "pending_reserved_at=clock_timestamp(), pending_reservation_id=gen_random_uuid(), "
+                 "pending_publication_attempted=FALSE, pending_publisher_owner=NULL, "
+                 "pending_publisher_claimed_at=NULL, pending_publisher_lease_until=NULL "
+                 "WHERE tenant_id='" + TENANT + "' AND sensor_id='" + SENSOR + "' "
+                 "AND settled_through_sequence=6 AND pending_first_sequence IS NULL")
+        crash_pending = self.watermark()
+        assert crash_pending["pending_first_sequence"] == 7
+        assert crash_pending["pending_request_sha256"] == crash_digest
+        assert crash_pending["pending_reservation_id"] is not None
+        assert crash_pending["pending_publisher_owner"] is None
+        assert crash_pending["pending_publication_attempted"] is False
+        self.call(self.compose + ["restart", "core"], timeout=90)
+        self.wait_healthy("core")
+        code, crash_denied = self.core(crash_stale)
+        assert code == 403 and crash_denied["code"] == "ERR_AGENT_ASSIGNMENT_UNKNOWN", (code, crash_denied)
+        crash_cleared = self.watermark()
+        assert crash_cleared["acked_through_sequence"] == 2
+        assert crash_cleared["settled_through_sequence"] == 6
+        assert crash_cleared["pending_first_sequence"] is None
+        assert crash_cleared["pending_request_sha256"] is None
+        assert crash_cleared["pending_reservation_id"] is None
+        assert crash_cleared["pending_publisher_owner"] is None
+        assert crash_cleared["pending_publication_attempted"] is False
+        assert self.terminal(7) is None
+        assert not self.kafka_metric("p0.sequence.crash-stale.7")
+        assert self.clickhouse_count("p0.sequence.crash-stale.7") == 0
+        crash_corrected = self.direct_batch(7, stream, "p0.sequence.crash-corrected.7", generation=1)
+        code, crash_accepted = self.core(crash_corrected)
+        assert code == 200 and crash_accepted["status"] == "ACCEPTED", (code, crash_accepted)
+        crash_final = self.wait_watermark(2, 7)
+        assert crash_final["pending_first_sequence"] is None and self.terminal(7) is None
+        assert len(self.kafka_metric("p0.sequence.crash-corrected.7")) == 1
+        until = time.monotonic() + 30
+        while time.monotonic() < until and self.clickhouse_count("p0.sequence.crash-corrected.7") != 1:
+            time.sleep(1)
+        assert self.clickhouse_count("p0.sequence.crash-corrected.7") == 1
+        self.mark("J6-crash-restart-recovery", {
+            "pending_before_restart": crash_pending, "rejected_after_restart": crash_denied,
+            "watermark_after_release": crash_cleared, "corrected_response": crash_accepted,
+            "final_watermark": crash_final, "stale_kafka_hits": 0, "stale_clickhouse_rows": 0,
+            "corrected_kafka_hits": 1, "corrected_clickhouse_rows": 1})
+
         malformed_code, _ = self.sensor("{")
         assert malformed_code == 400
         oversized = self.envelope(6, GOOD_HOST, "p0.sequence.oversize.6")
         oversized["correlationId"] = "x" * (1024 * 1024)
         oversized_code, oversize_response = self.sensor(json.dumps(oversized, separators=(",", ":")))
         assert oversized_code == 413, (oversized_code, oversize_response)
-        assert self.watermark()["settled_through_sequence"] == 6
+        assert self.watermark()["settled_through_sequence"] == 7
         self.mark("K", {"malformed_http": malformed_code, "oversize_http": oversized_code})
 
         rejected_hits = self.kafka_metric("p0.sequence.rejected.3")
