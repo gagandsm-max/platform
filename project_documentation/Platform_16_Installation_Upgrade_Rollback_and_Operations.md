@@ -122,6 +122,8 @@ Preflight → capacity/free-space check → package signature → state/config b
 
 ```text
 AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION
 ```
 
 **MASTER ARCHITECTURE DECISION — two-phase cutover.** A check-then-unlock-then-migrate gap is forbidden. Apparent quiescence under ordinary drain is not sufficient: an old-version exact retry MUST NOT create a new reservation or publisher claim after the final active-ownership check and before migration commit. Persistence/migration correctness invariants and race fixtures live in `Platform_17` §7.1.9; authority checkpoint / historical recovery live in `Platform_17` §7.1.10–§7.1.15; application-flow transitions live in `Platform_06` §119.21. Runtime Agent-ingress fence/recovery behavior is BUILD-062; upgrade/cutover certification is BUILD-127.
@@ -163,7 +165,7 @@ Before the final active-writer / publisher-lease check, and as one uninterrupted
 8. Commit schema transaction;
 9. Release EXCLUSIVE lock only via transaction completion;
 10. Start/activate upgraded runtime;
-11. Exit HARD CUTOVER state; verify continuity/health. Post-upgrade exact retries recover via historical temporal authority (`Platform_17` §7.1.11–§7.1.13); streams that cannot prove historical authority remain `LEGACY_PENDING_RECONCILIATION_REQUIRED` without globally blocking the completed schema upgrade.
+11. Exit HARD CUTOVER state; verify continuity/health. Post-upgrade exact retries recover via historical temporal authority and reproducible canonical identity (`Platform_17` §7.1.11–§7.1.13): **U5A** qualified historical authority + reproducible canonical identity recovers; **U5B** historically valid authority without reproducible canonical mapping, or insufficient historical proof (including raw-`acceptedAt`-only legacy without another authoritative proof), remains `LEGACY_PENDING_RECONCILIATION_REQUIRED` without globally blocking the completed schema upgrade.
 
 There MUST be no release between final active-ownership check and migration commit. There must be no check-then-unlock-then-migrate gap. The previously frozen “final zero-state check” wording for all pending rows is superseded for dormant legacy pending; active publisher/writer ownership must still be zero.
 

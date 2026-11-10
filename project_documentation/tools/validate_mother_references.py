@@ -2308,10 +2308,27 @@ class MotherReferenceValidator:
             "Historical pending publication state is **not inferable**",
             "SUPERSEDED contract — zero-pending as mandatory migration blocker",
             "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
             "LEGACY_UNKNOWN",
             "AUTHORITY_VALIDATED",
             "UNVALIDATED",
             "LEGACY_PENDING_RECONCILIATION_REQUIRED",
+            "SensorAcceptanceEvidenceV1",
+            "PendingCanonicalBindingV1",
+            "raw `acceptedAt` alone is insufficient",
+            "clock_max_error_ms <= 5000",
+            "clock_sync_age_ms <= 300000",
+            "ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+            "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+            "U5A",
+            "U5B",
+            "pending_canonical_batch_sha256",
+            "do **NOT** re-resolve entity identity against the current live entity binding",
+            "replay uses persisted Entity A",
+            "does **not** resolve to Entity B",
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
             "Crash after mutable validation failure, before pending release",
             "Manual pending deletion/reset is **not** accepted remediation",
             "STAGE 1 — DRAIN MODE",
@@ -2340,6 +2357,9 @@ class MotherReferenceValidator:
             "both Cores must honor the same PostgreSQL global cutover lock",
             "#### 7.1.10 Durable authority checkpoint",
             "#### 7.1.11 Historical temporal authority",
+            "##### 7.1.11.1 SensorAcceptanceEvidenceV1",
+            "##### 7.1.11.4 UNVALIDATED exact retry",
+            "##### 7.1.10.2 PendingCanonicalBindingV1",
             "#### 7.1.12 AUTHORITY_VALIDATED retry",
             "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
             "#### 7.1.14 Publication-uncertain authority change — mandatory case J7",
@@ -2378,11 +2398,57 @@ class MotherReferenceValidator:
                 "Platform_17` §7.1",
                 frozen,
                 "ERR_AGENT_IDENTITY_CONFLICT",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
             ):
                 if needle not in p05:
                     self.fail(
                         f"Platform_05 must bind Platform_17 §7.1 "
                         f"(missing {needle!r})"
+                    )
+
+        p14_path = (
+            self.docs_root / "Platform_14_Test_Performance_and_Release_Quality.md"
+        )
+        if p14_path.is_file():
+            p14 = p14_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 3.2 Agent-ingress authority-checkpoint",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "U5A",
+                "U5B",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "raw `acceptedAt` alone is insufficient",
+                "clock_max_error_ms > 5000",
+                "clock_sync_age_ms > 300000",
+            ):
+                if needle not in p14:
+                    self.fail(
+                        "Platform_14 must freeze authority-checkpoint "
+                        f"acceptance obligations (missing {needle!r})"
+                    )
+
+        p12_path = self.docs_root / "Platform_12_Decision_Source_Register.md"
+        if p12_path.is_file():
+            p12 = p12_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 29.10 Agent-ingress authority-checkpoint",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "U5A",
+                "U5B",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            ):
+                if needle not in p12:
+                    self.fail(
+                        "Platform_12 must freeze authority-checkpoint "
+                        f"decision register entries (missing {needle!r})"
                     )
 
         p06_path = self.docs_root / "Platform_06_Dataflow.md"
@@ -2401,6 +2467,10 @@ class MotherReferenceValidator:
                 "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
                 "No Core partial-schema state is valid",
                 "AUTHORITY_CHECKPOINT_RECOVERY",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1",
+                "PENDING_CANONICAL_BINDING_V1",
+                "U5A",
+                "U5B",
             ):
                 if needle not in p06:
                     self.fail(
@@ -2433,6 +2503,10 @@ class MotherReferenceValidator:
                 "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
                 "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
                 "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "U5A",
+                "U5B",
                 "Do not introduce a third witness/coordinator",
             ):
                 if needle not in p16:
@@ -2454,6 +2528,13 @@ class MotherReferenceValidator:
                 "BUILD-127",
                 "LEGACY_UNKNOWN",
                 "AUTHORITY_CHECKPOINT_RECOVERY",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1",
+                "PENDING_CANONICAL_BINDING_V1",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "U5A",
+                "U5B",
                 "supersedes zero-pending-as-mandatory-migration-blocker",
                 "crash after mutable-validation failure before pending release",
                 "CUTOVER-RACE-1",
@@ -2517,6 +2598,18 @@ class MotherReferenceValidator:
                 self.fail(
                     "BUILD-062 must own AUTHORITY_CHECKPOINT_RECOVERY runtime "
                     "maturity honesty"
+                )
+            if summary_062 and "SENSOR_ACCEPTANCE_EVIDENCE_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own SENSOR_ACCEPTANCE_EVIDENCE_V1 maturity"
+                )
+            if summary_062 and "PENDING_CANONICAL_BINDING_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own PENDING_CANONICAL_BINDING_V1 maturity"
+                )
+            if summary_062 and "J8_UNVALIDATED_CRASH_THEN_REVOCATION" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own J8_UNVALIDATED_CRASH_THEN_REVOCATION"
                 )
             if summary_062 and "ERR_PLATFORM_UPGRADE_IN_PROGRESS" not in summary_062:
                 self.fail(

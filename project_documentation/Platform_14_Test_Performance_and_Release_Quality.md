@@ -75,9 +75,11 @@ For Agent-ingress pending-release / authority-checkpoint schema evolution (`Plat
 
 ```text
 AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION
 ```
 
-Do not treat presence here as current-`main` runtime certification.
+Do not treat presence here as current-`main` runtime/test completion.
 
 Mandatory upgrade matrix:
 
@@ -85,13 +87,17 @@ Mandatory upgrade matrix:
 - **U2** dormant legacy pending migration preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN`;
 - **U3** multi-tenant legacy pending;
 - **U4** active publisher blocks migration;
-- **U5** legacy historically-valid replay recovery;
+- **U5A** `LEGACY_UNKNOWN` + qualified historical authority + reproducible canonical identity ⇒ recover;
+- **U5B** historically valid authority but canonical mapping not reproducible ⇒ stream-local `LEGACY_PENDING_RECONCILIATION_REQUIRED`;
 - **U6** insufficient historical proof remains `LEGACY_PENDING_RECONCILIATION_REQUIRED` (stream-local only);
 - **U7** accepted/settled history unchanged.
 
-Mandatory continuity case **J7**: publication uncertain + later authority change remains recoverable under at-least-once physical Kafka republish with once-only canonical customer-visible telemetry.
+Mandatory continuity cases:
 
-Security negatives: changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; checkpoint cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; authority checkpoint cannot authorize new sequences.
+- **J7** publication uncertain + later authority/binding change: persisted Entity A replay (not Entity B), same logical observation ID, at-least-once physical Kafka republish, once-only canonical customer-visible Entity A telemetry; changed body cannot use Entity A snapshot.
+- **J8_UNVALIDATED_CRASH_THEN_REVOCATION** UNVALIDATED crash then revocation: qualified historical acceptance → `AUTHORITY_VALIDATED` → publish/finalize; unqualified/uncertain → no publication, no ACK, no permanent DB wedge.
+
+Security / qualification negatives: changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; checkpoint cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; authority checkpoint cannot authorize new sequences; raw `acceptedAt` alone is insufficient; `clock_max_error_ms > 5000` fails qualification; `clock_sync_age_ms > 300000` fails qualification; uncertainty overlapping revocation fails historical authority; canonical binding snapshot required before `AUTHORITY_VALIDATED` publication.
 
 Global `AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1` race/lock fixtures (CUTOVER-RACE-1..4, CUTOVER-LOCK-1..10) remain mandatory and are not removed by the zero-pending supersession.
 

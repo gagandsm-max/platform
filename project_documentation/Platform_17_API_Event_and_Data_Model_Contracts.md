@@ -372,8 +372,8 @@ Logical ordering for authenticated Agent-ingress admission:
 3. Validate immutable request structure, stream identity, sequence range and checksum/body identity.
 4. Perform exact durable prior-disposition / replay lookup for the request identity.
 5. If an exact previous `ACCEPTED` or `TERMINALLY_REJECTED` disposition exists, return that exact durable result. Current mutable state MUST NOT rewrite historical durable outcomes.
-6. For genuinely new/unsettled work only, perform mutable assignment / entity / binding validation (including current assignment generation, Sensor binding, revocation/fencing and entity resolution). New reservations begin `UNVALIDATED`; only after this full exact-request validation may the durable authority checkpoint become `AUTHORITY_VALIDATED` (§7.1.10). Historical `AUTHORITY_VALIDATED` / `LEGACY_UNKNOWN` recovery paths follow §7.1.11–§7.1.13 and MUST NOT invent a reusable Agent-wide grant.
-7. Proceed to publication and finalize (`ACCEPTED`), governed terminal settlement (`TERMINALLY_REJECTED` where explicitly authorized), or deterministic non-terminal rejection with pending-reservation safety below. Publisher claim is permitted only when exact pending authority state is `AUTHORITY_VALIDATED`.
+6. For genuinely new/unsettled work only, perform mutable assignment / entity / binding validation (including current assignment generation, Sensor binding, revocation/fencing and entity resolution). New reservations begin `UNVALIDATED`; only after this full exact-request validation **and** atomic `PendingCanonicalBindingV1` persistence may the durable authority checkpoint become `AUTHORITY_VALIDATED` (§7.1.10). Historical `UNVALIDATED` / `AUTHORITY_VALIDATED` / `LEGACY_UNKNOWN` recovery paths follow §7.1.11–§7.1.13 (qualified `SensorAcceptanceEvidenceV1` + reproducible canonical identity) and MUST NOT invent a reusable Agent-wide grant.
+7. Proceed to publication and finalize (`ACCEPTED`), governed terminal settlement (`TERMINALLY_REJECTED` where explicitly authorized), or deterministic non-terminal rejection with pending-reservation safety below. Publisher claim is permitted only when exact pending authority state is `AUTHORITY_VALIDATED` (never while `UNVALIDATED` or `LEGACY_UNKNOWN`).
 
 Do **not** move historical disposition lookup behind mutable current-identity validation. Cross-tenant or unauthorized callers MUST fail before they can learn disposition state.
 
@@ -456,10 +456,11 @@ Applicable Agent / shared-ingress BUILD owners (principally BUILD-062 ingestion 
 4. **Cleanup race.** Conditional cleanup cannot delete publisher-owned, finalized or settled state.
 5. **Cleanup failure.** Cleanup failure remains retryable, preserves Sensor custody and advances neither accepted nor settled watermarks.
 6. **Crash after mutable validation failure, before pending release.** Core crashes after a deterministic mutable-validation failure has been decided but before conditional unpublished pending release commits. Prove: no deletion-authorizing response exists so Sensor retains custody; exact retry after Core restart reconciles/releases that exact unpublished pending reservation; corrected authority may then use the same unsettled sequence; no Kafka/customer duplicate and no fabricated watermark advance.
-7. **Authority checkpoint negatives.** Changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; `AUTHORITY_VALIDATED` cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; checkpoint cannot authorize new sequences.
-8. **J7 publication-uncertain + later authority change.** Prove §7.1.14 expected recovery under at-least-once physical republish with once-only canonical customer-visible telemetry.
+7. **Authority checkpoint negatives.** Changed body/checksum/tenant/Sensor/stream cannot consume a checkpoint; `AUTHORITY_VALIDATED` cannot be created before validation; publisher cannot claim `UNVALIDATED`/`LEGACY_UNKNOWN`; checkpoint cannot authorize new sequences; raw `acceptedAt` alone is insufficient historical authority; canonical binding snapshot is required before `AUTHORITY_VALIDATED` publication.
+8. **J7 publication-uncertain + later authority/binding change.** Prove §7.1.14: Entity A snapshot survives later Entity B binding change and optional revocation; physical Kafka at-least-once republish with once-only canonical customer-visible Entity A observation; changed body cannot consume Entity A snapshot.
+9. **J8_UNVALIDATED_CRASH_THEN_REVOCATION.** Prove §7.1.11.5–§7.1.11.6: UNVALIDATED reservation + Core crash + later assignment revocation → qualified historical acceptance recovers to `AUTHORITY_VALIDATED` then publish/finalize; unqualified/uncertain acceptance → no publication, no ACK, no permanent DB wedge, conditional exact release permitted, Sensor retains custody.
 
-These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them. Fixture 6 is a required BUILD-062 failure fixture. Fixtures 7–8 and U1–U7 (§7.1.15) remain `AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` until runtime evidence exists.
+These tests are documentation-acceptance obligations for implementation closure; their presence here does not claim current main already passes them. Fixture 6 is a required BUILD-062 failure fixture. Fixtures 7–9, J8 and U1–U7 (§7.1.15) remain `AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` until runtime evidence exists.
 
 #### 7.1.9 Schema migration / release-guard upgrade precondition
 
@@ -467,9 +468,11 @@ These tests are documentation-acceptance obligations for implementation closure;
 
 ```text
 AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION
 ```
 
-Current canonical `main` does **NOT** implement authority-checkpoint recovery. Docs must not claim runtime closure until a runtime candidate merges and independent evidence exists.
+Current canonical `main` does **NOT** implement authority-checkpoint recovery, `SensorAcceptanceEvidenceV1`, or `PendingCanonicalBindingV1`. Docs must not claim runtime/test completion until a runtime candidate merges and independent evidence exists.
 
 **SUPERSEDED contract — zero-pending as mandatory migration blocker.** The prior contract that all dormant Agent-ingress pending rows must be zero before a V021-like schema evolution is **superseded**. Reason: a legacy pending request may be impossible to drain through the old runtime after mutable authority changes, causing one Sensor stream to block the entire Core schema upgrade indefinitely.
 
@@ -658,11 +661,12 @@ Finite acceptance owned across BUILD-062 (runtime fence/admission + SHARED parti
 2. U2 dormant legacy pending migration → succeeds; rows preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN`; watermarks unchanged; no row deleted.
 3. U3 multi-tenant legacy pending → same preserve semantics; no cross-tenant bleed.
 4. U4 active publisher blocks migration → abort with old schema/data intact.
-5. U5 legacy historically-valid replay recovery after upgrade → `LEGACY_UNKNOWN → AUTHORITY_VALIDATED →` publisher claim → publish/re-publish → finalize → ACK.
-6. U6 insufficient historical proof → remains `LEGACY_PENDING_RECONCILIATION_REQUIRED`; no ACK/release/terminal settlement; only affected stream blocked; schema upgrade itself not globally blocked.
-7. U7 accepted/settled history unchanged across migration.
-8. Manual pending deletion/reset is **not** accepted remediation.
-9. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
+5. U5A `LEGACY_UNKNOWN` + qualified historical authority + reproducible canonical identity after upgrade → `LEGACY_UNKNOWN → AUTHORITY_VALIDATED →` publisher claim → publish/re-publish → finalize → ACK.
+6. U5B historically valid authority but canonical mapping not reproducible → `LEGACY_PENDING_RECONCILIATION_REQUIRED`; no ACK/republish/pending deletion/terminal settlement; only affected stream blocked.
+7. U6 insufficient historical proof → remains `LEGACY_PENDING_RECONCILIATION_REQUIRED`; no ACK/release/terminal settlement; only affected stream blocked; schema upgrade itself not globally blocked.
+8. U7 accepted/settled history unchanged across migration.
+9. Manual pending deletion/reset is **not** accepted remediation.
+10. Failure is observable/audited (stable error code, correlation ID, pending/lease diagnostic evidence without secrets).
 
 The superseded historical fixtures “V020-equivalent zero-pending → migration succeeds” and “One pre-existing pending row → migration aborts” are replaced by U1–U4 above. Do not reinstate zero-pending-as-mandatory-migration-blocker.
 
@@ -706,14 +710,14 @@ Freeze explicit pending authority state (exact field names may follow implementa
 |---|---|
 | `NONE` | No pending authority checkpoint is present |
 | `UNVALIDATED` | New reservation created; request authority/entity validation not yet completed |
-| `AUTHORITY_VALIDATED` | Exact-request authority/entity validation completed; publisher claim is eligible |
-| `LEGACY_UNKNOWN` | Pre-checkpoint legacy pending preserved across schema migration; historical validation required before claim |
+| `AUTHORITY_VALIDATED` | Exact-request authority/entity validation completed **and** `PendingCanonicalBindingV1` snapshot committed; publisher claim is eligible |
+| `LEGACY_UNKNOWN` | Pre-checkpoint legacy pending preserved across schema migration; historical validation **and** reproducible canonical identity required before claim |
 
 **New reservations** MUST start as `UNVALIDATED`.
 
-After full request authority/entity validation and **before** publisher claim, state MUST become `AUTHORITY_VALIDATED`.
+After full request authority validation, canonical entity resolution, and atomic `PendingCanonicalBindingV1` persistence — and **before** publisher claim — state MUST become `AUTHORITY_VALIDATED`.
 
-Publisher claim MUST NOT occur unless exact pending state is `AUTHORITY_VALIDATED`.
+Publisher claim MUST NOT occur unless exact pending state is `AUTHORITY_VALIDATED`. Publisher claim before `AUTHORITY_VALIDATED` is forbidden.
 
 ##### 7.1.10.1 Exact-request scope
 
@@ -725,7 +729,7 @@ The authority checkpoint is bound to the exact:
 - sequence range;
 - checksum;
 - batch/request identity;
-- request body digest;
+- request body digest / request SHA-256;
 - reservation identity.
 
 It is **NOT**:
@@ -733,14 +737,76 @@ It is **NOT**:
 - an Agent-wide permission;
 - a reusable assignment grant;
 - authority for different telemetry;
-- permission for future sequences.
+- permission for future sequences;
+- permission for another Sensor or tenant.
 
 Security negatives (mandatory):
 
 - changed body/checksum/tenant/Sensor/stream cannot consume the checkpoint;
 - checkpoint cannot be created before validation (`AUTHORITY_VALIDATED` before validation is forbidden);
 - publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN` state;
-- authority checkpoint cannot authorize new sequences.
+- authority checkpoint cannot authorize new sequences;
+- canonical binding snapshot cannot be reused across batches/reservations.
+
+##### 7.1.10.2 PendingCanonicalBindingV1
+
+The exact request checkpoint binds request identity **and** the resolved canonical entity identity. Freeze typed `PendingCanonicalBindingV1`. Do **not** use a generic unbounded JSON authority blob.
+
+Logical child-record contract (minimum):
+
+- tenant ID;
+- Sensor ID;
+- reservation ID;
+- Sensor ingress sequence;
+- Agent ID;
+- assignment generation;
+- host ID / authoritative resolution key;
+- resolved `entity_identifier_id`;
+- resolved canonical `entity_id`;
+- canonical-binding version;
+- created/validated time.
+
+Also persist exact `pending_canonical_batch_sha256` over the deterministic canonicalized batch projection.
+
+The canonical snapshot belongs to the exact reservation only:
+
+- exists only for that pending reservation;
+- is protected by tenant/Sensor/reservation identity;
+- cannot be reused across batches;
+- clears atomically only when the pending reservation is successfully finalized/settled or through another explicitly governed safe terminal cleanup;
+- MUST survive Core restart.
+
+```text
+PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+```
+
+##### 7.1.10.3 AUTHORITY_VALIDATED atomic transaction invariant
+
+The following is **one atomic PostgreSQL transaction**:
+
+1. request authority validation succeeds;
+2. canonical entity resolution succeeds;
+3. canonical binding snapshot rows are written;
+4. canonical batch digest (`pending_canonical_batch_sha256`) is written;
+5. pending authority state becomes `AUTHORITY_VALIDATED`.
+
+If any step fails, authority state remains `UNVALIDATED` and publisher claim remains impossible.
+
+##### 7.1.10.4 Stable Agent observation identity (V1)
+
+Freeze V1 logical observation identity components to the existing deterministic contract and ordering:
+
+```text
+tenant_id
+authoritative_sensor_id
+agent_id
+assignment_generation
+agent_record_sequence
+observation_ordinal
+metric_id
+```
+
+Representation may remain implementation-owned, but these identity inputs and their ordering are immutable for V1. Entity reassignment does **not** change the logical observation ID of an already validated exact request.
 
 #### 7.1.11 Historical temporal authority
 
@@ -752,14 +818,146 @@ Historical validation uses:
 - `agentId`;
 - `assignmentGeneration`;
 - authoritative Sensor;
-- Sensor `acceptedAt`;
-- retained assignment created/revoked interval.
+- qualified `SensorAcceptanceEvidenceV1` (not raw wall-clock alone);
+- retained assignment created/revoked interval;
+- reproducible historical canonical entity identity when transitioning to `AUTHORITY_VALIDATED`.
 
-A `REVOKED` assignment generation may remain valid **historical** authority when Sensor acceptance occurred within its authoritative interval.
+A `REVOKED` assignment generation may remain valid **historical** authority when qualified Sensor acceptance proves the complete acceptance uncertainty interval lies inside that assignment's authoritative interval.
 
 Current `ACTIVE` state MUST NOT retroactively discard already-custodied telemetry.
 
+Current `ACTIVE` assignment is **not** required when qualified historical evidence proves the exact request was already durably accepted during a valid historical assignment interval.
+
 New telemetry after revocation remains prohibited.
+
+##### 7.1.11.1 SensorAcceptanceEvidenceV1
+
+Raw `acceptedAt = Sensor time.Now()` is **NOT** sufficient authority for retrospective revocation ordering.
+
+Freeze typed `SensorAcceptanceEvidenceV1`, produced when the Sensor durably appends the Agent batch to its spool. The evidence is part of the durable Sensor spool record and exact request identity supplied to Core.
+
+Minimum typed fields:
+
+- `evidence_version = 1`;
+- tenant ID;
+- Sensor ID;
+- Sensor incarnation / service-instance identity;
+- Agent ID;
+- assignment generation;
+- Sensor ingress sequence/range;
+- batch ID;
+- exact batch/request digest;
+- durable Sensor spool sequence;
+- `accepted_at_utc`;
+- `clock_quality`;
+- `clock_max_error_ms`;
+- `clock_sync_age_ms`;
+- `clock_source`.
+
+```text
+SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+```
+
+##### 7.1.11.2 Phase-1 clock qualification
+
+For V1, historical temporal authority requires:
+
+```text
+clock_quality = QUALIFIED
+clock_max_error_ms <= 5000
+clock_sync_age_ms <= 300000
+```
+
+The Sensor obtains clock quality from the host's disciplined system-clock state; unsynchronised/unknown clock state is `UNQUALIFIED`.
+
+Do **not** silently substitute raw wall-clock time when clock qualification is missing.
+
+Define the Core-time acceptance uncertainty interval:
+
+```text
+acceptance_lower = accepted_at_utc - clock_max_error
+acceptance_upper = accepted_at_utc + clock_max_error
+```
+
+Historical assignment interval is `[assignment.created_at, assignment.revoked_at)` for revoked assignments.
+
+Historical acceptance is valid **only** when the **complete** acceptance uncertainty interval lies inside the authoritative assignment interval:
+
+```text
+acceptance_lower >= created_at
+acceptance_upper < revoked_at
+```
+
+For an assignment with no `revoked_at`, `acceptance_lower >= created_at` remains required.
+
+Boundary behavior is fail-closed. If the acceptance uncertainty interval overlaps `revoked_at`, authority ordering is `UNKNOWN`. Exact equality with the revocation boundary is **not** historically authorized.
+
+Negatives (mandatory):
+
+- raw `acceptedAt` alone is insufficient;
+- `clock_max_error_ms > 5000` fails qualification;
+- `clock_sync_age_ms > 300000` fails qualification;
+- uncertainty overlapping revocation fails historical authority.
+
+##### 7.1.11.3 Legacy V020 raw acceptedAt rule
+
+Legacy requests that contain only raw `acceptedAt` but do **not** contain qualified `SensorAcceptanceEvidenceV1` MUST NOT be automatically accepted merely because their raw timestamp appears earlier than `revoked_at`.
+
+They require another authoritative historical proof source or become:
+
+```text
+LEGACY_PENDING_RECONCILIATION_REQUIRED
+```
+
+stream-locally. This does **NOT** block schema migration globally.
+
+##### 7.1.11.4 UNVALIDATED exact retry
+
+An exact pending reservation in `pending_authority_state = UNVALIDATED` MAY establish historical authority after restart/retry even when the assignment is now `REVOKED`, but **ONLY** through qualified historical acceptance evidence defined by `SensorAcceptanceEvidenceV1`.
+
+Sequence:
+
+1. authenticate current Sensor mTLS identity;
+2. verify tenant/Sensor scope;
+3. match exact reservation identity (tenant; Sensor; stream; sequence range; checksum; batch identity; request SHA-256; reservation ID);
+4. validate `SensorAcceptanceEvidenceV1`;
+5. validate the exact historical assignment generation;
+6. validate historical canonical entity mapping;
+7. atomically persist canonical identity snapshot (`PendingCanonicalBindingV1`);
+8. transition `UNVALIDATED → AUTHORITY_VALIDATED`;
+9. only after that transition may publisher claim occur.
+
+This applies only to the exact already-custodied request. It MUST NOT authorize a different body, different checksum, different sequence, new telemetry, future batches, another Sensor, or another tenant.
+
+##### 7.1.11.5 UNVALIDATED failure outcomes
+
+If historical evidence clearly proves acceptance was after revocation, return a stable non-terminal authority rejection such as:
+
+```text
+ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE
+```
+
+Because `UNVALIDATED` guarantees publication has not started, the exact pending reservation may be conditionally released using the existing safe exact-release invariant. Sensor retains original spool custody.
+
+If historical ordering cannot be proven, return:
+
+```text
+ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN
+```
+
+The exact `UNVALIDATED` reservation may likewise be conditionally released because publisher claim is forbidden before `AUTHORITY_VALIDATED`.
+
+In both failure outcomes:
+
+- no terminal settlement;
+- no ACK;
+- no accepted/settled watermark advance;
+- no permanent DB wedge.
+
+BUILD-062 acceptance MUST include `J8_UNVALIDATED_CRASH_THEN_REVOCATION`:
+
+- **Positive:** qualified historical acceptance → `AUTHORITY_VALIDATED` → publish/finalize.
+- **Negative:** unqualified/uncertain acceptance → no publication, no ACK, no permanent DB wedge.
 
 #### 7.1.12 AUTHORITY_VALIDATED retry
 
@@ -768,8 +966,13 @@ If exact pending request state is `AUTHORITY_VALIDATED`:
 - exact retry does **not** require current `ACTIVE` assignment/binding as a continuity prerequisite;
 - server Sensor/tenant authentication remains mandatory;
 - exact body/reservation identity remains mandatory;
-- canonical authority must be reproduced from the previously validated immutable/historical snapshot;
-- republish/finalize is permitted.
+- use the persisted `PendingCanonicalBindingV1` snapshot — do **NOT** re-resolve entity identity against the current live entity binding;
+- regenerate canonical observations from the exact body plus persisted canonical bindings;
+- recompute canonical batch digest and require exact digest equality with `pending_canonical_batch_sha256`;
+- use the same stable logical observation IDs (§7.1.10.4);
+- then claim / re-publish / finalize.
+
+A current entity-binding change cannot redirect already validated pending telemetry to another entity.
 
 At-least-once physical Kafka duplication is allowed in the Kafka-commit / PostgreSQL-finalize uncertainty window.
 
@@ -795,11 +998,22 @@ Migration MUST NOT fabricate `FALSE` or `TRUE` publication history.
 
 Migration MUST NOT clear the row.
 
+Legacy V020 pending rows do **not** automatically possess a `PendingCanonicalBindingV1` snapshot.
+
 ##### Post-upgrade recovery
 
-Exact Sensor retry after upgrade performs historical temporal authority validation (§7.1.11).
+Exact Sensor retry after upgrade performs historical temporal authority validation (§7.1.11) **and** requires reproducible historical canonical entity identity.
 
-If historical authority validates:
+Automatic `LEGACY_UNKNOWN` recovery requires **BOTH**:
+
+1. qualified historical Agent authority (`SensorAcceptanceEvidenceV1` or another authoritative historical proof source — raw `acceptedAt` alone is insufficient);
+2. reproducible historical canonical entity identity.
+
+Allowed historical canonical proof includes a durable authoritative prior mapping or already-persisted canonical evidence that unambiguously identifies the original entity mapping. Current mutable entity resolution alone is **NOT** sufficient proof after a binding change.
+
+**U5A — recover:**
+
+`LEGACY_UNKNOWN` + qualified historical authority + reproducible canonical identity ⇒
 
 ```text
 LEGACY_UNKNOWN → AUTHORITY_VALIDATED → publisher claim → transactional publish/re-publish → PostgreSQL finalize → ACK
@@ -807,42 +1021,65 @@ LEGACY_UNKNOWN → AUTHORITY_VALIDATED → publisher claim → transactional pub
 
 This is safe regardless of unknown prior Kafka publication because delivery remains at-least-once and logical identity/dedupe is authoritative downstream.
 
-If historical authority cannot be proven:
+**U5B — stream-local reconciliation:**
+
+Historically valid authority but canonical mapping not reproducible ⇒
+
+```text
+LEGACY_PENDING_RECONCILIATION_REQUIRED
+```
 
 - no ACK;
-- no release;
+- no republish;
+- no pending deletion;
 - no terminal settlement;
-- stable `LEGACY_PENDING_RECONCILIATION_REQUIRED` operational state;
 - Sensor retains custody;
 - only the affected stream remains blocked.
+
+If historical authority itself cannot be proven, the same stream-local `LEGACY_PENDING_RECONCILIATION_REQUIRED` outcome applies (U6).
 
 The schema upgrade itself is not globally blocked by such a stream.
 
 #### 7.1.14 Publication-uncertain authority change — mandatory case J7
 
-Freeze mandatory J7 case:
+Freeze mandatory J7 binding-change replay:
 
 ```text
-Authority validated
-→ publisher claim
-→ Kafka commit
-→ PostgreSQL finalize failure
-→ assignment/binding later revoked/reassigned
-→ exact retry
+1. exact reservation created
+2. Sensor acceptance evidence qualified
+3. historical/current Agent authority validates
+4. canonical entity resolution produces Entity A
+5. PendingCanonicalBindingV1 for Entity A is durably committed
+6. state becomes AUTHORITY_VALIDATED
+7. publisher claim
+8. Kafka commit
+9. PostgreSQL finalize fails
+10. entity identifier/binding is changed to Entity B
+11. Agent assignment may also be revoked/reassigned
+12. exact original request retries
 ```
 
-Expected:
+Required:
 
-- previously validated exact request remains recoverable;
-- current mutable revocation does not strand it;
-- physical Kafka replay may occur;
-- canonical customer-visible telemetry remains once;
-- pending clears after finalization;
-- corrected continuity proceeds.
+- replay uses persisted Entity A;
+- does **not** resolve to Entity B;
+- same logical observation ID (§7.1.10.4);
+- physical Kafka replay may occur (at-least-once);
+- canonical customer-visible result remains exactly one logical observation associated with Entity A;
+- PostgreSQL finalize succeeds;
+- pending state and binding snapshot clear.
 
-#### 7.1.15 Authority-checkpoint / upgrade acceptance matrix (U1–U7 + J7)
+Negative: changed request body cannot use Entity A snapshot.
 
-`AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` until runtime candidate merges.
+#### 7.1.15 Authority-checkpoint / upgrade acceptance matrix (U1–U7 + J7 + J8)
+
+```text
+AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED
+SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION
+```
+
+until runtime candidate merges. Do not claim runtime/test completion on current canonical `main`.
 
 | ID | Obligation | Owner |
 |---|---|---|
@@ -850,10 +1087,12 @@ Expected:
 | U2 | Dormant legacy pending migrates preserved as `LEGACY_UNKNOWN` / publication `UNKNOWN` | BUILD-127 |
 | U3 | Multi-tenant legacy pending preserve without cross-tenant bleed | BUILD-127 |
 | U4 | Active publisher blocks migration | BUILD-127 |
-| U5 | Legacy historically-valid replay recovers after upgrade | BUILD-062 + BUILD-127 |
+| U5A | `LEGACY_UNKNOWN` + qualified historical authority + reproducible canonical identity ⇒ recover | BUILD-062 + BUILD-127 |
+| U5B | Historically valid authority but canonical mapping not reproducible ⇒ stream-local `LEGACY_PENDING_RECONCILIATION_REQUIRED` | BUILD-062 + BUILD-127 |
 | U6 | Insufficient historical proof → `LEGACY_PENDING_RECONCILIATION_REQUIRED`; stream-local block only | BUILD-062 + BUILD-127 |
 | U7 | Accepted/settled history unchanged across migration | BUILD-127 |
-| J7 | Publication uncertain + later authority change remains recoverable | BUILD-062 |
+| J7 | Publication uncertain + later authority/binding change remains Entity A recoverable | BUILD-062 |
+| J8_UNVALIDATED_CRASH_THEN_REVOCATION | UNVALIDATED crash then revocation: qualified → `AUTHORITY_VALIDATED`; unqualified/uncertain → no publish/ACK/wedge | BUILD-062 |
 
 ## 8. Unified correlation / RCA contract supplement — v3.2.2
 

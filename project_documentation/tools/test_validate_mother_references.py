@@ -4357,6 +4357,12 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "LEGACY_UNKNOWN",
             "#### 7.1.11 Historical temporal authority",
             "assignmentGeneration",
+            "SensorAcceptanceEvidenceV1",
+            "PendingCanonicalBindingV1",
+            "##### 7.1.11.4 UNVALIDATED exact retry",
+            "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+            "ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
             "#### 7.1.12 AUTHORITY_VALIDATED retry",
             "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
             "LEGACY_PENDING_RECONCILIATION_REQUIRED",
@@ -4365,12 +4371,21 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "U2 dormant legacy pending migration",
             "U3 multi-tenant legacy pending",
             "U4 active publisher blocks migration",
-            "U5 legacy historically-valid replay recovery",
+            "U5A",
+            "U5B",
             "U6 insufficient historical proof",
             "U7 accepted/settled history unchanged",
             "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
             "publisher cannot claim `UNVALIDATED` or `LEGACY_UNKNOWN`",
             "authority checkpoint cannot authorize new sequences",
+            "raw `acceptedAt` alone is insufficient",
+            "clock_max_error_ms <= 5000",
+            "clock_sync_age_ms <= 300000",
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
+            "replay uses persisted Entity A",
+            "does **not** resolve to Entity B",
         ):
             self.assertIn(needle, p17, needle)
 
@@ -4379,13 +4394,23 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             p16,
         )
         self.assertIn("LEGACY_UNKNOWN", p16)
+        self.assertIn("U5A", p16)
+        self.assertIn("U5B", p16)
         self.assertIn("### 3.2 Agent-ingress authority-checkpoint", p14)
+        self.assertIn("U5A", p14)
+        self.assertIn("U5B", p14)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", p14)
         self.assertIn("### 29.10 Agent-ingress authority-checkpoint", p12)
+        self.assertIn("SensorAcceptanceEvidenceV1", p12)
+        self.assertIn("PendingCanonicalBindingV1", p12)
         self.assertIn(
             "supersedes zero-pending-as-mandatory-migration-blocker",
             register,
         )
         self.assertIn("AUTHORITY_CHECKPOINT_RECOVERY", register)
+        self.assertIn("SENSOR_ACCEPTANCE_EVIDENCE_V1", register)
+        self.assertIn("PENDING_CANONICAL_BINDING_V1", register)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", register)
         # Preserve prior closures.
         self.assertIn("AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1", p17)
         self.assertIn("sFlow v5", register)
@@ -4411,6 +4436,204 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         validator.errors = []
         validator.validate_agent_ingress_pending_reservation_safety()
         self.assertEqual(validator.errors, [])
+
+    def test_99j_authority_checkpoint_p1_qualification_negatives(self) -> None:
+        """P1 freezes: clock qualification, UNVALIDATED retry, canonical binding."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p14 = (
+            docs / "Platform_14_Test_Performance_and_Release_Quality.md"
+        ).read_text(encoding="utf-8")
+        p05 = (docs / "Platform_05_LLD.md").read_text(encoding="utf-8")
+
+        # Raw acceptedAt alone is insufficient.
+        self.assertIn("raw `acceptedAt` alone is insufficient", p17)
+        self.assertIn("raw `acceptedAt` alone is insufficient", p14)
+        self.assertNotRegex(
+            p17,
+            r"Sensor `acceptedAt`;\s*$",
+            "raw acceptedAt must not remain the sole historical authority input",
+        )
+
+        # Clock qualification negatives.
+        self.assertIn("clock_max_error_ms <= 5000", p17)
+        self.assertIn("clock_sync_age_ms <= 300000", p17)
+        self.assertIn("clock_max_error_ms > 5000", p14)
+        self.assertIn("clock_sync_age_ms > 300000", p14)
+        self.assertIn(
+            "uncertainty overlapping revocation fails historical authority",
+            p17,
+        )
+        self.assertIn(
+            "Exact equality with the revocation boundary is **not** historically authorized",
+            p17,
+        )
+
+        # UNVALIDATED qualified historical retry can become AUTHORITY_VALIDATED.
+        self.assertIn("UNVALIDATED → AUTHORITY_VALIDATED", p17)
+        self.assertIn("J8_UNVALIDATED_CRASH_THEN_REVOCATION", p17)
+        self.assertIn(
+            "qualified historical acceptance → `AUTHORITY_VALIDATED`",
+            p17,
+        )
+
+        # Publisher cannot claim before AUTHORITY_VALIDATED.
+        self.assertIn(
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
+            p17,
+        )
+        self.assertIn(
+            "Publisher claim MUST NOT occur unless exact pending state is `AUTHORITY_VALIDATED`",
+            p17,
+        )
+
+        # Canonical binding snapshot required before AUTHORITY_VALIDATED publication.
+        self.assertIn("PendingCanonicalBindingV1", p17)
+        self.assertIn("pending_canonical_batch_sha256", p17)
+        self.assertIn(
+            "canonical binding snapshot is required before `AUTHORITY_VALIDATED` publication",
+            p17,
+        )
+        self.assertIn(
+            "PendingCanonicalBindingV1",
+            p05,
+        )
+
+        # Exact replay remains Entity A after current binding becomes Entity B.
+        self.assertIn("replay uses persisted Entity A", p17)
+        self.assertIn("does **not** resolve to Entity B", p17)
+        self.assertIn(
+            "changed request body cannot use Entity A snapshot",
+            p17,
+        )
+        self.assertIn(
+            "do **NOT** re-resolve entity identity against the current live entity binding",
+            p17,
+        )
+        self.assertIn(
+            "A current entity-binding change cannot redirect already validated pending telemetry to another entity",
+            p17,
+        )
+
+        # LEGACY_UNKNOWN without reproducible canonical identity → stream-local reconciliation.
+        self.assertIn("U5B", p17)
+        self.assertIn(
+            "canonical mapping not reproducible",
+            p17,
+        )
+        self.assertIn(
+            "Current mutable entity resolution alone is **NOT** sufficient proof after a binding change",
+            p17,
+        )
+        self.assertIn("U5B", p14)
+
+        # Maturity honesty remains PENDING_IMPLEMENTATION (no runtime claim).
+        self.assertIn(
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            p17,
+        )
+        self.assertIn(
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            p17,
+        )
+        self.assertIn(
+            "does **NOT** implement authority-checkpoint recovery",
+            p17,
+        )
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_agent_ingress_pending_reservation_safety()
+        self.assertEqual(validator.errors, [])
+
+        # Negative: stripping SensorAcceptanceEvidenceV1 fails closed.
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_docs = Path(tmp) / "project_documentation"
+            tmp_docs.mkdir(parents=True)
+            stripped = (
+                p17.replace("SensorAcceptanceEvidenceV1", "REMOVED_EVIDENCE")
+                .replace("PendingCanonicalBindingV1", "REMOVED_BINDING")
+                .replace("J8_UNVALIDATED_CRASH_THEN_REVOCATION", "REMOVED_J8")
+                .replace("U5A", "REMOVED_U5A")
+                .replace("U5B", "REMOVED_U5B")
+            )
+            (
+                tmp_docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+            ).write_text(stripped, encoding="utf-8")
+            (tmp_docs / "Platform_05_LLD.md").write_text(
+                "# LLD\nPlatform_17` §7.1\n"
+                "A deterministic pre-publication non-terminal rejection MUST NOT "
+                "leave an unpublished durable pending reservation blocking continuity.\n"
+                "ERR_AGENT_IDENTITY_CONFLICT\n",
+                encoding="utf-8",
+            )
+            (tmp_docs / "Platform_06_Dataflow.md").write_text(
+                "# Dataflow\nPlatform_17` §7.1\n"
+                "A deterministic pre-publication non-terminal rejection MUST NOT "
+                "leave an unpublished durable pending reservation blocking continuity.\n"
+                "### 119.21 Upgrade / rollback\n"
+                "active Agent-ingress publisher/writer ownership = non-zero\n"
+                "LEGACY_UNKNOWN\nSTAGE 1 drain mode\nSTAGE 2 hard cutover fence\n"
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS\nAGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                "No Core partial-schema state is valid\nAUTHORITY_CHECKPOINT_RECOVERY\n",
+                encoding="utf-8",
+            )
+            (
+                tmp_docs
+                / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+            ).write_text(
+                "# Ops\n"
+                "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                "pending-reservation upgrade gate\n"
+                "SUPERSEDED: zero-pending as mandatory migration blocker\n"
+                "active Agent-ingress publisher/writer ownership = non-zero\n"
+                "LEGACY_UNKNOWN\n"
+                "MUST NOT delete pending Agent-ingress rows manually\n"
+                "Verify no active Agent-ingress publisher leases remain\n"
+                "Verify no in-flight Agent-ingress writers\n"
+                "STAGE 1 — DRAIN MODE\nSTAGE 2 — HARD CUTOVER FENCE\n"
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS\n"
+                "check-then-unlock-then-migrate gap is forbidden\n"
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1\n"
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER\n"
+                "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW\n"
+                "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED\n"
+                "Do not introduce a third witness/coordinator\n",
+                encoding="utf-8",
+            )
+            (Path(tmp) / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                "# Register\n"
+                "| BUILD-003 | transport | x | y | CERTIFIED | does **not** reopen this certified record |\n"
+                "| BUILD-043 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-044 | x | y | z | SPECIFIED_ONLY / NOT_IMPLEMENTED | a |\n"
+                "| BUILD-051 | x | y | z | NOT_IMPLEMENTED | a |\n"
+                "| BUILD-062 | runtime pending | x | y | Significant partial | AUTHORITY_CHECKPOINT_RECOVERY ERR_PLATFORM_UPGRADE_IN_PROGRESS AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 crash-after-mutable-validation-before-pending-release |\n"
+                "| BUILD-127 | LEGACY_UNKNOWN zero-pending-as-mandatory-migration-blocker hard cutover fence AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 CUTOVER-LOCK-1 | x | y | Incomplete | U1 |\n"
+                "| 127 | Upgrade | x | AUTHORITY_CHECKPOINT_RECOVERY | D | U1 clean migration U2 dormant legacy pending U4 active publisher manual pending deletion/reset is **not** accepted remediation | r | Incomplete |\n",
+                encoding="utf-8",
+            )
+            validator = MotherReferenceValidator(tmp_docs, repo_root=Path(tmp))
+            validator.errors = []
+            validator.validate_agent_ingress_pending_reservation_safety()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected P1 freeze failures")
+            self.assertTrue(
+                "SensorAcceptanceEvidenceV1" in joined
+                or "PendingCanonicalBindingV1" in joined
+                or "J8_UNVALIDATED" in joined
+                or "U5A" in joined
+                or "U5B" in joined,
+                joined,
+            )
 
     def test_99g_build_042_counter_leaf_source_truth(self) -> None:
         """BUILD-042 must reflect PR #304 leaf without certification claims."""
