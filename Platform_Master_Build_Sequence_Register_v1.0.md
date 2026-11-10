@@ -6,16 +6,16 @@
 
 **Product identity:** Platform is the internal engineering/build identifier. AmrudAi is the default commercial/customer-facing product identity. Licensed governed tenant/MSP white-label branding may override customer-facing branding. Internal BUILD IDs and technical identity remain Platform.
 
-## Current execution checkpoint — 2026-11-08
+## Current execution checkpoint — 2026-11-10
 
 This checkpoint supersedes earlier current-dispatch assertions only. Historical accepted technical certificates, dates, source/CI hashes and dated snapshots below remain provenance and MUST NOT be rewritten. Mother References remain v3.3.0 and BUILD IDs are unchanged. Documentation correction does not recertify product code, packages, capacity, HA or Phase-1 GA. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
 | Current field | Verified fact / remaining gate |
 |---|---|
-| Canonical source | GitHub main `92f0fb37805c234be2869619abcc01ad26b5f30b` after Issue #302 CLOSED/COMPLETED and PR #303 merge (`fix(agent): preserve fragmented telemetry and durable queue custody`). Exact-main Platform CI run `42459975722` SUCCESS 4/4. Laptop `/home/gagan/nms` verified at exact main parity at this handoff. |
+| Canonical source | GitHub main `e207be47372236aadade3d452167bc03f4e5025e` after PR #304 merge (`feat(sensor): exact SNMP counter delta/rate engine (BUILD-042)`). Exact-main Platform CI run `42791498627` attempt 3 SUCCESS 4/4. Laptop `/home/gagan/nms` verified at exact main parity. |
 | Issue #302 / PR #303 boundary | Bounded Agent scheduler/queue/shared-health telemetry-custody repair only. Does **not** certify the whole Linux Agent, BUILD-016 end-to-end durable delivery, Network Sensor production runtime, Core HA, or Phase-1 GA. |
 | Whole-BUILD technical maturity | Last accepted whole-BUILD technical certificate remains BUILD-011 at `179a72837d050f4c757858452d3719c2e8978b95` / Issue #168 comment `6106750423`, bounded Linux scope. BUILD-020 remains IMPLEMENTING / NOT_CERTIFIED. G1B_RUNTIME=HOLD; G2_ADMISSION=DISABLED; RELEASE=NO_GO. |
-| Immediate parallel work | (1) Founder-directed P0 Mother Reference correction across all six documentation areas — candidate branch only; `DOC_P0_BLOCKED` until Master + independent audit accept all six together. (2) Linux Agent production-closure lane continues in parallel under existing BUILD-012..019 / transport-custody owners. Neither lane may claim the other is complete. |
+| Immediate parallel work | (1) Founder-directed P0 Mother Reference correction across all six documentation areas has completed candidate-level P0/P1 semantic review; governed exact-head provenance recheck, PR/CI/merge and post-main verification remain before the corrected Mother References become authoritative on `main`. (2) Linux Agent production-closure lane continues independently under existing BUILD-012..019 / transport-custody owners and remains evidence-gated. Neither lane may claim the other is complete. |
 | Subsequent product order after Linux Agent production closure | Network Sensor + Flow (BUILD-020/021/040 family and authenticated authority/transport prerequisites), then Infrastructure, then Syslog/Log — through existing BUILD/profile ownership below. Progression of bounded slices is not whole-BUILD or Phase-1 certification. |
 | Open docs PRs retained as evidence | PR #300/#301/#283/#284 remain OPEN at this handoff and are clause-adjudicated into this documentation candidate rather than merged blindly. Their historic CI status is not merge authority. |
 | Progress authority | Canonical progress authority is GitHub `main`, verified PR/CI evidence on exact SHAs, Issue #211 register-sync responsibilities and immutable certification references recorded below. Transient workstation paths, unpublished local commits, operator terminal attachments and unverified worktree heads are **not** progress authority. |
@@ -499,7 +499,7 @@ No separate Phase-2.5 codebase, customer-specific Core fork, duplicate graph/RCA
 
 ## Documentation-first dispatch and executable-plan ledger — 2026-11-06 (retained; current main 2026-11-08)
 
-Current documentation acceptance is governed by Platform_00 §10.1, Platform_08 §§4.1–4.3, Platform_12 §29, AGENTS and the Platform_13 executable-plan contract. The 2026-11-08 current checkpoint above supersedes only current-dispatch SHA/status fields. `DOC_P0_BLOCKED` persists until all six areas pass exact-candidate independent semantic review; neither this corrected sequence nor the plan ledger alone clears it. Documentation coverage, source implementation, default activation, executed test evidence, bounded technical certification and release/deployment are separate fields.
+Current documentation acceptance is governed by Platform_00 §10.1, Platform_08 §§4.1–4.3, Platform_12 §29, AGENTS and the Platform_13 executable-plan contract. The 2026-11-10 current checkpoint above supersedes only current-dispatch SHA/status fields. All six documentation areas have passed candidate-level P0/P1 semantic review; governed exact-head provenance recheck, PR/CI/merge and post-main verification remain before the corrected suite becomes authoritative on `main`. Documentation coverage, source implementation, default activation, executed test evidence, bounded technical certification and release/deployment remain separate fields.
 
 ### Ordered existing BUILD/profile lanes and source allocation
 
