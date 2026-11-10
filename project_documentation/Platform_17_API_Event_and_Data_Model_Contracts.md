@@ -1091,6 +1091,8 @@ Change Assurance APIs and NCM privileged-execution contracts retain maker-checke
 
 This refines the existing Flow/NTA/tenant/data-integrity contracts and reconciles `Platform_05` §5.4 `network_flow` field semantics; it does not authorize a new ingest protocol, database, storage dependency, shared-MSP deployment or breaking schema migration. Every canonical Flow observation must bind independently verified ingress context, routing domain and authorization plus resolved exporter/observation-domain identity separately from untrusted packet source attributes. A bare UDP port is not a trusted isolation boundary. The raw event retains protocol/version, source and destination collector transport context where applicable, source ID/Observation Domain, template/options identity and accepted version/lifetime/refresh/epoch evidence, sequence/gap/duplicate/unknown-template accounting, and raw capture/export times. An ambiguous tenant/exporter binding must fail closed or quarantine without misattributing a record to another customer. Quarantined/unmapped traffic must not produce canonical Flow analytics. Phase 1 covers intra-tenant overlapping RFC1918/VRF spaces on verified ingress contexts; MSP/shared-customer isolation certification remains Phase 1.5.
 
+**First bounded Phase-1 UDP receiver profile (specification authority).** The first executable receiver profile is `FLOW_UDP_P1_PROFILE_V1` owned by BUILD-051 in the Master Build Sequence Register (protocol/security notes also in `Platform_10`). It is a specification profile (`SPECIFIED_NOT_IMPLEMENTED`) until code and evidence exist; documentation of the profile MUST NOT change BUILD-051 source-reality maturity away from `NOT_IMPLEMENTED`. Profile scope: UDP collection for NetFlow v5, NetFlow v9, IPFIX v10 over UDP, and sFlow v5. J-Flow is not a proprietary parser in this profile — a J-Flow exporter is supported only when its wire format is certified as one of those NetFlow/IPFIX formats. IPFIX over TCP/SCTP and other transports require a later bounded profile. Tenant identity MUST NEVER come from a Flow packet field; resolve through current Core-issued/configured exporter binding using transport provenance (source IP/UDP port, collector local address/port, receive time, Sensor identity). Source IP alone is insufficient where NAT/overlap can make binding ambiguous. Unknown/ambiguous exporter binding ⇒ no tenant guess, no customer Flow persistence, typed quarantine/quality outcome, observable counters. Activated profile MUST supply `template_refresh_timeout_seconds > 0` (no invented universal timeout in code). IPFIX V1 untemplated Data Sets use `NO_BUFFER_UNTEMPLATED_DATA`. Sequence/loss uses protocol-native semantics (not a universal `sequence+1` rule) and never asserts Device Down. GoFlow2 (`OSS-022`) import for BUILD-051 is blocked until non-BUILD gate `FLOW_PARSER_DEPENDENCY_ADMISSION_GATE` freezes exact version/commit, licence revalidation, transitive inventory, SBOM/CVE, API surface used, reproducible checksum, fixture compatibility and rollback — dependency admission is not Flow certification.
+
 **Raw flow evidence (observed ≠ estimated).** Canonical raw facts MUST preserve OBSERVED values separately from derived estimates. Minimum logical fields: exporter/source identity; observation domain; interface/source vantage; source/destination addresses and ports; protocol; **observed** bytes; **observed** packets; flow count where applicable; event/start/end time; sampling mode; sampling algorithm; sampling selector/id where supplied; sampling rate/probability where known; direction `INGRESS | EGRESS | UNKNOWN`; application/classification identity nullable; application/classification provenance; quality/provenance. Do **not** fabricate direction or application. If direction cannot be derived from a certified observation point/interface relation ⇒ `direction=UNKNOWN`. If application classification is unavailable ⇒ classification remains `UNKNOWN` (not a guessed application).
 
 **Sampling state.** Explicit sampling state is one of `UNSAMPLED | SAMPLED_KNOWN | SAMPLED_UNKNOWN`. Estimation is eligible only when the exporter/protocol supplies a valid certified sampling model (`SAMPLED_KNOWN` with usable algorithm/rate/probability/selector evidence). Unknown/unsupported sampling (`SAMPLED_UNKNOWN` or missing certified model) MUST NOT silently scale observed traffic. Never treat `SAMPLED_UNKNOWN` as `UNSAMPLED`. Never silently average different sampling rates/models.
@@ -1460,14 +1462,36 @@ Rules:
 DependencyActivationV1 {
   semantic_states: SemanticStateV1[]
   maintenance_active: boolean
+  combine: ANY | ALL
 }
 ```
 
 Rules:
 
-- At least one activation criterion MUST be present: either `semantic_states` is non-empty, or `maintenance_active = true` (or both). An empty `semantic_states` array with `maintenance_active = false` is invalid.
+- The semantic-state criterion is ENABLED when `semantic_states` is non-empty. It MATCHES when the current qualified dependency semantic state is a member of `semantic_states`.
+- The maintenance criterion is ENABLED when `maintenance_active = true`. It MATCHES when the dependency is currently under qualified active maintenance according to the authoritative maintenance contract.
+- At least one criterion MUST be enabled. An empty `semantic_states` array with `maintenance_active = false` is invalid.
+- `combine` is required and MUST be persisted explicitly as `ANY` or `ALL`. Writers MUST NOT invent an unpersisted default.
+- `ANY` — activation is TRUE when at least one ENABLED criterion matches.
+- `ALL` — activation is TRUE only when every ENABLED criterion matches.
+- If only one criterion is enabled, `combine` MUST be `ANY`. `ALL` with only one enabled criterion is invalid (no meaningful conjunction).
+- No hidden/default combination behavior is permitted.
 - `semantic_states` values MUST be members of `SemanticStateV1` (canonical vocabulary only).
-- Activation is TRUE only when qualified dependency evidence is present AND the declared criterion matches the current dependency semantic/maintenance evidence.
+- Before either combination rule is evaluated, dependency evidence MUST satisfy canonical relationship identity, `min_confidence`, freshness/`max_age_seconds`, and current `as_of` graph authority (`DependencyRefV1`). Stale, missing, low-confidence or unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action and cannot activate `SUPPRESS`/`DEFER` irrespective of match fields.
+- The combination operator determines only whether dependency activation is TRUE. Once TRUE, persisted `DependencyThresholdV1.action ∈ {SUPPRESS, DEFER, ANNOTATE}` governs behavior under `Platform_22` §6.1.9; action semantics are not redefined here.
+
+**Finite activation fixtures (schema/evaluation contract):**
+
+1. semantic criterion only matches (maintenance disabled) ⇒ activation TRUE when `combine=ANY` (required);
+2. maintenance criterion only matches (`semantic_states` empty) ⇒ activation TRUE when `combine=ANY` (required);
+3. both criteria enabled and both match ⇒ TRUE for `ANY` and for `ALL`;
+4. both criteria enabled and neither matches ⇒ FALSE (not UNKNOWN when evidence is qualified);
+5. `combine=ANY`, both enabled, only semantic matches ⇒ TRUE;
+6. `combine=ANY`, both enabled, only maintenance matches ⇒ TRUE;
+7. `combine=ALL`, both enabled, only one matches ⇒ FALSE;
+8. `combine=ALL`, both enabled, both match ⇒ TRUE;
+9. `combine=ALL` configured with only one enabled criterion ⇒ validation failure;
+10. stale/unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action irrespective of match fields.
 
 ###### `ThresholdExprV1` (discriminated union)
 
@@ -1672,9 +1696,9 @@ DependencyThresholdV1 {
 Rules (persists the dependency action required by `Platform_22` §6.1.9):
 
 - `dependency_ref` is the typed canonical versioned/topology authority reference above.
-- `activation` is required and MUST satisfy `DependencyActivationV1` (at least one activation criterion).
+- `activation` is required and MUST satisfy `DependencyActivationV1` (at least one activation criterion; required explicit `combine ∈ {ANY, ALL}`; `ALL` forbidden when only one criterion is enabled).
 - `action` is required and immutable within a policy version; changing `action` or `activation` requires a new policy version.
-- Exact SUPPRESS / DEFER / ANNOTATE evaluation semantics are owned by `Platform_22` §6.1.9 and MUST NOT be reimplemented as writer-invented defaults.
+- Exact SUPPRESS / DEFER / ANNOTATE evaluation semantics are owned by `Platform_22` §6.1.9 and MUST NOT be reimplemented as writer-invented defaults. `combine` only decides whether activation is TRUE.
 - Stale/unqualified/No-Data dependency evidence ⇒ `UNKNOWN` / no dependency action; stale topology is never treated as proof of child health/failure and cannot activate `SUPPRESS`/`DEFER`.
 - Dependency disappearance/revocation removes the dependency effect reversibly; historical child evidence is never deleted by dependency action alone.
 
@@ -1721,7 +1745,7 @@ Rules (single business-time representation + configurable DST choices required b
 | Threshold parameters | `ComparisonV1` / family-specific fields (`fire`/`clear`, counts, deviations, calendars, children, group aggregation) | See variants above |
 | Clear / reset / hysteresis | `StaticThresholdV1.clear`; `DurationThresholdV1.unknown_behavior` + `unknown_grace_seconds`; `ConsecutiveThresholdV1.unknown_behavior`; optional root `recovery_condition` | No hidden numeric hysteresis default |
 | Missing / stale behavior | `MissingThresholdV1.*`; `BaselineThresholdV1.stale_behavior` + `fallback_policy_ref`; RATE/STATIC UNKNOWN on unqualified input | Device Down coercion **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** |
-| Dependency behavior | `DependencyThresholdV1.action` + `DependencyThresholdV1.activation` (+ `dependency_ref`) | `SUPPRESS`/`DEFER`/`ANNOTATE` immutable per policy version; stale/UNKNOWN ⇒ no action |
+| Dependency behavior | `DependencyThresholdV1.action` + `DependencyThresholdV1.activation` (+ `dependency_ref`) | `SUPPRESS`/`DEFER`/`ANNOTATE` immutable per policy version; `activation.combine ∈ {ANY, ALL}` required (no hidden default); stale/UNKNOWN ⇒ no action |
 | Business-time applicability | `BusinessTimeThresholdV1.calendar_ref` / `applicability` / `gap_behavior` / `fold_behavior` ONLY | No root `business_calendar_ref`; gap/fold stored explicitly |
 | Blackout / freeze identity | `BusinessTimeThresholdV1.blackout_calendar_ref` | Optional exact same-tenant calendar version; V1 behavior `HOLD_STATE` **FIXED BY EVALUATION CONTRACT — NOT CONFIGURABLE IN V1** |
 | Version authority | enclosing `alert_policy_version (policy_id, version_no)`; `BaselineRefV1`; `PolicyVersionRefV1`; `CalendarRefV1`; `DependencyRefV1.relationship_id` | Immutable references only |
@@ -1747,7 +1771,7 @@ The same server-side validator used by **OP-POLICY-CREATE**, **OP-POLICY-VERSION
 - calendar/version existence and immutable reference validity (`CalendarRefV1`, `BaselineRefV1`, `PolicyVersionRefV1`, `DependencyRefV1`);
 - **root `business_calendar_ref` is not a valid V1 field** and MUST fail as an unknown/forbidden field; no alternate calendar representation may exist elsewhere on `AlertPolicyDefinitionV1` outside `BusinessTimeThresholdV1`;
 - `BUSINESS_TIME` requires `calendar_ref`, required `gap_behavior`/`fold_behavior`, and nullable `blackout_calendar_ref`; when `blackout_calendar_ref` is present it MUST resolve same-tenant to an exact immutable calendar version; unknown/missing calendar references fail validation (`UNKNOWN` at evaluation — never silent always-on / silent “no blackout”);
-- `DEPENDENCY` requires `dependency_ref`, `activation` (`DependencyActivationV1` with ≥1 activation criterion) and immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}`;
+- `DEPENDENCY` requires `dependency_ref`, `activation` (`DependencyActivationV1` with ≥1 activation criterion, required `combine ∈ {ANY, ALL}`, and `ALL` only when ≥2 criteria are enabled) and immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}`;
 - unknown fields in schema V1 MUST fail validation unless a documented compatibility policy explicitly allows additive fields — never silently ignore an unknown policy field that could change intended behavior;
 - typed field/path errors; **never** silently normalize or rewrite an invalid definition.
 

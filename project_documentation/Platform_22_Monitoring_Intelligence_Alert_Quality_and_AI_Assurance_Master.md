@@ -306,7 +306,19 @@ A dependency threshold binds evaluation to qualified dependency/topology authori
 
 Stale, No Data, low-confidence or otherwise unqualified dependency evidence remains `UNKNOWN` / **no dependency action**. Dependency evidence never proves child technical health/failure by itself. Child technical evidence remains independently qualified.
 
-**Activation** (`DependencyActivationV1`) freezes when the dependency action applies: `semantic_states: SemanticStateV1[]` and/or `maintenance_active: boolean`. `SemanticStateV1` MUST reuse the existing canonical Platform semantic-state vocabulary (`Platform_22` §5 / `alert_current.semantic_state`); do not create another state model. At least one activation criterion MUST be present. The dependency `action` is immutable within a policy version; action/activation changes require a new policy version. Dependency disappearance/revocation removes the effect reversibly.
+**Activation** (`DependencyActivationV1`) freezes when the dependency action applies and requires an explicit combination operator. Persisted fields: `semantic_states: SemanticStateV1[]`, `maintenance_active: boolean`, and required `combine: ANY | ALL`. `SemanticStateV1` MUST reuse the existing canonical Platform semantic-state vocabulary (`Platform_22` §5 / `alert_current.semantic_state`); do not create another state model.
+
+Criterion enablement and match:
+
+- semantic-state criterion ENABLED iff `semantic_states` is non-empty; MATCHES iff current qualified dependency semantic state ∈ `semantic_states`;
+- maintenance criterion ENABLED iff `maintenance_active = true`; MATCHES iff the dependency is under qualified active maintenance per the authoritative maintenance contract;
+- at least one criterion MUST be enabled;
+- `combine=ANY` ⇒ activation TRUE when ≥1 ENABLED criterion matches;
+- `combine=ALL` ⇒ activation TRUE only when every ENABLED criterion matches;
+- if only one criterion is enabled, `combine` MUST be `ANY` (`ALL` with one enabled criterion is invalid);
+- no hidden/default combination behavior is permitted.
+
+Quality gate precedes combination: stale, missing, low-confidence or unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action and cannot activate `SUPPRESS`/`DEFER`. The combination operator determines only whether activation is TRUE; once TRUE, immutable `action ∈ {SUPPRESS, DEFER, ANNOTATE}` governs behavior below. The dependency `action` is immutable within a policy version; action/activation changes require a new policy version. Dependency disappearance/revocation removes the effect reversibly. Finite ANY/ALL fixtures are owned with the schema in `Platform_17` `DependencyActivationV1`.
 
 ##### SUPPRESS
 

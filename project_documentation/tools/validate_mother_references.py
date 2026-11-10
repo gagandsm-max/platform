@@ -1882,6 +1882,91 @@ class MotherReferenceValidator:
             if "NOT DISPATCHABLE" not in row:
                 self.fail("BUILD-045 must retain NOT DISPATCHABLE until gate PASS")
 
+        # BUILD-051 first UDP profile + GoFlow2 admission gate (docs only).
+        # Maturity must remain NOT_IMPLEMENTED; profile freeze is not Partial.
+        for row in (summary_row("BUILD-051"), ledger_row("051")):
+            if not row:
+                continue
+            for required in (
+                "FLOW_UDP_P1_PROFILE_V1",
+                "FLOW_PARSER_DEPENDENCY_ADMISSION_GATE",
+                "NOT_IMPLEMENTED",
+                "SPECIFIED_NOT_IMPLEMENTED",
+            ):
+                if required not in row:
+                    self.fail(
+                        f"BUILD-051 must retain {required!r} in summary/ledger "
+                        "(first UDP profile freeze; GoFlow2 admission; "
+                        "source reality NOT_IMPLEMENTED)"
+                    )
+            for banned in ("Partial", "Next lane"):
+                maturity = maturity_cell(row)
+                if banned == "Partial":
+                    if maturity == "Partial" or maturity.startswith("Partial;"):
+                        self.fail(
+                            "BUILD-051 must not promote documentation freeze to "
+                            f"Partial maturity ({maturity!r})"
+                        )
+                elif banned in maturity:
+                    self.fail(
+                        f"BUILD-051 must not retain overstated maturity token "
+                        f"{banned!r}"
+                    )
+
+    def validate_dependency_activation_combine_operator(self) -> None:
+        """Pin DependencyActivationV1 explicit ANY|ALL combination operator.
+
+        Skipped when Platform_17 / Platform_22 are absent (minimal fixtures).
+        """
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        p22_path = (
+            self.docs_root
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        )
+        if not p17_path.is_file() or not p22_path.is_file():
+            return
+        p17 = p17_path.read_text(encoding="utf-8")
+        p22 = p22_path.read_text(encoding="utf-8")
+        if "###### `DependencyActivationV1`" not in p17:
+            return
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for required in (
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "At least one criterion MUST be enabled",
+            "No hidden/default combination behavior is permitted",
+            "ALL` with only one enabled criterion is invalid",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN`",
+        ):
+            if required not in act:
+                self.fail(
+                    "Platform_17 DependencyActivationV1 must freeze "
+                    f"combination operator contract containing {required!r}"
+                )
+        body_dep = p22[
+            p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")
+        ]
+        for required in (
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
+        ):
+            if required not in body_dep:
+                self.fail(
+                    "Platform_22 §6.1.9 must freeze DependencyActivation "
+                    f"ANY|ALL semantics containing {required!r}"
+                )
+
     def validate_agent_ingress_pending_reservation_safety(self) -> None:
         """Pin Platform_17 §7.1 Agent-ingress pending-reservation invariant.
 
@@ -2052,6 +2137,7 @@ class MotherReferenceValidator:
         self.validate_normalized_rtm_licence_grace(paths)
         self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)
         self.validate_network_flow_source_reality_status()
+        self.validate_dependency_activation_combine_operator()
         self.validate_agent_ingress_pending_reservation_safety()
         return self.errors
 

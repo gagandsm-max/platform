@@ -3268,7 +3268,14 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         for needle in (
             "semantic_states: SemanticStateV1[]",
             "maintenance_active: boolean",
-            "At least one activation criterion MUST be present",
+            "combine: ANY | ALL",
+            "At least one criterion MUST be enabled",
+            "combine=ANY",
+            "combine=ALL",
+            "No hidden/default combination behavior is permitted",
+            "ALL` with only one enabled criterion is invalid",
+            "Finite activation fixtures",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN`",
         ):
             self.assertIn(needle, act, needle)
         self.assertIn("SemanticStateV1", p17)
@@ -3299,6 +3306,11 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             "cannot independently suppress or clear the child alert",
             "No Data / stale graph evidence cannot activate `SUPPRESS`/`DEFER`",
             "current `as_of` graph authority",
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
         ):
             self.assertIn(needle, body_dep, needle)
 
@@ -3778,6 +3790,187 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertTrue(validator.errors, "expected pending-reservation failures")
             self.assertIn("pending-reservation", joined.lower())
             self.assertIn("MUST NOT", joined)
+
+    def test_100_dependency_activation_any_all_combine(self) -> None:
+        """DependencyActivationV1 MUST persist explicit ANY|ALL combination."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        p22 = (
+            docs
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        ).read_text(encoding="utf-8")
+
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for needle in (
+            "combine: ANY | ALL",
+            "The semantic-state criterion is ENABLED when `semantic_states` is non-empty",
+            "The maintenance criterion is ENABLED when `maintenance_active = true`",
+            "At least one criterion MUST be enabled",
+            "`ANY` — activation is TRUE when at least one ENABLED criterion matches",
+            "`ALL` — activation is TRUE only when every ENABLED criterion matches",
+            "If only one criterion is enabled, `combine` MUST be `ANY`",
+            "ALL` with only one enabled criterion is invalid",
+            "No hidden/default combination behavior is permitted",
+            "both criteria enabled and both match ⇒ TRUE for `ANY` and for `ALL`",
+            "`combine=ALL`, both enabled, only one matches ⇒ FALSE",
+            "`combine=ALL` configured with only one enabled criterion ⇒ validation failure",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN` / no dependency action",
+            "combination operator determines only whether dependency activation is TRUE",
+        ):
+            self.assertIn(needle, act, needle)
+
+        body_dep = p22[
+            p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")
+        ]
+        for needle in (
+            "combine: ANY | ALL",
+            "combine=ANY` ⇒ activation TRUE when ≥1 ENABLED criterion matches",
+            "combine=ALL` ⇒ activation TRUE only when every ENABLED criterion matches",
+            "if only one criterion is enabled, `combine` MUST be `ANY`",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
+            "##### SUPPRESS",
+            "##### DEFER",
+            "##### ANNOTATE",
+        ):
+            self.assertIn(needle, body_dep, needle)
+
+        validator = MotherReferenceValidator(docs, repo_root=docs.parent)
+        validator.errors = []
+        validator.validate_dependency_activation_combine_operator()
+        self.assertEqual(validator.errors, [])
+
+    def test_101_build_051_flow_udp_profile_freeze(self) -> None:
+        """BUILD-051 first UDP profile/gate/slices remain NOT_IMPLEMENTED."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+        p10 = (
+            docs / "Platform_10_Protocol_Security_Connector_Master.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        p07 = (docs / "Platform_07_OSS_Catalog.md").read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+
+        summary = next(
+            line
+            for line in register.splitlines()
+            if line.startswith("| BUILD-051 |")
+        )
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = next(
+            line for line in section.splitlines() if line.startswith("| 051 |")
+        )
+
+        for row in (summary, ledger):
+            self.assertIn("FLOW_UDP_P1_PROFILE_V1", row)
+            self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", row)
+            self.assertIn("NOT_IMPLEMENTED", row)
+            self.assertIn("SPECIFIED_NOT_IMPLEMENTED", row)
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            maturity = cells[4] if cells[0].startswith("BUILD-") else cells[-1]
+            self.assertEqual(maturity, "NOT_IMPLEMENTED", maturity)
+            self.assertNotIn("Partial", maturity)
+
+        for needle in (
+            "sensor/internal/protocol/flow/",
+            "NetFlow v5",
+            "NetFlow v9",
+            "IPFIX v10",
+            "sFlow v5",
+            "S1 protocol-neutral",
+            "S2 NetFlow v5",
+            "S3 NetFlow v9",
+            "S4 IPFIX v10 UDP",
+            "S5 sFlow v5",
+            "S6 receiver/admission shell",
+            "S6 MUST NOT bypass BUILD-022/023",
+            "template_refresh_timeout_seconds > 0",
+            "NO_BUFFER_UNTEMPLATED_DATA",
+            "MALFORMED_PACKET",
+            "TEMPLATE_MISSING",
+            "TEMPLATE_EXPIRED",
+            "SEQUENCE_GAP",
+            "EXPORTER_UNBOUND",
+            "EXPORTER_AMBIGUOUS",
+            "never Device Down",
+            "do not delete previously durable authoritative Flow facts",
+            "revert external parser dependency to prior admitted version",
+        ):
+            self.assertIn(needle, ledger, needle)
+
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p12)
+        self.assertIn("dependency admission only", p12)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p07)
+        self.assertIn("FLOW_UDP_P1_PROFILE_V1", p10)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p10)
+        self.assertIn("NO_BUFFER_UNTEMPLATED_DATA", p10)
+        combined_lower = (ledger + p10).lower()
+        self.assertIn("sflow flow vs counter", combined_lower)
+        # IPFIX sequence distinction + restart/expiry ownership
+        self.assertIn("record-based", combined_lower)
+        self.assertIn("EMPTY", ledger)
+        self.assertIn("FLOW_UDP_P1_PROFILE_V1", p17)
+        self.assertIn("FLOW_PARSER_DEPENDENCY_ADMISSION_GATE", p17)
+        self.assertIn("template_refresh_timeout_seconds > 0", p17)
+        self.assertIn("NO_BUFFER_UNTEMPLATED_DATA", p17)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_network_flow_source_reality_status()
+        self.assertEqual(validator.errors, [])
+
+    def test_101b_build_051_must_remain_not_implemented(self) -> None:
+        """Promoting BUILD-051 to Partial after profile freeze must fail."""
+        docs = Path(__file__).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-043 | Interface | ifIndex | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-044 | Traps | traps | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-045 | gNMI | connector | DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-051 | Flow | FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | 020 | Partial | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 043 | Interface | Core | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 044 | Traps | Sensor | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 045 | gNMI; **NOT DISPATCHABLE until `DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE` PASS** | TARGET | Gate | D | exit | rb | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED |\n"
+                "| 051 | Flow FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | Sensor | delta | D | exit | rb | Partial |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_network_flow_source_reality_status()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected BUILD-051 maturity failure")
+            self.assertIn("BUILD-051", joined)
+            self.assertIn("Partial", joined)
 
 
 if __name__ == "__main__":
