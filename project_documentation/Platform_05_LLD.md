@@ -3409,3 +3409,55 @@ No physical schema in Phase 2 may assume full native APM span retention or full 
 Phase-2.5 implementation design SHALL explicitly bound per-tenant trace/profile/packet cardinality and ingest rate, sampling/capture policies and backpressure, durable storage classes and retention, PII/secret/payload redaction, raw-packet access and chain-of-custody, TLS-key handling where decryption is enabled, collector/agent failure semantics, service identity reconciliation, replay/idempotency and upgrade compatibility of instrumentation/capture components.
 
 No LLD may assume unlimited full-fidelity traces, unlimited PCAP retention, unrestricted payload visibility, or mandatory TLS decryption.
+
+## 97. v3.3.0 database/storage audit adjudication — 2026-10-30
+
+**Authority and maturity:** ARCH-DELEGATED clarification of existing `REQ-DATA-001..015`, `PRD-EGC-006`, SNMP exact-counter, tenant-isolation and resilience contracts. PostgreSQL remains transactional authority; ClickHouse remains telemetry/history; Kafka remains the internal bus; Valkey remains reconstructable ephemeral state. This section does not select new physical DDL, reserve a migration number, add OSS, allocate a BUILD, or upgrade SPECIFIED to IMPLEMENTED/TESTED/CERTIFIED.
+
+### 97.1 PostgreSQL query/index and JSONB policy
+
+- Design indexes from measured tenant-scoped access patterns, cardinality, selectivity, `EXPLAIN (ANALYZE, BUFFERS)` and write/storage overhead. Review high-churn identifiers, relationships, alerts and audit lookups; a foreign-key declaration does not alone justify an additional index.
+- Check existing primary-key, unique and composite index coverage before adding indexes. Do not duplicate automatically created unique/PK indexes (including `uq_identifier_resolution`; see §89). Query/index changes require forward-compatible migrations, lock/write-amplification budgets, rollback strategy and benchmark evidence. `CREATE INDEX CONCURRENTLY` is a migration option where operationally appropriate, not a universal rule.
+- Bound/validate dynamic `JSONB` attributes and immutable policy payloads. Frequently filtered/joined fields may receive typed relational columns, narrow expression indexes or appropriate GIN indexes only when actual query plans justify them. Do not mandate universal generated columns, rewrite existing payloads, or assume arbitrary JSONB predicates run on the alert hot path without evidence.
+- Tenant-owned relationships must prove tenant-consistent identity/foreign-key constraints and authorized query scoping; generic globally unique IDs alone do not excuse a cross-tenant reference.
+
+### 97.2 ClickHouse retention and controlled deletion
+
+- Keep time-oriented, bounded-cardinality partitions, workload-benchmarked sorting keys, configured per-class retention/rollups, the mandatory 80% guard and legal-hold protections. No fixed universal 90-day TTL, tenant-per-partition, device-per-partition or hash-salted layout is authorized by this audit.
+- A tenant/entity-scoped erasure/offboarding request must determine eligible data classes, affected time ranges, source/derived copies, active replicas, archives and backup expiry/hold exceptions before applying a deletion mechanism. A time-partition `DROP PARTITION` is forbidden where it would also remove another tenant's or protected records. Selective deletes/mutations are permitted only with bounded resource/admission controls, query-visibility versus physical-erasure semantics, progress/retry/verification and audit evidence.
+- Ordinary TTL may reclaim an entire eligible part efficiently, but must not be represented as an immediate legal erasure guarantee. Legal hold and offboarding must reconcile TTL/purge choices with `Platform_21` §4.6; no mandatory separate database/table for each hold is created.
+
+### 97.3 MSP database defence in depth
+
+- Phase 1 remains tenant-aware single-customer; Phase 1.5 MSP release requires independently negative-tested tenant isolation across SQL, history queries, exports, backups/restore paths and privileged operations.
+- PostgreSQL RLS is an admissible additional control on selected tenant-owned tables after validating application roles, owner/`BYPASSRLS` exemptions, appropriate permissive/restrictive `USING`/`WITH CHECK` policies, transaction-bound tenant context and pooled-connection reuse. It does not replace API authorization, tenant-consistent constraints or independent tests, and is not declared blanket-installed by this design note.
+- ClickHouse sort order and partition keys are **not** security boundaries. All customer query paths require server-derived tenant/resource authorization and fail-closed scoping; read-only database row policies may add defence in depth when supported and tested for the exact engine/version and role model. No direct unrestricted production DB access is admitted.
+
+### 97.4 Valkey unavailability classes
+
+- Reconstructable query/derived caches may miss or be bypassed to the authoritative PostgreSQL/ClickHouse path subject to bounded concurrency, timeouts, query budgets and backpressure; cache failure is visible as Core degraded health, not silently reported as successful cache operation.
+- Authentication/revocation, security rate limits, policy enforcement, critical deduplication, durable job ownership and fencing must retain their authoritative source and safety invariants. If an equivalent verified safe fallback is unavailable, the sensitive action fails closed or returns a stable degraded/unavailable outcome. Valkey locks/leases alone never establish HA leadership or permanent fencing authority.
+- Cache reconstruction time is measured per certified load profile; the audit's arbitrary 30–60-second guarantee is rejected. Reconnect/circuit recovery must not trigger a thundering herd or unbounded replay.
+
+### 97.5 Counter-rate state and restart/reassignment
+
+- The exact unsigned raw-counter path and §12.4 reset/wrap/discontinuity contract remain authoritative. Rate-state identity includes tenant, canonical entity/interface, source OID/metric, counter width, source/Sensor assignment epoch and sample time/identity as applicable. Reject duplicate, stale, non-monotonic-time or cross-epoch baselines before rate derivation.
+- A bounded previous-sample cache/checkpoint is an implementation choice, not a new datastore authority. After restart, failover, source reassignment, eviction or unprovable wrap, the first trustworthy sample establishes a baseline; the affected interval is `UNKNOWN`/`DEGRADED`, not zero, a fabricated interpolation or a rate spike. A later valid pair resumes computation. Optional recovery from retained exact raw facts must respect bounded query cost and source identity.
+- Counter32/Counter64 arithmetic is performed in exact integer range prior to derived floating-point rate; legitimate wraps require evidence against reset/discontinuity and plausibility relative to elapsed time and certified interface capacity. Do not infer every decrease to be a wrap.
+- Where Phase-1 network interfaces expose traffic/utilization, correct derived-rate behaviour is a Phase-1 release gate, not a silent Phase-1.5 deferment. Existing `Platform_14` SNMP/counter gates remain mandatory.
+
+### 97.6 Design-owned negative-acceptance scenarios (existing quality gate ownership)
+
+These scenarios refine the existing design without modifying the independently owned `Platform_14` quality master. Actual release evidence stays with the existing BUILD, Issue #92 and `Platform_14` gates; this section does not certify tests or mandate speculative schema implementation.
+
+1. **PostgreSQL/query safety:** Compare representative tenant-scoped `EXPLAIN (ANALYZE, BUFFERS)`, p95/p99, write/locking and storage before/after any candidate index, including JSONB, composite and FK paths. Detect redundant PK/UNIQUE indexes and prove online migration, rollback and lock budgets.
+2. **Tenant isolation:** Negatively test absent/wrong/forged tenant context, cross-tenant foreign keys/joins/exports, owner/privileged roles, background jobs, pooled-connection reuse, backup/restore and unauthorized query paths. If RLS or ClickHouse row policies are chosen, test the precise role, `USING`/`WITH CHECK`, transaction-scoping and engine behavior. Phase-1.5 MSP certification remains separate.
+3. **ClickHouse deletion/hold:** Place two tenants and legal-held records in the same time partition; selectively erase one eligible scope without disturbing unrelated/held records. Record query visibility versus verified physical erasure or pending expiry, replica/rollup/archive/backup treatment, bounded mutation load, 80% safety, progress and audit.
+4. **Valkey degradation:** Fault-inject timeout, restart and partition for ordinary cache, session/revocation, admission/rate limits, dedup/leases and HA-sensitive paths. Prove bounded backend fallback solely where safe, fail-closed sensitive operations, no dual Active, observable degradation, no replay/rebuild stampede.
+5. **Counter-rate discontinuity:** Exercise exact raw values above `2^53`, Counter32 wrap and ambiguous Counter64 decrease, stale/out-of-order/duplicate samples, reset/reboot, nonpositive/irregular intervals, Sensor reassignment, restart, eviction and failover. Preserve exact raw facts and return a proven rate or `UNKNOWN`/`DEGRADED`; no fabricated zero/spike.
+
+For each applicable scenario record commit, fixture, workload, measured outputs, failure reproduction and separate SPECIFIED/IMPLEMENTED/TESTED/BENCHMARKED/CERTIFIED status. Do not claim Phase-1.5 MSP or HA certification from standalone Phase-1 testing.
+
+**Implementation gate:** Inspect actual migrations, execution plans, ClickHouse DDL, Valkey call sites and Counter64 runtime before classifying a speculative audit scenario as a confirmed defect. Preserve already-fixed PR #81/#84 semantics and certification-envelope boundaries. See `Platform_12` §28 and §97.6 above; existing `Platform_14` quality gates remain authoritative.
+
+---
