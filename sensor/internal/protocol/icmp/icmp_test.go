@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net"
+	"runtime"
 	"syscall"
 	"testing"
 	"time"
@@ -145,6 +146,156 @@ func TestFactoryFailureClassification(t *testing.T) {
 	_, err := c.Collect(context.Background(), r)
 	if CodeOf(err) != CodePermission {
 		t.Fatalf("%v", err)
+	}
+}
+
+func TestVerifyLocalCapabilityPermissionAndNoProbe(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	var opens, probes, closes int
+	c.factory = func(r Request) (probeSession, error) {
+		opens++
+		if r.IPVersion == 6 {
+			return nil, syscall.EAFNOSUPPORT
+		}
+		return nil, syscall.EPERM
+	}
+	err := c.VerifyLocalCapability(context.Background())
+	if CodeOf(err) != CodePermission {
+		t.Fatalf("err=%v", err)
+	}
+	if opens != 1 {
+		t.Fatalf("opens=%d want 1 (IPv4 fail before IPv6)", opens)
+	}
+	if probes != 0 || closes != 0 {
+		t.Fatalf("probes=%d closes=%d", probes, closes)
+	}
+
+	session := &fakeSession{}
+	opens, probes, closes = 0, 0, 0
+	c.factory = func(r Request) (probeSession, error) {
+		opens++
+		if r.IPVersion == 6 {
+			return nil, syscall.EAFNOSUPPORT
+		}
+		return session, nil
+	}
+	if err := c.VerifyLocalCapability(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if opens != 2 || session.calls != 0 || session.closed != 1 {
+		t.Fatalf("opens=%d probes=%d closed=%d", opens, session.calls, session.closed)
+	}
+}
+
+func TestVerifyLocalCapabilityProtocolUnsupported(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) {
+		return nil, newError(CodeProtocol, "ping socket Echo identifier semantics unsupported", nil, false)
+	}
+	if err := c.VerifyLocalCapability(context.Background()); CodeOf(err) != CodeProtocol {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestVerifyLocalCapabilityRespectsContext(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) {
+		time.Sleep(50 * time.Millisecond)
+		return &fakeSession{}, nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	err := c.VerifyLocalCapability(ctx)
+	if CodeOf(err) != CodeDeadline {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestVerifyLocalCapabilityCancelDoesNotStrandGoroutines(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	factoryCalls := 0
+	c.factory = func(Request) (probeSession, error) {
+		factoryCalls++
+		time.Sleep(50 * time.Millisecond)
+		return &fakeSession{}, nil
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	before := runtime.NumGoroutine()
+	err := c.VerifyLocalCapability(ctx)
+	if CodeOf(err) != CodeCancelled {
+		t.Fatalf("%v", err)
+	}
+	if factoryCalls != 0 {
+		t.Fatal("cancelled context must not open ping sockets")
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= before+1 {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("goroutines leaked: before=%d after=%d", before, runtime.NumGoroutine())
+}
+
+func TestVerifyLocalCapabilityDeadlineWaitsFactoryWithoutDetachedCleanup(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) {
+		time.Sleep(40 * time.Millisecond)
+		return &fakeSession{}, nil
+	}
+	before := runtime.NumGoroutine()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Millisecond)
+	defer cancel()
+	err := c.VerifyLocalCapability(ctx)
+	if CodeOf(err) != CodeDeadline {
+		t.Fatalf("%v", err)
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if runtime.NumGoroutine() <= before+1 {
+			return
+		}
+		runtime.Gosched()
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatalf("goroutines leaked: before=%d after=%d", before, runtime.NumGoroutine())
+}
+
+func TestUnsupportedIPFamilyIsPermanentNotTransient(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(r Request) (probeSession, error) {
+		if r.IPVersion == 6 {
+			return nil, syscall.EAFNOSUPPORT
+		}
+		return &fakeSession{results: []struct {
+			rtt time.Duration
+			err error
+		}{{time.Millisecond, nil}}}, nil
+	}
+	if err := c.VerifyLocalCapability(context.Background()); err != nil {
+		t.Fatalf("startup skip IPv6: %v", err)
+	}
+	r := Request{Target: "2001:db8::1", IPVersion: 6, Samples: 1, Timeout: 10 * time.Millisecond, PayloadBytes: 1, ExecutionTimeout: 100 * time.Millisecond}
+	_, err := c.Collect(context.Background(), r)
+	if CodeOf(err) != CodeTransport || IsTransient(err) {
+		t.Fatalf("unsupported IPv6 must be permanent transport capability gap, got %v transient=%v", err, IsTransient(err))
+	}
+	r4 := Request{Target: "192.0.2.1", IPVersion: 4, Samples: 1, Timeout: 10 * time.Millisecond, PayloadBytes: 1, ExecutionTimeout: 100 * time.Millisecond}
+	if _, err := c.Collect(context.Background(), r4); err != nil {
+		t.Fatalf("IPv4 must remain usable: %v", err)
+	}
+}
+
+func TestIPv4UnsupportedFamilyIsPermanent(t *testing.T) {
+	c, _ := NewCollector(testLimits())
+	c.factory = func(Request) (probeSession, error) { return nil, syscall.EPROTONOSUPPORT }
+	r := Request{Target: "192.0.2.1", IPVersion: 4, Samples: 1, Timeout: 10 * time.Millisecond, PayloadBytes: 1, ExecutionTimeout: 100 * time.Millisecond}
+	_, err := c.Collect(context.Background(), r)
+	if CodeOf(err) != CodeTransport || IsTransient(err) {
+		t.Fatalf("%v transient=%v", err, IsTransient(err))
 	}
 }
 

@@ -29,14 +29,15 @@ import (
 )
 
 // newProductionScheduler constructs the single production-owned scheduler.
-// Slice 6 registers zero JobKind routes so the empty ExecutorRegistry remains
-// fail-closed for any accidentally admitted work.
-func newProductionScheduler(rt config.RuntimeConfig, logger *slog.Logger) (*scheduler.Scheduler, error) {
+// The caller supplies the registry shared with the Universal Sensor runtime.
+func newProductionScheduler(rt config.RuntimeConfig, registry *sensorruntime.ExecutorRegistry, logger *slog.Logger) (*scheduler.Scheduler, error) {
+	if registry == nil {
+		return nil, fmt.Errorf("SENSOR_RUNTIME_INVALID_CONFIG: executor registry is required")
+	}
 	schedCfg, err := config.ToSchedulerConfig(rt.Scheduler)
 	if err != nil {
 		return nil, err
 	}
-	registry := sensorruntime.NewExecutorRegistry()
 	return scheduler.New(schedCfg, registry, scheduler.WithLogger(logger))
 }
 
@@ -163,13 +164,14 @@ func main() {
 		os.Exit(1)
 	}
 
-	prodScheduler, err := newProductionScheduler(rt, logger)
+	// NETWORK Runtime owns the single scheduler and real protocol routes.
+	// Other roles retain legacy composition; BUILD-021 owns recurring admission.
+	bootstrap, err := startProductionBootstrap(context.Background(), rt, sink, logger)
 	if err != nil {
-		logger.Error("Failed to initialize production scheduler",
-			"error_code", "SENSOR_SCHEDULER_INIT_FAILED",
-			"safe_context", map[string]any{"reason_class": "initialization_failed"})
+		logger.Error("Failed to start Sensor runtime", "error_code", "SENSOR_RUNTIME_START_FAILED", "safe_context", map[string]any{"reason_class": "initialization_failed"})
 		os.Exit(1)
 	}
+	prodScheduler := bootstrap.Scheduler
 
 	controlReconciler, err := control.NewReconciler(client, controlStore, rt, runtimeState, logger, controlMetrics)
 	if err != nil {
@@ -183,6 +185,9 @@ func main() {
 		health.WithIdentity(sensorVersion, serviceInstanceID))
 	healthServer.SetScheduler(prodScheduler)
 	healthServer.SetControl(controlStatus)
+	if bootstrap.Runtime != nil {
+		healthServer.SetRuntime(runtimeHealthAdapter{rt: bootstrap.Runtime})
+	}
 	go func() {
 		if err := healthServer.Start(); err != nil {
 			logger.Error("Health server encountered error",
@@ -344,9 +349,11 @@ func main() {
 		}
 	}
 
-	if err := prodScheduler.Shutdown(context.Background()); err != nil {
-		logger.Warn("Production scheduler shutdown error",
-			"error_code", "SENSOR_SCHEDULER_SHUTDOWN_FAILED",
+	runtimeShutdownCtx, runtimeShutdownCancel := context.WithTimeout(context.Background(), rt.Scheduler.ShutdownGracePeriod)
+	defer runtimeShutdownCancel()
+	if err := bootstrap.shutdown(runtimeShutdownCtx); err != nil {
+		logger.Warn("Sensor runtime shutdown error",
+			"error_code", "SENSOR_RUNTIME_SHUTDOWN_FAILED",
 			"safe_context", map[string]any{"reason_class": "shutdown_failed"})
 	}
 

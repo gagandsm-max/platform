@@ -108,7 +108,7 @@ func TestApplyLogLevelControlsStartupLogger(t *testing.T) {
 
 func TestNewProductionSchedulerInitialSnapshot(t *testing.T) {
 	rt := testRuntime()
-	sched, err := newProductionScheduler(rt, slog.Default())
+	sched, err := newProductionScheduler(rt, sensorruntime.NewExecutorRegistry(), slog.Default())
 	if err != nil {
 		t.Fatalf("newProductionScheduler: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestNewProductionSchedulerInitialSnapshot(t *testing.T) {
 
 func TestEmptyRegistryFailsClosedWithoutRetry(t *testing.T) {
 	rt := testRuntime()
-	sched, err := newProductionScheduler(rt, slog.Default())
+	sched, err := newProductionScheduler(rt, sensorruntime.NewExecutorRegistry(), slog.Default())
 	if err != nil {
 		t.Fatalf("newProductionScheduler: %v", err)
 	}
@@ -197,7 +197,7 @@ func TestProductionSchedulerIdleShutdownWithinConfiguredGrace(t *testing.T) {
 	rt := testRuntime()
 	rt.Scheduler.ShutdownGracePeriod = 500 * time.Millisecond
 
-	sched, err := newProductionScheduler(rt, slog.Default())
+	sched, err := newProductionScheduler(rt, sensorruntime.NewExecutorRegistry(), slog.Default())
 	if err != nil {
 		t.Fatalf("newProductionScheduler: %v", err)
 	}
