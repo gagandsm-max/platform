@@ -1913,6 +1913,161 @@ class MotherReferenceValidator:
                         f"{banned!r}"
                     )
 
+        self.validate_sflow_v5_datagram_sequence_contract()
+
+    def validate_sflow_v5_datagram_sequence_contract(self) -> None:
+        """Pin BUILD-051 S5 sFlow datagram sequence / discontinuity contract.
+
+        Detailed semantics live in Platform_10; Build Register cross-references
+        S5 fixtures. BUILD-051 maturity must remain NOT_IMPLEMENTED.
+        Skipped when Platform_10 / Build Register are absent (minimal fixtures).
+        """
+        p10_path = (
+            self.docs_root
+            / "Platform_10_Protocol_Security_Connector_Master.md"
+        )
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not p10_path.is_file() or not register_path.is_file():
+            return
+
+        p10 = p10_path.read_text(encoding="utf-8")
+        register = register_path.read_text(encoding="utf-8")
+
+        if "sFlow v5 datagram sequence" not in p10:
+            # Minimal fixtures without the Flow handoff section.
+            if "FLOW_UDP_P1_PROFILE_V1" not in p10 and "BUILD-051" not in register:
+                return
+            self.fail(
+                "Platform_10 must own sFlow v5 datagram sequence / gap / "
+                "duplicate / reorder / restart semantics for BUILD-051 S5"
+            )
+
+        required_p10 = (
+            "Primary loss authority = datagram sequence",
+            "sFlow datagram `sequence_number`",
+            "Do **NOT** scope only by source IP",
+            "Sample sequence numbers are supplemental",
+            "MUST NOT be interpreted as sequence-per-`source_id`",
+            "UINT32 serial arithmetic",
+            "distance = (C - P) mod 2^32",
+            "DUPLICATE_DATAGRAM",
+            "SEQUENCE_COLLISION",
+            "SEQUENCE_GAP",
+            "missing_datagrams = distance - 1",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "UINT32 wrap",
+            "0xffffffff → 0",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "do not calculate datagram loss across the boundary",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "Duplicate and reorder do not become loss",
+            "Stream epoch state",
+            "first valid datagram establishes a fresh collector-side baseline",
+            "Do not silently persist sequence state by exporter IP alone",
+            "sample family (`FLOW` or `COUNTER`)",
+            "SAMPLE_SEQUENCE_GAP",
+            "SAMPLE_DUPLICATE",
+            "SAMPLE_OUT_OF_ORDER",
+            "MUST NOT change primary datagram loss counts",
+            "sub_agent_id",
+            "malformed packet does not mutate sequence high-water",
+            "NOT_IMPLEMENTED",
+        )
+        for needle in required_p10:
+            if needle not in p10:
+                self.fail(
+                    "Platform_10 sFlow v5 datagram sequence contract missing "
+                    f"{needle!r}"
+                )
+
+        # Build Register must cross-reference S5 ownership without promoting
+        # maturity, and retain the primary-authority / wrap / epoch pins.
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = ""
+        for line in section.splitlines():
+            if line.startswith("| 051 |"):
+                ledger = line
+                break
+        if not ledger:
+            self.fail("BUILD-051 ledger row missing for sFlow sequence contract")
+            return
+
+        for required in (
+            "NOT_IMPLEMENTED",
+            "S5 sFlow v5",
+            "datagram-sequence primary loss authority",
+            "uint32 wrap",
+            "duplicate/reorder/gap distinction",
+            "restart/discontinuity epoch",
+            "sample-sequence supplemental-only",
+            "Platform_10",
+            "SEQUENCE_GAP",
+            "DUPLICATE_DATAGRAM",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "SAMPLE_SEQUENCE_GAP",
+            "sub_agent_id",
+            "collector-restart baseline",
+        ):
+            if required not in ledger:
+                self.fail(
+                    f"BUILD-051 S5 ledger must retain sFlow sequence pin {required!r}"
+                )
+
+        maturity = [c.strip() for c in ledger.strip().strip("|").split("|")][-1]
+        if maturity != "NOT_IMPLEMENTED":
+            self.fail(
+                "BUILD-051 must remain NOT_IMPLEMENTED after sFlow sequence "
+                f"contract freeze; got {maturity!r}"
+            )
+
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if p17_path.is_file():
+            p17 = p17_path.read_text(encoding="utf-8")
+            if "FLOW_UDP_P1_PROFILE_V1" in p17:
+                for required in (
+                    "sFlow v5 sequence quality envelope",
+                    "DUPLICATE_DATAGRAM",
+                    "SEQUENCE_COLLISION",
+                    "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+                    "SEQUENCE_DISCONTINUITY_UNKNOWN",
+                    "SAMPLE_SEQUENCE_GAP",
+                    "datagram header `sequence_number`",
+                    "MUST NOT mutate primary datagram-loss counts",
+                ):
+                    if required not in p17:
+                        self.fail(
+                            "Platform_17 Flow quality envelope missing sFlow "
+                            f"sequence outcome {required!r}"
+                        )
+
+        p12_path = (
+            self.docs_root / "Platform_12_Decision_Source_Register.md"
+        )
+        if p12_path.is_file():
+            p12 = p12_path.read_text(encoding="utf-8")
+            if "FLOW_PARSER_DEPENDENCY_ADMISSION_GATE" in p12:
+                for required in (
+                    "sFlow v5 datagram sequence / discontinuity authority",
+                    "EXPORTER_RESTART_OR_DISCONTINUITY",
+                    "prefer possible false discontinuity over fabricated giant loss",
+                    "NOT_IMPLEMENTED",
+                ):
+                    if required not in p12:
+                        self.fail(
+                            "Platform_12 must register sFlow sequence decision "
+                            f"containing {required!r}"
+                        )
+
     def validate_dependency_activation_combine_operator(self) -> None:
         """Pin DependencyActivationV1 explicit ANY|ALL combination operator.
 

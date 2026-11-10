@@ -3930,6 +3930,21 @@ class MotherReferenceValidatorTests(unittest.TestCase):
         self.assertIn("template_refresh_timeout_seconds > 0", p17)
         self.assertIn("NO_BUFFER_UNTEMPLATED_DATA", p17)
 
+        # sFlow v5 datagram sequence contract (BUILD-051 S5)
+        self.assertIn("sFlow v5 datagram sequence", p10)
+        self.assertIn("Primary loss authority = datagram sequence", p10)
+        self.assertIn("UINT32 wrap", p10)
+        self.assertIn("DUPLICATE_DATAGRAM", p10)
+        self.assertIn("OUT_OF_ORDER_OR_OLD_DATAGRAM", p10)
+        self.assertIn("EXPORTER_RESTART_OR_DISCONTINUITY", p10)
+        self.assertIn("SEQUENCE_DISCONTINUITY_UNKNOWN", p10)
+        self.assertIn("SAMPLE_SEQUENCE_GAP", p10)
+        self.assertIn("sample-sequence supplemental-only", ledger)
+        self.assertIn("datagram-sequence primary loss authority", ledger)
+        self.assertIn("collector-restart baseline", ledger)
+        self.assertIn("sFlow v5 sequence quality envelope", p17)
+        self.assertIn("sFlow v5 datagram sequence / discontinuity authority", p12)
+
         validator = MotherReferenceValidator(docs, repo_root=root)
         validator.errors = []
         validator.validate_network_flow_source_reality_status()
@@ -3971,6 +3986,147 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertTrue(validator.errors, "expected BUILD-051 maturity failure")
             self.assertIn("BUILD-051", joined)
             self.assertIn("Partial", joined)
+
+    def test_101c_sflow_v5_datagram_sequence_contract(self) -> None:
+        """sFlow datagram sequence / wrap / gap / discontinuity pins must hold."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        p10 = (
+            docs / "Platform_10_Protocol_Security_Connector_Master.md"
+        ).read_text(encoding="utf-8")
+        p12 = (
+            docs / "Platform_12_Decision_Source_Register.md"
+        ).read_text(encoding="utf-8")
+        p17 = (
+            docs / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        ).read_text(encoding="utf-8")
+        register = (
+            root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        ).read_text(encoding="utf-8")
+
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = next(
+            line for line in section.splitlines() if line.startswith("| 051 |")
+        )
+        maturity = [c.strip() for c in ledger.strip().strip("|").split("|")][-1]
+        self.assertEqual(maturity, "NOT_IMPLEMENTED")
+
+        for needle in (
+            "Primary loss authority = datagram sequence",
+            "sFlow datagram `sequence_number`",
+            "Do **NOT** scope only by source IP",
+            "Sample sequence numbers are supplemental",
+            "UINT32 serial arithmetic",
+            "distance = (C - P) mod 2^32",
+            "DUPLICATE_DATAGRAM",
+            "SEQUENCE_COLLISION",
+            "SEQUENCE_GAP",
+            "missing_datagrams = distance - 1",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "UINT32 wrap",
+            "0xffffffff → 0",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "do not calculate datagram loss across the boundary",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "Duplicate and reorder do not become loss",
+            "first valid datagram establishes a fresh collector-side baseline",
+            "sample family (`FLOW` or `COUNTER`)",
+            "SAMPLE_SEQUENCE_GAP",
+            "MUST NOT change primary datagram loss counts",
+            "sub_agent_id",
+            "malformed packet does not mutate sequence high-water",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, p10, needle)
+
+        for needle in (
+            "datagram-sequence primary loss authority",
+            "uint32 wrap",
+            "duplicate/reorder/gap distinction",
+            "restart/discontinuity epoch",
+            "sample-sequence supplemental-only",
+            "collector-restart baseline",
+            "SEQUENCE_GAP",
+            "DUPLICATE_DATAGRAM",
+            "SAMPLE_SEQUENCE_GAP",
+            "sub_agent_id",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, ledger, needle)
+
+        for needle in (
+            "sFlow v5 sequence quality envelope",
+            "DUPLICATE_DATAGRAM",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "SAMPLE_SEQUENCE_GAP",
+            "datagram header `sequence_number`",
+            "MUST NOT mutate primary datagram-loss counts",
+        ):
+            self.assertIn(needle, p17, needle)
+
+        for needle in (
+            "sFlow v5 datagram sequence / discontinuity authority",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "prefer possible false discontinuity over fabricated giant loss",
+            "NOT_IMPLEMENTED",
+        ):
+            self.assertIn(needle, p12, needle)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_sflow_v5_datagram_sequence_contract()
+        self.assertEqual(validator.errors, [])
+
+    def test_101d_sflow_sequence_regression_detects_loss(self) -> None:
+        """Dropping datagram-sequence primary authority must fail validation."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            # Minimal register with BUILD-051 profile freeze but no S5 pins.
+            bad_register = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-051 | Flow | FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED | 020 | NOT_IMPLEMENTED | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 051 | Flow FLOW_UDP_P1_PROFILE_V1 FLOW_PARSER_DEPENDENCY_ADMISSION_GATE "
+                "SPECIFIED_NOT_IMPLEMENTED S5 sFlow v5 | Sensor | delta | D | exit | rb | NOT_IMPLEMENTED |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad_register, encoding="utf-8"
+            )
+            # Point docs_root at a copy of Platform_10 with sequence contract removed.
+            docs_tmp = tmp_root / "project_documentation"
+            docs_tmp.mkdir()
+            p10_src = (
+                docs / "Platform_10_Protocol_Security_Connector_Master.md"
+            ).read_text(encoding="utf-8")
+            # Keep FLOW profile markers so the validator does not skip, but strip
+            # the dedicated sFlow datagram sequence owner heading.
+            p10_bad = p10_src.replace(
+                "sFlow v5 datagram sequence / gap / duplicate / reorder / restart semantics",
+                "sFlow v5 evidence notes",
+            )
+            self.assertNotIn("sFlow v5 datagram sequence", p10_bad)
+            self.assertIn("FLOW_UDP_P1_PROFILE_V1", p10_bad)
+            (docs_tmp / "Platform_10_Protocol_Security_Connector_Master.md").write_text(
+                p10_bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs_tmp, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_sflow_v5_datagram_sequence_contract()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected sFlow sequence contract failure")
+            self.assertIn("sFlow v5 datagram sequence", joined)
 
 
 if __name__ == "__main__":
