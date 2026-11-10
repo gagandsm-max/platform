@@ -19,6 +19,7 @@ from validate_mother_references import (  # noqa: E402
     CANONICAL_MOTHER_REFERENCE_VERSION,
     CONSTITUTIONAL_AUTHORITATIVE_COUNT,
     SCHEMA_VERSION,
+    MotherReferenceValidator,
     validate_docs_root,
 )
 
@@ -3562,6 +3563,120 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             self.assertIn(gate, p12, gate)
             self.assertIn(gate, register, gate)
             self.assertIn("NOT DISPATCHABLE", register)
+
+    def test_98_network_flow_source_reality_status(self) -> None:
+        """BUILD-043/044/045/051 must not overstate main 92f0fb37 source reality."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        register_path = root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        register = register_path.read_text(encoding="utf-8")
+
+        def summary_maturity(build_id: str) -> str:
+            prefix = f"| {build_id} |"
+            for line in register.splitlines():
+                if line.startswith(prefix):
+                    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                    return cells[4]
+            self.fail(f"missing summary row {build_id}")
+            return ""
+
+        def ledger_maturity(num: str) -> str:
+            section = register[register.find("### BUILD-040..054") :]
+            nxt = section.find("\n### BUILD-", 1)
+            if nxt != -1:
+                section = section[:nxt]
+            prefix = f"| {num} |"
+            for line in section.splitlines():
+                if line.startswith(prefix):
+                    cells = [c.strip() for c in line.strip().strip("|").split("|")]
+                    return cells[-1]
+            self.fail(f"missing ledger row {num}")
+            return ""
+
+        for build_id, num, required in (
+            ("BUILD-043", "043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            ("BUILD-044", "044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+            (
+                "BUILD-045",
+                "045",
+                (
+                    "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE "
+                    "PASS; NOT_IMPLEMENTED"
+                ),
+            ),
+            ("BUILD-051", "051", "NOT_IMPLEMENTED"),
+        ):
+            self.assertEqual(summary_maturity(build_id), required, build_id)
+            self.assertEqual(ledger_maturity(num), required, f"ledger {num}")
+
+        for banned in (
+            "Mostly not implemented",
+            "Not production",
+            "Partial/spec",
+        ):
+            # Banned tokens must not remain as maturity claims for the four builds.
+            for build_id in ("BUILD-043", "BUILD-044", "BUILD-045", "BUILD-051"):
+                row = next(
+                    line
+                    for line in register.splitlines()
+                    if line.startswith(f"| {build_id} |")
+                )
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                self.assertNotIn(banned, cells[4], f"{build_id}:{banned}")
+
+        # Neighbor genuine partials must not be downgraded by this correction.
+        for build_id, needle in (
+            ("BUILD-040", "Partial"),
+            ("BUILD-041", "Partial"),
+            ("BUILD-042", "Raw Counter64 exists"),
+            ("BUILD-046", "Partial"),
+            ("BUILD-047", "Partial code"),
+            ("BUILD-050", "Partial"),
+        ):
+            self.assertIn(needle, summary_maturity(build_id), build_id)
+
+        validator = MotherReferenceValidator(docs, repo_root=root)
+        validator.errors = []
+        validator.validate_network_flow_source_reality_status()
+        self.assertEqual(validator.errors, [])
+
+    def test_98b_network_flow_source_reality_regression_fails(self) -> None:
+        """Overstated BUILD-043/051 maturity must fail the source-reality pin."""
+        docs = Path(__file__).resolve().parents[1]
+        root = docs.parent
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_root = Path(tmp)
+            bad = (
+                "# Register\n\n"
+                "| ID | Build unit | Primary scope | Depends on | Starting maturity | Exit gate |\n"
+                "|---|---|---|---|---|---|\n"
+                "| BUILD-043 | Interface/entity reconciliation | ifIndex | 041/042 | Partial | exit |\n"
+                "| BUILD-044 | SNMP traps/informs | traps | 041 | SPECIFIED_ONLY / NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-045 | gNMI/NETCONF/REST | connector | DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED | exit |\n"
+                "| BUILD-051 | Flow receiver | NetFlow | 020 | Not production | exit |\n"
+                "\n"
+                "### BUILD-040..054 — Network, Flow, Syslog\n\n"
+                "| BUILD | ① | ② | ③ delta | ④ D / I / C | ⑤ exit & acceptance | ⑥ rollout / rollback | ⑦ evidence / gate |\n"
+                "|---|---|---|---|---|---|---|---|\n"
+                "| 043 | Interface/entity reconciliation | Core | delta | D | exit | n/a | Partial |\n"
+                "| 044 | SNMP traps/informs | Sensor | delta | D | exit | n/a | SPECIFIED_ONLY / NOT_IMPLEMENTED |\n"
+                "| 045 | gNMI; **NOT DISPATCHABLE until `DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE` PASS** | TARGET | Gate | D | exit | rb | "
+                "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE PASS; NOT_IMPLEMENTED |\n"
+                "| 051 | Flow receiver | Sensor | delta | D | exit | allowlist | Not production |\n"
+            )
+            (tmp_root / "Platform_Master_Build_Sequence_Register_v1.0.md").write_text(
+                bad, encoding="utf-8"
+            )
+            validator = MotherReferenceValidator(docs, repo_root=tmp_root)
+            validator.errors = []
+            validator.validate_network_flow_source_reality_status()
+            joined = "\n".join(validator.errors)
+            self.assertTrue(validator.errors, "expected source-reality failures")
+            self.assertIn("BUILD-043", joined)
+            self.assertIn("BUILD-051", joined)
+            self.assertIn("Partial", joined)
+            self.assertIn("Not production", joined)
 
 
 if __name__ == "__main__":

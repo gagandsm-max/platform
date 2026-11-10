@@ -1761,6 +1761,127 @@ class MotherReferenceValidator:
                 return False
             idx = pos + len(needle)
 
+    def validate_network_flow_source_reality_status(self) -> None:
+        """Pin BUILD-043/044/045/051 status truth to main 92f0fb37 source reality.
+
+        Documentation candidate based on canonical main
+        ``92f0fb37805c234be2869619abcc01ad26b5f30b`` must not overstate
+        interface reconciliation, SNMP trap/inform, device-control connector,
+        or Flow receiver implementation. Skipped when the programme register
+        is absent (minimal fixture trees).
+        """
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not register_path.is_file():
+            return
+        text = register_path.read_text(encoding="utf-8")
+
+        def summary_row(build_id: str) -> str:
+            prefix = f"| {build_id} |"
+            for line in text.splitlines():
+                if line.startswith(prefix):
+                    return line
+            self.fail(f"Build Register missing summary row for {build_id}")
+            return ""
+
+        def ledger_row(num: str) -> str:
+            section = text
+            marker = "### BUILD-040..054"
+            if marker in text:
+                section = text[text.find(marker) :]
+                nxt = section.find("\n### BUILD-", 1)
+                if nxt != -1:
+                    section = section[:nxt]
+            prefix = f"| {num} |"
+            for line in section.splitlines():
+                if line.startswith(prefix):
+                    return line
+            self.fail(
+                f"Build Register missing executable-plan ledger row for BUILD-{num}"
+            )
+            return ""
+
+        def maturity_cell(row: str) -> str:
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if not cells:
+                return ""
+            # Summary: ID | unit | scope | depends | Starting maturity | Exit
+            # Ledger: BUILD | ... | ⑦ evidence / gate (last cell)
+            if cells[0].startswith("BUILD-"):
+                return cells[4] if len(cells) > 4 else ""
+            return cells[-1]
+
+        checks: list[tuple[str, str, str, tuple[str, ...]]] = [
+            (
+                "BUILD-043",
+                "043",
+                "SPECIFIED_ONLY / NOT_IMPLEMENTED",
+                ("Partial/spec", "Partial"),
+            ),
+            (
+                "BUILD-044",
+                "044",
+                "SPECIFIED_ONLY / NOT_IMPLEMENTED",
+                ("Partial/spec", "Partial"),
+            ),
+            (
+                "BUILD-045",
+                "045",
+                (
+                    "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE "
+                    "PASS; NOT_IMPLEMENTED"
+                ),
+                ("Mostly not implemented",),
+            ),
+            (
+                "BUILD-051",
+                "051",
+                "NOT_IMPLEMENTED",
+                ("Not production", "Next lane"),
+            ),
+        ]
+
+        for build_id, num, required, banned in checks:
+            for label, row in (
+                ("summary", summary_row(build_id)),
+                ("ledger", ledger_row(num)),
+            ):
+                if not row:
+                    continue
+                maturity = maturity_cell(row)
+                if maturity != required and required not in maturity:
+                    self.fail(
+                        f"Build Register {label} {build_id} maturity must be "
+                        f"{required!r} (source reality at main "
+                        f"92f0fb37805c234be2869619abcc01ad26b5f30b); got {maturity!r}"
+                    )
+                for bad in banned:
+                    if bad == "Partial":
+                        # Exact cell or tokenized maturity, not substring of
+                        # SPECIFIED_ONLY / NOT_IMPLEMENTED.
+                        if maturity == "Partial" or maturity.startswith("Partial;"):
+                            self.fail(
+                                f"Build Register {label} {build_id} must not use "
+                                f"overstated maturity {maturity!r}"
+                            )
+                        continue
+                    if bad in maturity:
+                        self.fail(
+                            f"Build Register {label} {build_id} must not retain "
+                            f"overstated maturity token {bad!r}"
+                        )
+
+        for row in (summary_row("BUILD-045"), ledger_row("045")):
+            if not row:
+                continue
+            if "DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE" not in row:
+                self.fail(
+                    "BUILD-045 must retain DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE"
+                )
+            if "NOT DISPATCHABLE" not in row:
+                self.fail("BUILD-045 must retain NOT DISPATCHABLE until gate PASS")
+
     def validate(self) -> list[str]:
         self.errors = []
         constitutional = self.validate_constitutional_set()
@@ -1787,6 +1908,7 @@ class MotherReferenceValidator:
         self.validate_maturity_language(paths)
         self.validate_normalized_rtm_licence_grace(paths)
         self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)
+        self.validate_network_flow_source_reality_status()
         return self.errors
 
 
