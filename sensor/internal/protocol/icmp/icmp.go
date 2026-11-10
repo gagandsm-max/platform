@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -215,7 +216,7 @@ func (c *Collector) Collect(parent context.Context, r Request) (Result, error) {
 }
 
 type realSession struct {
-	conn    *xicmp.PacketConn
+	conn    net.PacketConn
 	version int
 	id      int
 	closed  sync.Once
@@ -232,11 +233,80 @@ func (c *Collector) newSession(r Request) (probeSession, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := int(nextEchoID.Add(1) & 0xffff)
-	if id == 0 {
-		id = 1
+	id, err := effectiveEchoID(conn.LocalAddr(), runtime.GOOS)
+	if err != nil {
+		_ = conn.Close()
+		return nil, err
 	}
 	return &realSession{conn: conn, version: r.IPVersion, id: id}, nil
+}
+
+// VerifyLocalCapability performs a one-time open/close of the ping datagram
+// sockets used by Collect. It does not send Echo requests or address a customer
+// target. IPv4 is required; IPv6 is attempted and skipped only when the local
+// address family/protocol is unsupported.
+func (c *Collector) VerifyLocalCapability(ctx context.Context) error {
+	if c == nil || c.factory == nil {
+		return newError(CodeInvalidRequest, "ICMP collector is not initialized", nil, false)
+	}
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	if err := c.verifyFamily(ctx, 4); err != nil {
+		return err
+	}
+	if err := c.verifyFamily(ctx, 6); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (c *Collector) verifyFamily(ctx context.Context, version int) error {
+	if err := contextErr(ctx); err != nil {
+		return err
+	}
+	// Open/close synchronously. A factory goroutine plus post-cancel cleanup
+	// goroutine can strand both on a blocked ListenPacket; cancellation is
+	// checked around the call instead of racing it with detached work.
+	s, err := c.factory(Request{IPVersion: version})
+	if err != nil {
+		if version == 6 && unsupportedIPFamily(err) {
+			return nil
+		}
+		return classify(ctx, err)
+	}
+	if s == nil {
+		return newError(CodeProtocol, "ICMP ping socket factory returned nil session", nil, false)
+	}
+	if err := s.Close(); err != nil {
+		return classify(ctx, err)
+	}
+	return contextErr(ctx)
+}
+
+func unsupportedIPFamily(err error) bool {
+	return errors.Is(err, syscall.EAFNOSUPPORT) || errors.Is(err, syscall.EPROTONOSUPPORT)
+}
+
+// Linux ping sockets bind the Echo identifier as the UDP address port.
+// The kernel replaces the marshalled ID with this value for both IP families.
+func effectiveEchoID(addr net.Addr, goos string) (int, error) {
+	if goos == "linux" {
+		local, ok := addr.(*net.UDPAddr)
+		if !ok || local == nil || local.Port <= 0 || local.Port > 65535 {
+			return 0, newError(CodeProtocol, "ping socket effective Echo identifier unavailable", nil, false)
+		}
+		return local.Port, nil
+	}
+	// Darwin's datagram ICMP API preserves the caller's Echo identifier.
+	if goos == "darwin" {
+		id := int(nextEchoID.Add(1) & 0xffff)
+		if id == 0 {
+			id = 1
+		}
+		return id, nil
+	}
+	return 0, newError(CodeProtocol, "ping socket Echo identifier semantics unsupported", nil, false)
 }
 
 func (s *realSession) Close() error {
@@ -259,7 +329,8 @@ func (s *realSession) Probe(ctx context.Context, target net.IP, seq, payloadByte
 		typ = ipv6.ICMPTypeEchoRequest
 		proto = 58
 	}
-	msg := xicmp.Message{Type: typ, Code: 0, Body: &xicmp.Echo{ID: s.id, Seq: seq, Data: bytes.Repeat([]byte{0x50}, payloadBytes)}}
+	payload := bytes.Repeat([]byte{0x50}, payloadBytes)
+	msg := xicmp.Message{Type: typ, Code: 0, Body: &xicmp.Echo{ID: s.id, Seq: seq, Data: payload}}
 	wire, err := msg.Marshal(nil)
 	if err != nil {
 		return 0, err
@@ -283,23 +354,25 @@ func (s *realSession) Probe(ctx context.Context, target net.IP, seq, payloadByte
 		if err != nil {
 			return 0, err
 		}
-		parsed, err := xicmp.ParseMessage(proto, buf[:n])
-		if err != nil {
-			continue
-		}
-		echo, ok := parsed.Body.(*xicmp.Echo)
-		if !ok || !echoReplyMatches(echo, s.id, seq) || !samePeer(peer, target) {
-			continue
-		}
-		if s.version == 4 && parsed.Type != ipv4.ICMPTypeEchoReply {
-			continue
-		}
-		if s.version == 6 && parsed.Type != ipv6.ICMPTypeEchoReply {
+		if !validEchoReply(buf[:n], proto, s.version, s.id, seq, peer, target, payload) {
 			continue
 		}
 		return time.Since(started), nil
 	}
 	return 0, newError(CodeResourceLimit, "reply scan exceeded configured bound", nil, false)
+}
+
+func validEchoReply(wire []byte, proto, version, id, seq int, peer net.Addr, target net.IP, payload []byte) bool {
+	parsed, err := xicmp.ParseMessage(proto, wire)
+	if err != nil || parsed.Code != 0 || !samePeer(peer, target) {
+		return false
+	}
+	if (version == 4 && parsed.Type != ipv4.ICMPTypeEchoReply) ||
+		(version == 6 && parsed.Type != ipv6.ICMPTypeEchoReply) {
+		return false
+	}
+	echo, ok := parsed.Body.(*xicmp.Echo)
+	return ok && echoReplyMatches(echo, id, seq) && bytes.Equal(echo.Data, payload)
 }
 
 func samePeer(a net.Addr, target net.IP) bool {
@@ -326,6 +399,13 @@ func classify(ctx context.Context, err error) error {
 	}
 	if errors.Is(err, syscall.EPERM) || errors.Is(err, syscall.EACCES) {
 		return newError(CodePermission, "ICMP socket permission denied; configure supported ping socket capability/policy", err, false)
+	}
+	if unsupportedIPFamily(err) {
+		// Match VerifyLocalCapability skip semantics: unsupported family is a
+		// permanent local capability gap (no retry), not transient transport.
+		// CodeProtocol would latch collector DEGRADED on a later IPv6 job even
+		// when IPv4 remains usable; keep this permanent and non-collector-unusable.
+		return newError(CodeTransport, "ICMP address family or protocol unsupported", err, false)
 	}
 	if errors.Is(err, syscall.ENETUNREACH) || errors.Is(err, syscall.EHOSTUNREACH) {
 		return newError(CodeUnreachable, "ICMP target/network unreachable", err, true)
