@@ -206,12 +206,179 @@ Agent/Sensor credentials, reusable secrets and unrestricted device-control capab
 
 ## Flow / Log / Webhook / ITSM connector security notes — v3.2.2 handoff
 
-- Flow: configured exporter/source/tenant authority; packet source IP alone is insufficient; sampling/template/sequence evidence retained; user-attributed Flow is privacy/RBAC sensitive.
+- Flow: configured exporter/source/tenant authority; packet source IP alone is insufficient; sampling/template/sequence evidence retained; user-attributed Flow is privacy/RBAC sensitive. Tenant identity MUST NEVER be taken from a Flow packet field.
+- Flow first Phase-1 UDP profile: BUILD-051 freezes executable ordering for `FLOW_UDP_P1_PROFILE_V1` (`SPECIFIED_NOT_IMPLEMENTED` until code/evidence; BUILD-051 remains `NOT_IMPLEMENTED`). Scope = UDP NetFlow v5/v9, IPFIX v10 over UDP, sFlow v5. J-Flow is not a proprietary parser here — only when the exporter's wire format is certified as one of those NetFlow/IPFIX formats. Target package `sensor/internal/protocol/flow/` (no new microservice). GoFlow2 (`OSS-022`) import requires `FLOW_PARSER_DEPENDENCY_ADMISSION_GATE` (exact version/commit, licence, SBOM/CVE, API surface, checksum, fixture compatibility, rollback) before BUILD-051 source dispatch that imports it. Protocol-detail ownership: `Platform_17` §13.9 + this section; Build Register owns slices/gates.
 - Flow ingress isolation: a bare UDP port is not a trusted isolation boundary. Bind exporter identity to independently verified ingress context, routing domain and authorization (listener/interface/VRF/site/Sensor). Ambiguous mappings fail closed; spoofable UDP origin remains low-trust unless independently protected/validated. Quarantined/unmapped traffic must not produce canonical Flow analytics. Phase 1 covers intra-tenant overlapping RFC1918/VRF spaces on verified ingress contexts; Phase 1.5 MSP certification tests cross-tenant overlapping addresses and source/tenant spoofing.
-- Flow template and sampling safety: NetFlow v9/IPFIX template keys and lifetimes include exporter transport/Observation Domain or Source ID context and the shared Data/Options Template ID namespace. After collector restart, UDP Data Sets must not be decoded from an unvalidated persisted template; require live template validation/session continuity. Enforce UDP refresh/redefinition semantics; ignore UDP Template Withdrawal messages. Distinguish sFlow sampled-frame evidence, sFlow interface/device Counter samples (typed metric paths—not ordinary per-flow `network_flow` facts), and IPFIX/NetFlow counters. sFlow sampled header capture length is not automatically original frame length; preserve original frame length only where provided and qualified. Never treat cumulative sFlow interface counters as per-flow bytes/packets or scale them by packet sample rate. Missing templates and uncertain sampling are quality/coverage signals. Expose immutable raw source values and separately identified estimates; exporter sampling configuration is not a blanket numeric multiplier. No new local KV store, mandatory physical schema columns or breaking schema migration is selected.
+- Flow stream identity (do not collapse solely by source IP): NetFlow v5 binds authoritative exporter binding + source IP/port + engine type/ID; NetFlow v9 binds exporter binding + source IP/port + Source ID/Observation Domain; IPFIX UDP binds exporter binding + source IP/UDP port + collector local IP/destination port + Observation Domain ID; sFlow v5 binds exporter binding + agent address + sub-agent ID.
+- Flow template and sampling safety: NetFlow v9/IPFIX template keys and lifetimes include exporter transport/Observation Domain or Source ID context and the shared Data/Options Template ID namespace. After collector restart, template authority starts EMPTY/volatile — do not decode UDP Data Sets from unvalidated persisted templates; require live template refresh. Activated profile MUST supply `template_refresh_timeout_seconds > 0`. Enforce UDP refresh/redefinition semantics; valid redefinition replaces atomically; malformed redefinition must not corrupt prior valid state; **ignore UDP Template Withdrawal as unreliable withdrawal authority**. IPFIX V1 uses `NO_BUFFER_UNTEMPLATED_DATA`. Sequence/loss uses protocol-native semantics (v5 flow-sequence; v9 cumulative Export Packet sequence; IPFIX record-based — Template/Options Template records do not increment data-record sequence); gaps are quality/loss evidence, never Device Down. Distinguish sFlow sampled-frame evidence, sFlow interface/device Counter samples (typed metric paths—not ordinary per-flow `network_flow` facts), and IPFIX/NetFlow counters. sFlow sampled header capture length is not automatically original frame length; preserve original frame length only where provided and qualified. Never treat cumulative sFlow interface counters as per-flow bytes/packets or scale them by packet sample rate. BUILD-051 decoder preserves sampling evidence only and does not manufacture estimated traffic totals; `SAMPLED_UNKNOWN` is never `UNSAMPLED`. Missing templates and uncertain sampling are quality/coverage signals. Expose immutable raw source values and separately identified estimates; exporter sampling configuration is not a blanket numeric multiplier. No new local KV store, mandatory physical schema columns or breaking schema migration is selected.
+- Flow first-profile failure vocabulary (logical classes; exact constants follow repository naming): `MALFORMED_PACKET`, `UNSUPPORTED_PROTOCOL_VERSION`, `EXPORTER_UNBOUND`, `EXPORTER_AMBIGUOUS`, `TEMPLATE_MISSING`, `TEMPLATE_EXPIRED`, `TEMPLATE_REDEFINITION_INVALID`, `SEQUENCE_GAP`, `DUPLICATE_DATAGRAM`, `SEQUENCE_COLLISION`, `OUT_OF_ORDER_OR_OLD_DATAGRAM`, `EXPORTER_RESTART_OR_DISCONTINUITY`, `SEQUENCE_DISCONTINUITY_UNKNOWN`, `SAMPLE_SEQUENCE_GAP`, `SAMPLE_DUPLICATE`, `SAMPLE_OUT_OF_ORDER`, `UNSUPPORTED_RECORD`, `QUALITY_PARTIAL`. Parser errors MUST NOT become target DOWN.
 - Log forwarding: secret/PII minimization/redaction; per-destination queue isolation; SIEM outage must not block base monitoring.
 - Webhooks: signature/auth, replay protection, tenant/source binding, SSRF/egress allowlists, secrets, schema validation, rate limits, idempotency, audit; no arbitrary scripts.
 - ITSM callbacks: signed/authenticated inbound; remote ticket state cannot override Platform health authority.
+
+### sFlow v5 datagram sequence / gap / duplicate / reorder / restart semantics — BUILD-051 S5 contract
+
+Detailed sFlow v5 UDP sequence contract for `FLOW_UDP_P1_PROFILE_V1`. BUILD-051 S5 cross-references this section; BUILD-051 source reality remains `NOT_IMPLEMENTED` until code and evidence exist. Specification here is not implementation.
+
+#### Primary loss authority = datagram sequence
+
+For sFlow v5 UDP transport, primary collector packet-loss/reorder accounting SHALL use the **sFlow datagram `sequence_number`** from the datagram header.
+
+Tracking scope MUST be the authoritative sFlow exporter stream:
+
+- tenant resolved from current exporter binding;
+- exporter binding identity;
+- sFlow agent address;
+- `sub_agent_id`;
+- collector/vantage identity where required to prevent stream collision.
+
+Do **NOT** scope only by source IP. Do **NOT** use flow-sample or counter-sample sequence numbers as the primary UDP datagram-loss authority.
+
+#### Sample sequence numbers are supplemental
+
+Preserve the raw sequence number carried by `flow_sample`, `expanded_flow_sample`, `counters_sample` and `expanded_counters_sample`. Per sFlow v5 errata, these are sequence numbers generated by the relevant sFlow Instance and MUST NOT be interpreted as sequence-per-`source_id`.
+
+For V1:
+
+- flow-sample sequence may provide supplemental flow-sample continuity evidence;
+- counter-sample sequence may provide supplemental counter-sample continuity evidence;
+- neither substitutes for datagram sequence when determining UDP datagram loss;
+- sample sequence gap does **not** fabricate missing customer Flow records;
+- sample sequence anomaly does **not** mean Device Down.
+
+Do not merge flow-sample and counter-sample sequence state into one counter if the protocol implementation maintains them as distinct sample families.
+
+#### UINT32 serial arithmetic
+
+Treat sFlow datagram sequence number as unsigned 32-bit serial state. For previously accepted high-water value `P` and current `C`:
+
+`distance = (C - P) mod 2^32`
+
+Classify:
+
+| distance | Classification | High-water / loss rules |
+|---|---|---|
+| `distance = 0` and immutable datagram digest / exact packet identity matches | `DUPLICATE_DATAGRAM` | do not advance high-water; do not increment loss; suppress duplicate authoritative effects |
+| `distance = 0` but immutable datagram bytes/digest differ | `SEQUENCE_COLLISION` (or repository-equivalent integrity error) | do not silently dedupe; retain security/quality evidence; do not overwrite prior authoritative state |
+| `0 < distance < 2^31` and `distance = 1` | contiguous forward progress | advance high-water only after the current datagram passes required parser/exporter admission |
+| `0 < distance < 2^31` and `distance > 1` | `SEQUENCE_GAP` with `missing_datagrams = distance - 1` | advance high-water only after admission; gap is transport quality/loss evidence only — MUST NOT imply exporter/device DOWN |
+| `distance >= 2^31` | `OUT_OF_ORDER_OR_OLD_DATAGRAM` (V1) | do not move high-water backwards; do not count a giant false loss gap; datagram may be decoded as bounded late evidence only if downstream idempotency permits; otherwise drop/quarantine with typed quality evidence |
+
+Do **NOT** invent an arbitrary numeric reorder-window size in this contract.
+
+#### UINT32 wrap
+
+Normal datagram sequence wrap `0xffffffff → 0` is valid forward progress with modular distance `1`. It is **not** automatically an exporter restart. Explicit wrap fixture is mandatory.
+
+#### Exporter uptime
+
+sFlow v5 datagram header carries exporter uptime in milliseconds. Use uptime only as continuity/discontinuity evidence. Because the uptime field itself is bounded/wrapping, a decrease MUST NOT by itself be claimed as a confirmed reboot. It is an **epoch-boundary classification**.
+
+**Master decision (V1):** when `current exporter uptime < previous exporter uptime` for the same authoritative sFlow stream, the result is **ALWAYS**:
+
+```text
+EXPORTER_RESTART_OR_DISCONTINUITY
+```
+
+unless independent authoritative restart/session evidence proves a more specific state. This does **NOT** assert that a reboot definitely occurred. It means continuity cannot safely span that uptime decrease.
+
+Consequences for this transition:
+
+- close the previous sequence epoch;
+- current accepted datagram establishes the new baseline;
+- do not calculate datagram loss across the boundary;
+- retain previous/current sequence and uptime evidence for audit;
+- no Device Down inference.
+
+`SEQUENCE_DISCONTINUITY_UNKNOWN` is **NOT** legal when a trusted uptime decrease is present.
+
+This conservative behavior accepts possible false discontinuity rather than fabricating a huge loss count.
+
+#### When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal
+
+`SEQUENCE_DISCONTINUITY_UNKNOWN` is reserved for sequence discontinuity/backtrack cases where:
+
+- uptime is absent, unavailable or explicitly untrusted;
+  **OR**
+- uptime does not itself indicate an epoch boundary;
+  **AND**
+- no stronger authoritative restart/discontinuity evidence exists.
+
+Examples:
+
+- sequence regression while uptime is non-decreasing but identity/ordering evidence is insufficient;
+- ambiguous old/reordered packet where no reliable uptime evidence exists.
+
+For those weaker-evidence cases:
+
+- do not infer a large gap;
+- do not infer reboot as fact;
+- start a new continuity epoch only according to the documented state transition;
+- retain provenance.
+
+#### Duplicate and reorder do not become loss
+
+Freeze:
+
+- exact duplicate ⇒ `DUPLICATE_DATAGRAM`, not gap;
+- older/reordered datagram ⇒ `OUT_OF_ORDER_OR_OLD_DATAGRAM`, not gap;
+- forward serial jump `> 1` ⇒ `SEQUENCE_GAP`;
+- discontinuity/restart boundary ⇒ no loss count across epoch boundary.
+
+#### Stream epoch state
+
+The in-memory bounded tracker for each authoritative sFlow stream SHALL contain enough state to distinguish:
+
+- sequence high-water;
+- exporter uptime evidence;
+- continuity epoch/generation;
+- last accepted datagram identity/digest required for duplicate collision safety.
+
+This is collector runtime state, not a new authoritative database.
+
+On collector restart:
+
+- sequence tracker starts with no continuity authority;
+- first valid datagram establishes a fresh collector-side baseline;
+- do not infer loss from the gap between pre-restart and post-restart collector memory unless persisted/certified continuity state is introduced later.
+
+Do not silently persist sequence state by exporter IP alone.
+
+#### Sample-sequence tracking
+
+Where sample-sequence tracking is implemented, scope it by at least:
+
+- authoritative exporter binding;
+- sFlow agent;
+- sub-agent;
+- sample family (`FLOW` or `COUNTER`).
+
+Do not key it solely by `source_id`.
+
+For V1, sample sequence anomalies produce supplemental `SAMPLE_SEQUENCE_GAP`, `SAMPLE_DUPLICATE`, `SAMPLE_OUT_OF_ORDER` (or equivalent quality evidence). They MUST NOT change primary datagram loss counts.
+
+#### Required finite S5 acceptance fixtures
+
+BUILD-051 S5 acceptance MUST include:
+
+1. datagram sequence `100 → 101` = contiguous.
+2. `100 → 103` = `SEQUENCE_GAP`, `missing_datagrams = 2`.
+3. exact duplicate `100 → 100` same digest = `DUPLICATE_DATAGRAM`, no loss.
+4. same sequence with different payload digest = `SEQUENCE_COLLISION` / integrity collision.
+5. `103 → 102` = `OUT_OF_ORDER_OR_OLD_DATAGRAM`; high-water remains `103`.
+6. `0xffffffff → 0` = valid uint32 wrap, contiguous.
+7. sequence reset + uptime decrease = `EXPORTER_RESTART_OR_DISCONTINUITY` epoch; no gap counted across boundary.
+8. trusted uptime decrease (`current < previous`) with otherwise plausible modular progression = ALWAYS `EXPORTER_RESTART_OR_DISCONTINUITY` (epoch boundary; not confirmed reboot; MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`).
+9. sequence regression with insufficient restart evidence (uptime absent/unavailable/untrusted, or uptime non-decreasing without stronger restart evidence) = `SEQUENCE_DISCONTINUITY_UNKNOWN`; no fabricated giant loss.
+10. collector restart = first valid datagram establishes new collector-side sequence baseline.
+11. two different `sub_agent_id` values maintain independent datagram sequence state.
+12. same source IP but different authoritative exporter binding does not collide.
+13. flow sample sequence gap is supplemental only (`SAMPLE_SEQUENCE_GAP`).
+14. counter sample sequence gap is supplemental only (`SAMPLE_SEQUENCE_GAP`).
+15. flow/counter sample sequence numbers are not merged into primary datagram-loss state.
+16. sample sequence is not scoped solely by `source_id`.
+17. duplicate/reordered packet does not become target DOWN.
+18. malformed packet does not mutate sequence high-water/template state.
 
 ### Log/SIEM forwarding isolation
 
@@ -230,7 +397,7 @@ Where external SIEM forwarding is enabled, use per-destination/tenant bounded **
 3. **Deterministic Capability State Machine:**
    - `ACTIVE`: eBPF bytecode verified and attached; BPF ring-buffer healthy; local aggregation active.
    - `UNSUPPORTED`: Host architecture or OS kernel is non-Linux or below minimum supported eBPF baseline.
-   - `UNAVAILABLE`: Host eBPF subsystem disabled by sysctl or security policy (e.g. `kernel.unprivileged_bpf_disabled=2`).
+   - `UNAVAILABLE`: Required eBPF functionality is unavailable under verified host/kernel/security policy. A single sysctl observation is not sufficient to classify the collector; bounded preflight and actual permitted load/attach capability determine the outcome, with a non-secret reason code.
    - `PRIVILEGE_DENIED`: Agent process lacks required Linux capabilities (`CAP_BPF`, `CAP_PERFMON`).
    - `KERNEL_INCOMPATIBLE`: Kernel verifier rejected bytecode, or BTF definitions do not match running kernel.
    - `RESOURCE_GUARDED`: Local Agent memory or kernel map capacity exceeded; shedding/sampling enabled to protect host stability.

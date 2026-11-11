@@ -1,15 +1,15 @@
 # Platform — Sizing, Capacity, Sensor Distribution & Storage Master
 
-**Document ID:** PLATFORM-SIZING-001  
+**Document ID:** PLATFORM-SIZING-001
 **Version:** 3.3.0
-**Status:** **Authoritative Mother Reference — Engineering Sizing Model**  
+**Status:** **Authoritative Mother Reference — Engineering Sizing Model**
 **Product:** Platform
 
 ## 1. Governing rule
 
 Device count is a commercial/planning input, not the only engineering load measure. Platform must size and operate using measured workload: poll operations/sec, metrics/sec, interfaces/entities, polling interval, protocol cost, RTT/timeouts, Flow/log rates, streaming subscriptions, NCM jobs, synthetic tests, **interactive/on-demand diagnostics and CLI sessions**, concurrent users, query/report/RCA demand and retention.
 
-All numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities.
+Device-density, resource and throughput numbers below are **engineering planning targets until benchmark-certified**. They are not contractual scale claims merely because incumbent products publish similar densities. This does not make normative safety rules optional: the non-disableable at-or-above-80% protection boundary and accepted minimum uncertainty margin in §9 remain design requirements.
 
 ## 2. Core compute targets
 
@@ -24,7 +24,7 @@ All numbers below are **engineering planning targets until benchmark-certified**
 | 10,000 | 1 | **16 vCPU / 64 GB RAM planning target** |
 | 15,000 | 1 | **24 vCPU / 96 GB RAM planning target** |
 
-### 2.2 HA
+### 2.2 Phase 1.5 HA
 
 HA uses **exactly two full Core nodes**, one Active and one Standby. Each full Core is sized to carry the certified workload after failover. There is no third customer-visible Core/governance node.
 
@@ -77,14 +77,18 @@ Priority 4  local LLM interactive assistance
 Priority 5  model recalibration / training / challenger evaluation
 ```
 
-A Core release fails resource certification if enabling the supported local-intelligence profile causes the certified monitoring workload to miss ingestion, alerting, query, durability, failover or storage-protection objectives.
+A Core release fails resource certification if enabling the supported local-intelligence profile causes the certified monitoring workload to miss ingestion, alerting, query, durability, phase-applicable failover/recovery targets or storage-protection objectives. Phase 1 applicability covers standalone Core interruption/recovery, Sensor Pool/reassignment/failover where applicable, Sensor buffering/replay and DR; Phase 1.5 applicability additionally covers Core Active/Standby HA failover. Phase-1 standalone certification does not require two-Core Core HA.
 
 ## 3. Network Sensor planning
 
 Current safe planning baseline retained from prior deployments:
 
-- **4 vCPU / 16 GB RAM / 150 GB SSD ≈ 800 normal network devices** under representative SNMP/ICMP workload and reasonable RTT.
-- **8 vCPU / 16 GB RAM ≈ 2,000–2,500 normal network devices** is an engineering benchmark objective, not yet a product guarantee.
+- **4 vCPU / 16 GB RAM / 150 GB SSD ≈ 800 normal network devices** under representative SNMP/ICMP/reference workload assumptions and reasonable RTT.
+- **8 vCPU / 32 GB RAM** targeting approximately **2,000–2,500 normal network devices** where workload permits is an **engineering benchmark objective / planning target** until benchmark-certified (**NOT CERTIFIED**). It is **not** a product guarantee, hard device-count entitlement, installer rejection threshold, blanket workload guarantee, or certified capacity result. No additional SSD requirement is invented for this high-density profile by this statement.
+
+Device count alone remains insufficient for Sensor sizing. Apply Monitoring Work Units (MWU) and workload-based sizing including interfaces, metrics, intervals, protocol cost, RTT/timeouts, Flow, syslog, streaming, NCM, users/query/report load, backlog/spool and retention (see §1 and §6). Core compute targets in §2 are unchanged by this Sensor planning target; planning-versus-certified distinction remains mandatory.
+
+Under Issue #206, **4 GB RAM/vCPU** is the internal recommended Sensor sizing/benchmark ratio. Installers, APIs/CLI, startup, deployment and licence checks MUST NOT reject solely because RAM is below this ratio; they provide a nonblocking sizing warning, workload/capacity risk disclosure and authorized-operator proceed. The 4C/16G/150GB baseline remains; no disk specification is invented for the 8C/32G objective.
 
 ### 3.1 Planning count at current 800-device baseline
 
@@ -161,6 +165,12 @@ Customer modes: **Automatic (recommended)**, **Automatic with Approval**, **Manu
 
 ## 8. Standard Network Workload Profile SNWP-2500-v1
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-012`**: Platform SHALL enforce: Telemetry cardinality/explosion protection.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The 8 vCPU/32 GB Core target is certified only against a versioned workload profile containing 2,500 representative enterprise network devices; ICMP; meaningful SNMPv2c/v3 mix; interface inventory/performance; CPU/memory/uptime/environment; traps; topology; alert evaluation; representative dashboards/reports/incidents/RCA; and Flow/syslog below dedicated-streaming threshold. Exact interface/metric/event distributions are committed in the performance repository before certification, not invented in product documentation.
 
 **CORE_RESOURCE_FEASIBILITY_GATE_1** (governance checkpoint after BUILD-060–065 are runnable enough for representative aggregate measurements; before BUILD-066): FEASIBILITY CHECKPOINT, **not** capacity certification. Measures Core JVM CPU/RAM, heap, PostgreSQL, Kafka, ClickHouse, Valkey, OS/filesystem/cache reserve, disk/IO, ingestion lag/backlog, protected workload latency, recovery reserve and dominant bottleneck, with baseline AI/local inference DISABLED/DEFAULT-OFF. Result: `PASS` / `CONDITIONAL_PASS` / `FAIL`. The 8-vCPU / 32-GB Core profile remains **TARGET / NOT BENCHMARK-CERTIFIED**. Do not silently increase hardware minimums on FAIL. Full capacity/scale certification remains BUILD-130.
@@ -196,12 +206,18 @@ For each overlay profile, benchmarks must measure incremental:
 - alert qualification and incident creation latency;
 - investigation and deterministic RCA response latency.
 
-**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or HA failover targets) to be violated or degraded. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
+**Inviolable non-interference gate:** Certification fails if optional observability enrichment causes base monitoring objectives (scheduled polling, durability, liveness, alert qualification, deterministic RCA, or phase-applicable failover/recovery targets) to be violated or degraded. Phase-applicable targets mean Phase 1 standalone Core interruption/recovery, Sensor Pool/reassignment/failover where applicable, Sensor buffering/replay and DR; and, when certifying Phase 1.5, Core Active/Standby HA failover. They do not make Phase-1 standalone certification depend on two-Core Core HA. Engineering is strictly prohibited from "fixing" an overlay benchmark failure by silently raising minimum Core, Sensor, or Agent hardware tiers. If resource budgets are exceeded, eBPF aggregation, active path probing cadences, and analytical enrichment must load-shed, sample, or suspend to protect primary monitoring correctness.
 
 
 ## 9. Core storage sizing model
 
-A fixed “TB per device” number is prohibited because storage depends on data volume and customer retention. The sizing calculator computes:
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-006`**: Platform SHALL enforce: Hot/warm/archive capability and NFS/S3-compatible/customer archive destinations.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+A fixed “TB per device” number is prohibited because storage depends on data volume and customer retention. The sizing calculator contract requires attributable occupied demand per physical volume:
 
 ```text
 raw metric bytes/day
@@ -211,44 +227,121 @@ raw metric bytes/day
 + audit/incident/NCM/diagnostic-investigation evidence bytes/day
 + Kafka operational retention
 + PostgreSQL control growth
-+ ClickHouse merge/working headroom
-+ archive/backup headroom
-+ filesystem reserve
++ ClickHouse merge/replay/spill working demand
++ archive/backup occupied demand on the volumes holding those copies
++ OS/application/log/temporary working demand
 ```
 
-Inputs include sample/record rate, average encoded row size after benchmarked compression, raw retention, each rollup resolution/retention, archive policy and legal holds. The UI displays current/proposed storage, growth/day, projected 80% date and recommended capacity.
+Inputs include sample/record rate, average encoded row size after benchmarked compression, raw retention, each rollup resolution/retention, archive policy and legal holds. The UI displays current/proposed storage, growth/day, projected 80% date where evidence supports it, and recommended capacity. The terms above are a footprint inventory, not permission to count the same physical bytes or free-space reserve twice.
+
+### 9.1 Per-volume baseline and uncertainty — REQ-DATA-011 / accepted Issue #292
+
+`REQ-DATA-011` owns storage forecast and retention simulation before policy change. Its accepted Issue #292 correction is normative in §9.1–9.4, with the existing retention/protection owners in §10–11 and `Platform_05` §37–38. Sizing MUST be calculated separately for every affected physical volume: OS/application/log, data/database, Sensor spool, archive, backup and replica volumes as deployed. The assessment records node/deployment and volume identity, capacity/used/free bytes, measurement timestamp/source, data-class attribution, retention and policy/model versions, growth basis and uncertainty. Multiple logical stores sharing one volume are summed once; replicas/backups are counted on the physical volumes holding their actual copies. Capacity from an unrelated volume cannot mask a full volume.
+
+`baseline_used` is attributable forecast occupied demand before the uncertainty uplift. It includes encoded payload, index/metadata and actual compression behavior, PostgreSQL/Kafka/ClickHouse/Valkey/OS demand where placed, merge/replay/spill working demand and actual retained copies. Free-space reserve is represented by the utilization target below; it MUST NOT be added as occupied demand and then counted again through that target. Assumptions, estimates and measured values are distinct. Missing, stale, contradictory or unmeasured inputs retain `UNKNOWN` plus reasons; no positive sufficiency or fabricated forecast date follows from an unknown baseline.
+
+The minimum planning uncertainty margin is **20% per physical volume**, independent of operational free-space reserve:
+
+```text
+uncertainty_multiplier = max(1.20, justified_multiplier)
+conservative_used = baseline_used × uncertainty_multiplier
+recommended_provisioned >= round_up_to_provisioning_unit(conservative_used / planning_utilization)
+```
+
+The initial recommended `planning_utilization` is **0.70**; an authorized policy may adjust it while keeping `0 < planning_utilization < 0.80` and preserving required operational safety. A justified burst/compression/growth scenario above 20% MUST use the larger multiplier. Document the multiplier and reason rather than silently overwriting measured inputs. Byte calculations MUST detect overflow and round required provisioned capacity upward to the actual allocation unit.
+
+**Steady-state planning disposition:** do not treat planned continuous operation above the configured early-warning threshold (default warning at 70% utilization) as an accepted steady state unless an authorized policy explicitly records that disposition, its owner, expiry/review and residual risk. Raising `planning_utilization` toward—but still strictly below—0.80 does not authorize disabling warning/pre-emergency transitions or the hard 80% emergency watermark.
+
+### 9.2 Emergency boundary and worked example
+
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-010`**: Platform SHALL enforce: Preserve recent operational window within safety limits.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
+
+
+`conservative_used / 0.80` is the **exact emergency-equality boundary**, not safe capacity below 80%. Strictly below 80% requires provisioned capacity greater than that boundary, rounded upward as required by the physical allocation unit. This does not replace the more conservative initial 70% planning recommendation.
+
+For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (10³); production results disclose bytes/unit conventions and allocation rounding.
+
+### 9.3 Assurance, simulation and protected retention
+
+For each volume and data class, expose actual usage/free space, safely reclaimable versus protected bytes, growth and data-age evidence, forecast shortfall/exhaustion and expansion deadline where supported, uncertainty and measurement freshness. Values MUST be labelled `OBSERVED`, `ESTIMATED`, `UNKNOWN` or `PROJECTED` with measurement freshness; do not silently promote estimates to observed facts.
+
+Simulate retention, topology and capacity-policy changes against a **version-bound policy revision** before activation. Activation requires the same reviewed policy revision and estimate/scope identity presented in the simulation; a concurrent policy mutation or stale preview MUST be rejected (`STALE_PREVIEW` / concurrent-change conflict) and force re-simulation. An impossible retention/capacity proposal cannot be certified as sufficient; it requires correction or an explicitly authorized and audited exception that preserves hard safety and protected-retention/legal-hold rules. Unknown or unstable growth yields an unknown forecast, not a guessed date. No calculator, preview or notification may bypass protected-retention or legal-hold requirements.
+
+The normal warning/pre-emergency/emergency model remains 70% / 75% / at-or-above 80% (`Platform_05` §37); adjustable warning and planning policies do not disable the hard 80% boundary. Recovery uses safe headroom, hysteresis and bounded reclamation work to prevent oscillation and monitoring starvation. Legal holds and protected governance/security/control data are not silently deleted to satisfy a capacity target. If eligible reclamation is insufficient, enter `CRITICAL`, identify the responsible operator and escalate for authorized capacity/retention action. Sensor emergency shedding remains explicit, accounted and governed by §11.2.
+
+### 9.3.1 Integer-byte authority and unit display
+
+Backend/API storage quantities are authoritative as **non-negative integer bytes** (64-bit range with overflow detection; reject or fail closed on arithmetic overflow rather than wrapping). JSON encodings that cannot safely represent the integer in IEEE-754 Number form MUST use a decimal-string integer field (or an equivalent exact integer representation already approved for Counter64-class exactness) and MUST NOT coerce through JavaScript/`double` Number. UI and reports may display decimal **GB/TB** (10³/10⁶) and/or binary **GiB/TiB** (2¹⁰/2²⁰) but MUST label the unit system explicitly and convert only from the integer-byte authority. Mixed unlabeled GB/GiB arithmetic is prohibited.
+
+### 9.4 Existing-owner notification and acceptance gates
+
+Storage Lifecycle owns assessment/policy authority; Platform Operations and existing Notification Center/ITSM/email integration own authorized delivery and response. Capacity cases require deduplication/correlation, configurable procurement lead times, authorized recipient profiles, retry/dead-letter custody, actual delivery status, acknowledgement, reopen/close and maintenance behavior. Example advance-notice intervals are not hardcoded defaults. A delivered notification does not prove capacity is safe or authorize protected-data deletion.
+
+Existing BUILD-061/064/074/086/094/097/130 gates own this bounded specification; no new service, database, report engine or BUILD ID is introduced. `Platform_05` §37.6–37.7 defines logical assessment/notification contracts and required arithmetic, mixed-volume, UNKNOWN, burst/drift, impossible-policy, 70/75/80 recovery, hold, audit, restore/replay and tenant/delivery-negative evidence. These requirements do not assert that a calculator, live forecast or notification path is implemented or certified.
+
 
 ## 10. Retention and rollups
 
-Customer admins configure by data type/scope:
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-- raw retention;
-- rollup resolution(s);
-- rollup retention(s);
-- archive destination/retention;
-- emergency purge priority within safe data classes.
+- **`REQ-DATA-001`**: Platform SHALL enforce: Customer-configurable raw retention by data type/scope.
+- **`REQ-DATA-002`**: Platform SHALL enforce: Customer-configurable rollup resolution and rollup retention.
+- **`REQ-DATA-003`**: Platform SHALL enforce: Numeric rollups preserve min/max/avg/count/percentiles as appropriate.
+- **`REQ-DATA-004`**: Platform SHALL enforce: Counter and state metrics use correct rate/delta/availability semantics.
+- **`REQ-DATA-005`**: Platform SHALL enforce: Automatic query resolution selection based on time range.
+- **`REQ-DATA-013`**: Platform SHALL enforce: Deduplication, replay, late/out-of-order handling.
 
-Numeric gauges preserve min/max/avg/count and percentiles where meaningful. Counters preserve rate/delta/total semantics; states preserve availability/down duration/transitions/last state. Historical queries automatically choose an appropriate resolution and disclose the resolution used.
-
+<!-- END P0-1 NORMATIVE BINDINGS -->
 ## 11. 80% Storage Protection Engine
 
 ### 11.1 Core
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-007`**: Platform SHALL enforce: Mandatory Core 80% storage-protection watermark.
+- **`REQ-DATA-009`**: Platform SHALL enforce: Emergency purge oldest eligible raw telemetry/flow/log before protected state.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The 80% safety watermark is non-disableable. Pre-watermark zones provide warning/forecast/normal TTL/compaction. At or above 80%, emergency reclamation starts and targets safe headroom rather than stopping at 79.9%. Oldest eligible raw telemetry, Flow and logs are reclaimed before protected platform state. Configuration, identity/RBAC, current inventory, licensing, current incidents and protected security/governance data are not indiscriminately purged. Audit/compliance data follows protected retention/archival rules.
 
 ### 11.2 Sensors
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-008`**: Platform SHALL enforce: Mandatory Sensor 80% storage-protection watermark.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 The same 80% principle applies to Sensor disks. Sensor cleanup prioritizes junk/temp/debug logs and already-delivered/expired spool data; if necessary during prolonged outage, oldest eligible lower-priority buffered raw data may be shed according to policy while polling continues. Sensor must expose remaining buffer horizon and loss risk.
 
 ### 11.3 Legal hold
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-014`**: Platform SHALL enforce: Legal hold/preserve incident evidence from purge.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Incident/investigation legal holds protect selected time windows/entities/evidence from normal purge and make the Storage Engine reclaim other eligible data first.
 
 ## 12. Performance/resource certification
 
+<!-- P0-1 NORMATIVE BINDINGS -->
+Primary normative bindings for this section (P0-1; not an RTM catalogue):
+
+- **`REQ-DATA-015`**: Platform SHALL enforce: Data pipeline integrity counters and no silent data loss.
+
+<!-- END P0-1 NORMATIVE BINDINGS -->
 Every release benchmarks Core CPU/RAM, Sensor CPU/RAM/disk, metrics/sec, polls/sec, Flow records/sec, syslog EPS, ingestion lag, query latency, dashboard load latency, report/RCA concurrency, **interactive diagnostic/CLI concurrency, multi-vantage fan-out, bounded continuous-test load and diagnostic latency under simultaneous certified monitoring load**, compression, retention cleanup and failure recovery. Certification must prove that interactive troubleshooting cannot starve scheduled monitoring/ingestion. Regressions beyond approved tolerance fail certification or require documented exception.
 
-For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and failover. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
+For releases enabling Local AI/ML/LLM, certification additionally records per-module normal/peak CPU and RAM, inference latency, local LLM concurrency/context, model load/unload behavior, queue/backpressure, GNN/embedding workload, AI artifact disk footprint and the effect of AI load on ingestion, alert qualification, query latency and phase-applicable failover/recovery targets. The supported local-intelligence profile must pass inside the same certified Core tier; it does not create a hidden higher minimum hardware requirement.
 
 ## 13. Development workstation resource behavior — v3.1
 

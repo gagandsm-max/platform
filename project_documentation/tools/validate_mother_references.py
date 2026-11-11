@@ -143,6 +143,81 @@ REQ_MARKER_END = "<!-- END GLOBAL PRIMARY REQ REGISTRY -->"
 PRD_MARKER_START = "<!-- GLOBAL PRIMARY PRD REGISTRY -->"
 PRD_MARKER_END = "<!-- END GLOBAL PRIMARY PRD REGISTRY -->"
 
+# Non-normative ownership placeholders rejected as sole owner evidence.
+OWNERSHIP_INDEX_START = "<!-- RTM FORMAL-ID OWNERSHIP INDEX -->"
+OWNERSHIP_INDEX_END = "<!-- END RTM FORMAL-ID OWNERSHIP INDEX -->"
+OWNERSHIP_INDEX_HEADING_RE = re.compile(
+    r"^#{1,6}\s+RTM formal-ID ownership index\b.*$",
+    re.I | re.M,
+)
+# Front-matter / family catalogue markers that only duplicate RTM one-liners.
+RTM_SECTION_FORMAL_START_RE = re.compile(
+    r"<!--\s*RTM SECTION FORMAL REQUIREMENTS:\s*([^>]+?)\s*-->",
+    re.I,
+)
+RTM_SECTION_FORMAL_END_RE = re.compile(
+    r"<!--\s*END RTM SECTION FORMAL REQUIREMENTS:\s*([^>]+?)\s*-->",
+    re.I,
+)
+NON_NORMATIVE_SECTION_HEADING_RE = re.compile(
+    r"^#{1,6}\s+.*\b("
+    r"non-normative|ownership index|summary[- ]only|catalogue only|"
+    r"formal-id ownership|rtm section formal requirements|"
+    r"family catalogue|index[- ]only|summary catalogue"
+    r")\b.*$",
+    re.I | re.M,
+)
+# Synthetic family ownership catalogues (rejected as primary semantic owners).
+SYNTHETIC_FAMILY_SECTION_HEADING_RE = re.compile(
+    r"^(#{2,6})\s+(\d+(?:\.\d+)*)\.0\s+Normative requirements\b.*$",
+    re.I | re.M,
+)
+SYNTHETIC_FAMILY_LOCATOR_RE = re.compile(
+    r"(?:§|Section\s+)\d+(?:\.\d+)*\.0\s+Normative requirements\b"
+    r"|Normative requirements\s*[—\-]\s*`?REQ-[A-Z]+`?\s+family",
+    re.I,
+)
+# Trailing/footer blocks that only list identifiers without requirement prose.
+BARE_ID_BULLET_RE = re.compile(
+    r"^\s*[-*]\s+`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*$",
+    re.M,
+)
+BARE_ID_TABLE_ROW_RE = re.compile(
+    r"^\|\s*`?((?:REQ|PRD)-[A-Z]+(?:-[A-Z]+)*-\d{3,}(?:\.\d+)?)`?\s*\|\s*$",
+    re.M,
+)
+# Two-column summary catalogues that merely restatement RTM one-liners.
+SUMMARY_REQ_TABLE_HEADER_RE = re.compile(
+    r"^\|\s*Requirement ID\s*\|\s*Normative requirement\s*\|\s*$",
+    re.I | re.M,
+)
+# Four-column synthetic family boilerplate tables.
+FOUR_COLUMN_FAMILY_TABLE_HEADER_RE = re.compile(
+    r"^\|\s*Requirement ID\s*\|\s*Normative SHALL contract\s*\|\s*"
+    r"Parent-section envelope\s*\|\s*Boundary\s*/\s*non-goal\s*\|\s*$",
+    re.I | re.M,
+)
+# Extract numbered section references from Platform_08 locators.
+# Require an explicit section marker (§ / Section / leading N. title form).
+# Do not treat issue numbers, versions (v3.3) or ID suffixes (-001) as sections.
+LOCATOR_SECTION_RE = re.compile(
+    r"(?:§|Section\s+|sec(?:tion)?\s+)(\d+(?:\.\d+){0,4})\b"
+    r"|^\s*(\d+(?:\.\d+){0,4})\.\s+\S"
+    r"|(?<![A-Za-z0-9._#])(\d+(?:\.\d+){1,4})\s+[A-Za-z]",
+    re.I | re.M,
+)
+MARKDOWN_NUMBERED_HEADING_RE = re.compile(
+    # Accept "## 3. Title" (bare int requires trailing ". ") and
+    # "### 3.1 Title" / "#### 3.1.1 Title". Reject date headings like
+    # "## 2026-10-30" and letter-suffixed "### 3.1A".
+    r"^(#{2,6})\s+("
+    r"\d+(?:\.\d+)+"  # dotted subsection ids
+    r"|"
+    r"\d+(?=\.\s)"  # bare top-level id only when followed by ". "
+    r")(?:\.\s|\s)\S[^\n]*$",
+    re.M,
+)
+
 REQ_COLUMNS = 7
 PRD_COLUMNS = 6
 REQ_HEADERS = {
@@ -174,6 +249,260 @@ def strip_marker_block(text: str, start: str, end: str) -> str:
     before, rest = text.split(start, 1)
     _, after = rest.split(end, 1)
     return before + after
+
+
+def strip_all_marker_blocks(text: str, start: str, end: str) -> str:
+    while start in text and end in text:
+        text = strip_marker_block(text, start, end)
+    return text
+
+
+def strip_rtm_section_formal_requirement_blocks(text: str) -> str:
+    """Remove <!-- RTM SECTION FORMAL REQUIREMENTS --> catalogue blocks.
+
+    These markers historically hosted two-column summary tables that duplicated
+    RTM one-liners. They are non-normative ownership evidence when used alone.
+    """
+    while True:
+        start = RTM_SECTION_FORMAL_START_RE.search(text)
+        if not start:
+            break
+        end = RTM_SECTION_FORMAL_END_RE.search(text, start.end())
+        if not end:
+            # Unclosed marker: drop from start marker to EOF so it cannot prove
+            # ownership.
+            text = text[: start.start()]
+            break
+        text = text[: start.start()] + text[end.end() :]
+    return text
+
+
+def _heading_level_at(text: str, pos: int) -> int | None:
+    """Return markdown heading level for a match starting at pos, else None."""
+    m = re.match(r"#{1,6}", text[pos:])
+    return len(m.group(0)) if m else None
+
+
+def _end_of_section_at_level(text: str, body_start: int, level: int) -> int:
+    """Return absolute end index of a section body starting at body_start.
+
+    Consumes nested child headings and stops at the next heading of equal or
+    higher level (fewer '#'), or EOF.
+    """
+    for hm in re.finditer(r"\n(#{1,6})\s+\S", text[body_start:]):
+        child_level = len(hm.group(1))
+        if child_level <= level:
+            return body_start + hm.start()
+    return len(text)
+
+
+def strip_non_normative_heading_sections(text: str) -> str:
+    """Drop sections whose heading declares index/summary/non-normative ownership.
+
+    Stripping continues through nested child headings until the next heading of
+    equal or higher level (not an arbitrary first child heading).
+    """
+    if not NON_NORMATIVE_SECTION_HEADING_RE.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in NON_NORMATIVE_SECTION_HEADING_RE.finditer(text):
+        parts.append(text[idx : match.start()])
+        level = _heading_level_at(text, match.start()) or 2
+        end = _end_of_section_at_level(text, match.end(), level)
+        idx = end
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
+def _strip_markdown_tables_matching(text: str, header_re: re.Pattern[str]) -> str:
+    """Remove markdown tables whose header line matches header_re."""
+    if not header_re.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in header_re.finditer(text):
+        line_start = text.rfind("\n", 0, match.start()) + 1
+        parts.append(text[idx:line_start])
+        cursor = match.end()
+        if cursor < len(text) and text[cursor] == "\n":
+            cursor += 1
+        while cursor < len(text):
+            eol = text.find("\n", cursor)
+            line = text[cursor:] if eol < 0 else text[cursor:eol]
+            if line.startswith("|"):
+                cursor = len(text) if eol < 0 else eol + 1
+                continue
+            break
+        idx = cursor
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
+def strip_two_column_summary_req_tables(text: str) -> str:
+    """Remove two-column Requirement ID | Normative requirement summary catalogues.
+
+    These tables historically duplicated RTM one-liners and must not prove
+    ownership by themselves. Semantic sufficiency of retained prose remains an
+    independent-audit concern.
+    """
+    return _strip_markdown_tables_matching(text, SUMMARY_REQ_TABLE_HEADER_RE)
+
+
+def strip_four_column_family_boilerplate_tables(text: str) -> str:
+    """Remove four-column synthetic family SHALL/envelope/boundary tables."""
+    return _strip_markdown_tables_matching(text, FOUR_COLUMN_FAMILY_TABLE_HEADER_RE)
+
+
+def strip_synthetic_family_normative_sections(text: str) -> str:
+    """Drop `.0 Normative requirements — REQ-* family` catalogue sections.
+
+    These headings and their boilerplate tables are not accepted as primary
+    semantic requirement ownership. Substantive numbered sections remain.
+    Stripping continues through nested children until equal/higher heading.
+    """
+    if not SYNTHETIC_FAMILY_SECTION_HEADING_RE.search(text):
+        return text
+    parts: list[str] = []
+    idx = 0
+    for match in SYNTHETIC_FAMILY_SECTION_HEADING_RE.finditer(text):
+        parts.append(text[idx : match.start()])
+        level = len(match.group(1))
+        end = _end_of_section_at_level(text, match.end(), level)
+        idx = end
+    parts.append(text[idx:])
+    return "".join(parts)
+
+
+def strip_ownership_index_placeholders(text: str) -> str:
+    """Remove index-only ownership placeholders that must not prove RTM ownership.
+
+    Structural ownership indexes, RTM SECTION FORMAL REQUIREMENTS catalogues,
+    bare identifier bullets/rows, two-/four-column summary catalogues, synthetic
+    `.0 Normative requirements` family sections and labelled
+    non-normative/summary sections are non-normative. Ownership must still bind
+    through an exact Platform_08 section locator into remaining substantive
+    owner text. A static validator cannot certify semantic completeness of that
+    prose; independent review remains mandatory.
+    """
+    text = strip_all_marker_blocks(text, OWNERSHIP_INDEX_START, OWNERSHIP_INDEX_END)
+    text = strip_rtm_section_formal_requirement_blocks(text)
+    text = strip_synthetic_family_normative_sections(text)
+    text = strip_non_normative_heading_sections(text)
+    text = strip_two_column_summary_req_tables(text)
+    text = strip_four_column_family_boilerplate_tables(text)
+    # Drop the ownership-index heading and following bare-ID list until the next
+    # heading, when present without markers.
+    if OWNERSHIP_INDEX_HEADING_RE.search(text):
+        parts: list[str] = []
+        idx = 0
+        for match in OWNERSHIP_INDEX_HEADING_RE.finditer(text):
+            parts.append(text[idx : match.start()])
+            level = _heading_level_at(text, match.start()) or 2
+            idx = _end_of_section_at_level(text, match.end(), level)
+        parts.append(text[idx:])
+        text = "".join(parts)
+    # Remove bare identifier-only bullets/rows so they cannot satisfy presence.
+    text = BARE_ID_BULLET_RE.sub("", text)
+    text = BARE_ID_TABLE_ROW_RE.sub("", text)
+    return text
+
+
+def extract_locator_section_ids(locator: str) -> list[str]:
+    """Return ordered unique numbered section ids referenced by a locator."""
+    found: list[str] = []
+    seen: set[str] = set()
+    for match in LOCATOR_SECTION_RE.finditer(locator or ""):
+        sid = next((g for g in match.groups() if g), None)
+        if sid and sid not in seen:
+            seen.add(sid)
+            found.append(sid)
+    return found
+
+
+class DuplicateSectionError(ValueError):
+    """Raised when a numbered section identifier appears more than once."""
+
+
+def section_body_map(text: str) -> dict[str, str]:
+    """Map numbered heading ids to body text until the next same/higher heading.
+
+    Duplicate numeric section identifiers are a hard failure — this function
+    never silently overwrites an earlier section key.
+    """
+    matches = list(MARKDOWN_NUMBERED_HEADING_RE.finditer(text))
+    bodies: dict[str, str] = {}
+    first_line: dict[str, str] = {}
+    for i, match in enumerate(matches):
+        level = len(match.group(1))
+        sid = match.group(2)
+        start = match.end()
+        end = len(text)
+        for nxt in matches[i + 1 :]:
+            if len(nxt.group(1)) <= level:
+                end = nxt.start()
+                break
+        if sid in bodies:
+            raise DuplicateSectionError(
+                f"duplicate numbered section identifier {sid!r} "
+                f"(first={first_line[sid]!r}; later={match.group(0)!r})"
+            )
+        bodies[sid] = text[start:end]
+        first_line[sid] = match.group(0)
+    return bodies
+
+
+def locator_binds_id(locator: str, rid: str, owner_text: str) -> tuple[bool, str]:
+    """Structural check: locator names a real section and the ID appears there.
+
+    Returns (ok, reason). Empty/coarse locators without numbered sections fail.
+    Synthetic `.0 Normative requirements — REQ-* family` locators always fail.
+    Catalogue/index/summary sections cannot satisfy primary ownership because
+    they are stripped before this check.
+    """
+    if SYNTHETIC_FAMILY_LOCATOR_RE.search(locator or ""):
+        return (
+            False,
+            "locator points at synthetic .0 Normative requirements family catalogue",
+        )
+    section_ids = extract_locator_section_ids(locator)
+    if not section_ids:
+        return False, "locator lacks numbered section reference"
+    try:
+        bodies = section_body_map(owner_text)
+    except DuplicateSectionError as exc:
+        return False, f"ambiguous section locator (duplicate ids): {exc}"
+    # Also allow the heading line itself to contain the ID. Reject ambiguous
+    # heading maps the same way section_body_map rejects duplicate bodies.
+    heading_only: dict[str, str] = {}
+    for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(owner_text):
+        sid = m.group(2)
+        if sid in heading_only:
+            return (
+                False,
+                f"ambiguous section locator (duplicate heading id {sid})",
+            )
+        heading_only[sid] = m.group(0)
+    matched_existing = False
+    for sid in section_ids:
+        if sid not in bodies and sid not in heading_only:
+            continue
+        matched_existing = True
+        chunk = heading_only.get(sid, "") + "\n" + bodies.get(sid, "")
+        if rid.startswith("REQ-"):
+            present = rid in REQ_ID_RE.findall(chunk)
+        elif rid.startswith("PRD-"):
+            present = rid in PRD_ID_RE.findall(chunk)
+        else:
+            present = rid in chunk
+        if present:
+            return True, ""
+    if not matched_existing:
+        return (
+            False,
+            "locator section not found in owner: " + ", ".join(section_ids),
+        )
+    return False, "formal ID absent from locator section(s)"
 
 
 def clean_cell(value: str) -> str:
@@ -620,6 +949,9 @@ class MotherReferenceValidator:
             text = strip_marker_block(text, REQ_MARKER_START, REQ_MARKER_END)
         else:
             text = strip_marker_block(text, PRD_MARKER_START, PRD_MARKER_END)
+        # Ownership proven solely via trailing ID indexes / bare ID placeholders
+        # is rejected. Substantive normative tables and prose remain.
+        text = strip_ownership_index_placeholders(text)
         return text
 
     def _validate_registry_owners(
@@ -628,6 +960,7 @@ class MotherReferenceValidator:
         kind: str,
         paths: dict[str, Path],
     ) -> None:
+        owner_text_cache: dict[str, str | None] = {}
         for row in rows:
             rid = row["id"]
             owner = row["owner"]
@@ -647,11 +980,38 @@ class MotherReferenceValidator:
             if not owner_path.is_file():
                 self.fail(f"{kind} {rid}: owner file does not exist: {owner}")
                 continue
-            owner_text = self._owner_text_without_primary_registry(owner, paths, kind)
+            # Reject synthetic family locators before presence checks so the
+            # failure names the catalogue defect rather than a stripped ID.
+            if locator and SYNTHETIC_FAMILY_LOCATOR_RE.search(locator):
+                self.fail(
+                    f"{kind} {rid}: source locator does not bind ID to a "
+                    f"substantive owner section (locator points at synthetic "
+                    f".0 Normative requirements family catalogue): "
+                    f"locator={locator!r} owner={owner}"
+                )
+                continue
+            if owner not in owner_text_cache:
+                owner_text_cache[owner] = self._owner_text_without_primary_registry(
+                    owner, paths, kind
+                )
+            owner_text = owner_text_cache[owner]
             if owner_text is None or not self._id_occurs_in_text(rid, owner_text):
                 self.fail(
                     f"{kind} {rid}: formal ID absent from declared owner "
                     f"outside primary registry: {owner}"
+                )
+                continue
+            # Structural semantic-ownership gate: Platform_08 locator must name
+            # an exact numbered owner section that contains the ID after
+            # non-normative catalogues are stripped.
+            if not locator:
+                continue
+            ok, reason = locator_binds_id(locator, rid, owner_text)
+            if not ok:
+                self.fail(
+                    f"{kind} {rid}: source locator does not bind ID to a "
+                    f"substantive owner section ({reason}): locator={locator!r} "
+                    f"owner={owner}"
                 )
 
     def validate_global_requirements(
@@ -886,6 +1246,85 @@ class MotherReferenceValidator:
                     f"{rel}: numeric subsection {sub.group(2)}{sub.group(3)} "
                     f"under ## {current_top} (parent mismatch): "
                     f"{line.strip()[:80]}"
+                )
+
+    def validate_unique_section_identifiers(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Reject duplicate numeric section IDs at every numbered heading depth.
+
+        Applies to all Mother Reference markdown files. Duplicate `## N`,
+        `### N.M`, `#### N.M.x`, etc. fail closed; `section_body_map` must never
+        silently overwrite a colliding key.
+        """
+        for rel, path in paths.items():
+            if not rel.endswith(".md") or not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8")
+            # Strip fenced code so example markdown cannot create false collisions.
+            cleaned_parts: list[str] = []
+            in_fence = False
+            for line in text.splitlines(keepends=True):
+                if line.lstrip().startswith("```"):
+                    in_fence = not in_fence
+                    continue
+                if not in_fence:
+                    cleaned_parts.append(line)
+            cleaned = "".join(cleaned_parts)
+            try:
+                section_body_map(cleaned)
+            except DuplicateSectionError as exc:
+                self.fail(f"{rel}: {exc}")
+            # Also report via Counter for clearer multi-collision messages.
+            ids = [
+                m.group(2) for m in MARKDOWN_NUMBERED_HEADING_RE.finditer(cleaned)
+            ]
+            for sid, count in Counter(ids).items():
+                if count > 1:
+                    msg = (
+                        f"{rel}: duplicate numbered section identifier "
+                        f"{sid} (count={count})"
+                    )
+                    if msg not in self.errors and not any(
+                        rel in e and f"duplicate numbered section identifier {sid!r}" in e
+                        for e in self.errors
+                    ):
+                        self.fail(msg)
+
+    _VARCHAR_ENUM_FIELD_RE = re.compile(
+        r"`?([A-Za-z_][A-Za-z0-9_]*)`?\s+"
+        r"VARCHAR\((\d+)\)\s+NN?"
+        r"[^\n]*?"
+        r"(?:CHECK\s+IN\s*\(([^)]+)\)|\(([^)]+)\))",
+        re.I,
+    )
+
+    def validate_postgres_enum_varchar_widths(
+        self, paths: dict[str, Path]
+    ) -> None:
+        """Fail when a declared VARCHAR(n) cannot hold every listed enum literal."""
+        rel = "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        path = paths.get(rel)
+        if path is None or not path.is_file():
+            return
+        text = path.read_text(encoding="utf-8")
+        for m in self._VARCHAR_ENUM_FIELD_RE.finditer(text):
+            field, width_s, check_list, paren_list = m.groups()
+            width = int(width_s)
+            raw = check_list or paren_list or ""
+            # Only treat as enum list when tokens look like quoted/UPPER literals.
+            literals = re.findall(r"'([A-Z][A-Z0-9_]*)'|\b([A-Z][A-Z0-9_]{2,})\b", raw)
+            values = [a or b for a, b in literals]
+            if len(values) < 2:
+                continue
+            # Skip likely non-enum parenthetical notes.
+            if any(v in {"UUID", "JSONB", "BYTEA", "TIMESTAMPTZ", "INET"} for v in values):
+                continue
+            longest = max(values, key=len)
+            if len(longest) > width:
+                self.fail(
+                    f"{rel}: VARCHAR({width}) too narrow for {field} enum "
+                    f"(longest literal {longest!r} len={len(longest)})"
                 )
 
     def validate_maturity_language(self, paths: dict[str, Path]) -> None:
@@ -1322,6 +1761,1151 @@ class MotherReferenceValidator:
                 return False
             idx = pos + len(needle)
 
+    def validate_network_flow_source_reality_status(self) -> None:
+        """Pin BUILD-043/044/045/051 status truth to main 92f0fb37 source reality.
+
+        Documentation candidate based on canonical main
+        ``92f0fb37805c234be2869619abcc01ad26b5f30b`` must not overstate
+        interface reconciliation, SNMP trap/inform, device-control connector,
+        or Flow receiver implementation. Skipped when the programme register
+        is absent (minimal fixture trees).
+        """
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not register_path.is_file():
+            return
+        text = register_path.read_text(encoding="utf-8")
+
+        def summary_row(build_id: str) -> str:
+            prefix = f"| {build_id} |"
+            for line in text.splitlines():
+                if line.startswith(prefix):
+                    return line
+            self.fail(f"Build Register missing summary row for {build_id}")
+            return ""
+
+        def ledger_row(num: str) -> str:
+            section = text
+            marker = "### BUILD-040..054"
+            if marker in text:
+                section = text[text.find(marker) :]
+                nxt = section.find("\n### BUILD-", 1)
+                if nxt != -1:
+                    section = section[:nxt]
+            prefix = f"| {num} |"
+            for line in section.splitlines():
+                if line.startswith(prefix):
+                    return line
+            self.fail(
+                f"Build Register missing executable-plan ledger row for BUILD-{num}"
+            )
+            return ""
+
+        def maturity_cell(row: str) -> str:
+            cells = [c.strip() for c in row.strip().strip("|").split("|")]
+            if not cells:
+                return ""
+            # Summary: ID | unit | scope | depends | Starting maturity | Exit
+            # Ledger: BUILD | ... | ⑦ evidence / gate (last cell)
+            if cells[0].startswith("BUILD-"):
+                return cells[4] if len(cells) > 4 else ""
+            return cells[-1]
+
+        checks: list[tuple[str, str, str, tuple[str, ...]]] = [
+            (
+                "BUILD-043",
+                "043",
+                "SPECIFIED_ONLY / NOT_IMPLEMENTED",
+                ("Partial/spec", "Partial"),
+            ),
+            (
+                "BUILD-044",
+                "044",
+                "SPECIFIED_ONLY / NOT_IMPLEMENTED",
+                ("Partial/spec", "Partial"),
+            ),
+            (
+                "BUILD-045",
+                "045",
+                (
+                    "**NOT DISPATCHABLE** until DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE "
+                    "PASS; NOT_IMPLEMENTED"
+                ),
+                ("Mostly not implemented",),
+            ),
+            (
+                "BUILD-051",
+                "051",
+                "NOT_IMPLEMENTED",
+                ("Not production", "Next lane"),
+            ),
+        ]
+
+        for build_id, num, required, banned in checks:
+            for label, row in (
+                ("summary", summary_row(build_id)),
+                ("ledger", ledger_row(num)),
+            ):
+                if not row:
+                    continue
+                maturity = maturity_cell(row)
+                if maturity != required and required not in maturity:
+                    self.fail(
+                        f"Build Register {label} {build_id} maturity must be "
+                        f"{required!r} (source reality at main "
+                        f"92f0fb37805c234be2869619abcc01ad26b5f30b); got {maturity!r}"
+                    )
+                for bad in banned:
+                    if bad == "Partial":
+                        # Exact cell or tokenized maturity, not substring of
+                        # SPECIFIED_ONLY / NOT_IMPLEMENTED.
+                        if maturity == "Partial" or maturity.startswith("Partial;"):
+                            self.fail(
+                                f"Build Register {label} {build_id} must not use "
+                                f"overstated maturity {maturity!r}"
+                            )
+                        continue
+                    if bad in maturity:
+                        self.fail(
+                            f"Build Register {label} {build_id} must not retain "
+                            f"overstated maturity token {bad!r}"
+                        )
+
+        for row in (summary_row("BUILD-045"), ledger_row("045")):
+            if not row:
+                continue
+            if "DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE" not in row:
+                self.fail(
+                    "BUILD-045 must retain DEVICE_CONTROL_P1_PROFILE_FREEZE_GATE"
+                )
+            if "NOT DISPATCHABLE" not in row:
+                self.fail("BUILD-045 must retain NOT DISPATCHABLE until gate PASS")
+
+        # BUILD-051 first UDP profile + GoFlow2 admission gate (docs only).
+        # Maturity must remain NOT_IMPLEMENTED; profile freeze is not Partial.
+        for row in (summary_row("BUILD-051"), ledger_row("051")):
+            if not row:
+                continue
+            for required in (
+                "FLOW_UDP_P1_PROFILE_V1",
+                "FLOW_PARSER_DEPENDENCY_ADMISSION_GATE",
+                "NOT_IMPLEMENTED",
+                "SPECIFIED_NOT_IMPLEMENTED",
+            ):
+                if required not in row:
+                    self.fail(
+                        f"BUILD-051 must retain {required!r} in summary/ledger "
+                        "(first UDP profile freeze; GoFlow2 admission; "
+                        "source reality NOT_IMPLEMENTED)"
+                    )
+            for banned in ("Partial", "Next lane"):
+                maturity = maturity_cell(row)
+                if banned == "Partial":
+                    if maturity == "Partial" or maturity.startswith("Partial;"):
+                        self.fail(
+                            "BUILD-051 must not promote documentation freeze to "
+                            f"Partial maturity ({maturity!r})"
+                        )
+                elif banned in maturity:
+                    self.fail(
+                        f"BUILD-051 must not retain overstated maturity token "
+                        f"{banned!r}"
+                    )
+
+        self.validate_sflow_v5_datagram_sequence_contract()
+        self.validate_build_042_counter_leaf_source_truth()
+
+    def validate_build_042_counter_leaf_source_truth(self) -> None:
+        """Pin BUILD-042 status after PR #304 counter derivation leaf merge.
+
+        Must not regress to obsolete ``Raw Counter64 exists`` alone, and must
+        not claim whole-BUILD / BUILD-048 / deployment certification. Skipped
+        when the programme register is absent (minimal fixture trees).
+        """
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not register_path.is_file():
+            return
+        text = register_path.read_text(encoding="utf-8")
+
+        required = (
+            "PARTIAL — exact raw Counter64 + counter derivation leaf "
+            "implemented; integration/benchmark/certification pending"
+        )
+        banned_exact = ("Raw Counter64 exists",)
+
+        summary = ""
+        ledger = ""
+        section = text
+        marker = "### BUILD-040..054"
+        if marker in text:
+            section = text[text.find(marker) :]
+            nxt = section.find("\n### BUILD-", 1)
+            if nxt != -1:
+                section = section[:nxt]
+        for line in text.splitlines():
+            if line.startswith("| BUILD-042 |"):
+                summary = line
+                break
+        for line in section.splitlines():
+            if line.startswith("| 042 |"):
+                ledger = line
+                break
+        if not summary:
+            self.fail("Build Register missing summary row for BUILD-042")
+            return
+        if not ledger:
+            self.fail(
+                "Build Register missing executable-plan ledger row for BUILD-042"
+            )
+            return
+
+        for label, row in (("summary", summary), ("ledger", ledger)):
+            if required not in row:
+                self.fail(
+                    f"Build Register {label} BUILD-042 must record "
+                    f"{required!r} after PR #304 leaf merge"
+                )
+            for bad in banned_exact:
+                # Allow historical discussion only if the required PARTIAL
+                # status is present; ban obsolete sole maturity cell.
+                cells = [c.strip() for c in row.strip().strip("|").split("|")]
+                maturity = ""
+                if cells and cells[0].startswith("BUILD-"):
+                    maturity = cells[4] if len(cells) > 4 else ""
+                else:
+                    maturity = cells[-1] if cells else ""
+                if maturity == bad:
+                    self.fail(
+                        f"Build Register {label} BUILD-042 must not regress to "
+                        f"obsolete maturity {bad!r}"
+                    )
+
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if p17_path.is_file():
+            p17 = p17_path.read_text(encoding="utf-8")
+            for needle in (
+                required,
+                "PR #304",
+                "sensor/internal/protocol/snmp/counter/",
+                "no whole BUILD-042 certification",
+                "no BUILD-048 Network Sensor certification",
+                "no deployment claim",
+            ):
+                if needle not in p17:
+                    self.fail(
+                        "Platform_17 §6 must reconcile BUILD-042 leaf source "
+                        f"truth (missing {needle!r})"
+                    )
+            # Stale sole claim that derivation remains unimplemented.
+            stale = (
+                "That derived Counter32/Counter64 reset/wrap/discontinuity/"
+                "rate layer remains **SPECIFIED but NOT IMPLEMENTED/CERTIFIED**"
+            )
+            if stale in p17:
+                self.fail(
+                    "Platform_17 §6 must not retain obsolete "
+                    "SPECIFIED-but-NOT-IMPLEMENTED derivation claim after PR #304"
+                )
+
+    def validate_sflow_v5_datagram_sequence_contract(self) -> None:
+        """Pin BUILD-051 S5 sFlow datagram sequence / discontinuity contract.
+
+        Detailed semantics live in Platform_10; Build Register cross-references
+        S5 fixtures. BUILD-051 maturity must remain NOT_IMPLEMENTED.
+        Skipped when Platform_10 / Build Register are absent (minimal fixtures).
+        """
+        p10_path = (
+            self.docs_root
+            / "Platform_10_Protocol_Security_Connector_Master.md"
+        )
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if not p10_path.is_file() or not register_path.is_file():
+            return
+
+        p10 = p10_path.read_text(encoding="utf-8")
+        register = register_path.read_text(encoding="utf-8")
+
+        if "sFlow v5 datagram sequence" not in p10:
+            # Minimal fixtures without the Flow handoff section.
+            if "FLOW_UDP_P1_PROFILE_V1" not in p10 and "BUILD-051" not in register:
+                return
+            self.fail(
+                "Platform_10 must own sFlow v5 datagram sequence / gap / "
+                "duplicate / reorder / restart semantics for BUILD-051 S5"
+            )
+
+        required_p10 = (
+            "Primary loss authority = datagram sequence",
+            "sFlow datagram `sequence_number`",
+            "Do **NOT** scope only by source IP",
+            "Sample sequence numbers are supplemental",
+            "MUST NOT be interpreted as sequence-per-`source_id`",
+            "UINT32 serial arithmetic",
+            "distance = (C - P) mod 2^32",
+            "DUPLICATE_DATAGRAM",
+            "SEQUENCE_COLLISION",
+            "SEQUENCE_GAP",
+            "missing_datagrams = distance - 1",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "UINT32 wrap",
+            "0xffffffff → 0",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "do not calculate datagram loss across the boundary",
+            "current exporter uptime < previous exporter uptime",
+            "ALWAYS",
+            "NOT** legal when a trusted uptime decrease is present",
+            "When `SEQUENCE_DISCONTINUITY_UNKNOWN` is legal",
+            "uptime is absent, unavailable or explicitly untrusted",
+            "trusted uptime decrease",
+            "MUST NOT produce `SEQUENCE_DISCONTINUITY_UNKNOWN`",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "Duplicate and reorder do not become loss",
+            "Stream epoch state",
+            "first valid datagram establishes a fresh collector-side baseline",
+            "Do not silently persist sequence state by exporter IP alone",
+            "sample family (`FLOW` or `COUNTER`)",
+            "SAMPLE_SEQUENCE_GAP",
+            "SAMPLE_DUPLICATE",
+            "SAMPLE_OUT_OF_ORDER",
+            "MUST NOT change primary datagram loss counts",
+            "sub_agent_id",
+            "malformed packet does not mutate sequence high-water",
+            "NOT_IMPLEMENTED",
+        )
+        for needle in required_p10:
+            if needle not in p10:
+                self.fail(
+                    "Platform_10 sFlow v5 datagram sequence contract missing "
+                    f"{needle!r}"
+                )
+        # Fixture 8 must not regress to UNKNOWN on trusted uptime decrease.
+        if (
+            "uptime decrease with otherwise plausible modular progression = "
+            "discontinuity/`SEQUENCE_DISCONTINUITY_UNKNOWN`"
+            in p10
+        ):
+            self.fail(
+                "Platform_10 fixture 8 must not classify trusted uptime "
+                "decrease as SEQUENCE_DISCONTINUITY_UNKNOWN"
+            )
+
+        # Build Register must cross-reference S5 ownership without promoting
+        # maturity, and retain the primary-authority / wrap / epoch pins.
+        section = register[register.find("### BUILD-040..054") :]
+        nxt = section.find("\n### BUILD-", 1)
+        if nxt != -1:
+            section = section[:nxt]
+        ledger = ""
+        for line in section.splitlines():
+            if line.startswith("| 051 |"):
+                ledger = line
+                break
+        if not ledger:
+            self.fail("BUILD-051 ledger row missing for sFlow sequence contract")
+            return
+
+        for required in (
+            "NOT_IMPLEMENTED",
+            "S5 sFlow v5",
+            "datagram-sequence primary loss authority",
+            "uint32 wrap",
+            "duplicate/reorder/gap distinction",
+            "restart/discontinuity epoch",
+            "sample-sequence supplemental-only",
+            "Platform_10",
+            "SEQUENCE_GAP",
+            "DUPLICATE_DATAGRAM",
+            "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+            "EXPORTER_RESTART_OR_DISCONTINUITY",
+            "SEQUENCE_DISCONTINUITY_UNKNOWN",
+            "SAMPLE_SEQUENCE_GAP",
+            "sub_agent_id",
+            "collector-restart baseline",
+        ):
+            if required not in ledger:
+                self.fail(
+                    f"BUILD-051 S5 ledger must retain sFlow sequence pin {required!r}"
+                )
+
+        maturity = [c.strip() for c in ledger.strip().strip("|").split("|")][-1]
+        if maturity != "NOT_IMPLEMENTED":
+            self.fail(
+                "BUILD-051 must remain NOT_IMPLEMENTED after sFlow sequence "
+                f"contract freeze; got {maturity!r}"
+            )
+
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if p17_path.is_file():
+            p17 = p17_path.read_text(encoding="utf-8")
+            if "FLOW_UDP_P1_PROFILE_V1" in p17:
+                for required in (
+                    "sFlow v5 sequence quality envelope",
+                    "DUPLICATE_DATAGRAM",
+                    "SEQUENCE_COLLISION",
+                    "OUT_OF_ORDER_OR_OLD_DATAGRAM",
+                    "SEQUENCE_DISCONTINUITY_UNKNOWN",
+                    "SAMPLE_SEQUENCE_GAP",
+                    "datagram header `sequence_number`",
+                    "MUST NOT mutate primary datagram-loss counts",
+                ):
+                    if required not in p17:
+                        self.fail(
+                            "Platform_17 Flow quality envelope missing sFlow "
+                            f"sequence outcome {required!r}"
+                        )
+
+        p12_path = (
+            self.docs_root / "Platform_12_Decision_Source_Register.md"
+        )
+        if p12_path.is_file():
+            p12 = p12_path.read_text(encoding="utf-8")
+            if "FLOW_PARSER_DEPENDENCY_ADMISSION_GATE" in p12:
+                for required in (
+                    "sFlow v5 datagram sequence / discontinuity authority",
+                    "EXPORTER_RESTART_OR_DISCONTINUITY",
+                    "current exporter uptime < previous exporter uptime",
+                    "ALWAYS classifies `EXPORTER_RESTART_OR_DISCONTINUITY`",
+                    "NOT** legal when a trusted uptime decrease is present",
+                    "prefer possible false discontinuity over fabricated giant loss",
+                    "NOT_IMPLEMENTED",
+                ):
+                    if required not in p12:
+                        self.fail(
+                            "Platform_12 must register sFlow sequence decision "
+                            f"containing {required!r}"
+                        )
+
+    def validate_dependency_activation_combine_operator(self) -> None:
+        """Pin DependencyActivationV1 explicit ANY|ALL combination operator.
+
+        Skipped when Platform_17 / Platform_22 are absent (minimal fixtures).
+        """
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        p22_path = (
+            self.docs_root
+            / "Platform_22_Monitoring_Intelligence_Alert_Quality_and_AI_Assurance_Master.md"
+        )
+        if not p17_path.is_file() or not p22_path.is_file():
+            return
+        p17 = p17_path.read_text(encoding="utf-8")
+        p22 = p22_path.read_text(encoding="utf-8")
+        if "###### `DependencyActivationV1`" not in p17:
+            return
+        act = p17[
+            p17.find("###### `DependencyActivationV1`") : p17.find(
+                "###### `ThresholdExprV1` (discriminated union)"
+            )
+        ]
+        for required in (
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "At least one criterion MUST be enabled",
+            "No hidden/default combination behavior is permitted",
+            "ALL` with only one enabled criterion is invalid",
+            "stale/unqualified dependency evidence ⇒ `UNKNOWN`",
+        ):
+            if required not in act:
+                self.fail(
+                    "Platform_17 DependencyActivationV1 must freeze "
+                    f"combination operator contract containing {required!r}"
+                )
+        body_dep = p22[
+            p22.find("#### 6.1.9 Dependency threshold") : p22.find("#### 6.1.10")
+        ]
+        for required in (
+            "combine: ANY | ALL",
+            "combine=ANY",
+            "combine=ALL",
+            "no hidden/default combination behavior is permitted",
+            "cannot activate `SUPPRESS`/`DEFER`",
+        ):
+            if required not in body_dep:
+                self.fail(
+                    "Platform_22 §6.1.9 must freeze DependencyActivation "
+                    f"ANY|ALL semantics containing {required!r}"
+                )
+
+    def validate_agent_ingress_pending_reservation_safety(self) -> None:
+        """Pin Platform_17 §7.1 Agent-ingress pending-reservation invariant.
+
+        A deterministic pre-publication non-terminal rejection must not leave an
+        unpublished durable pending reservation blocking continuity. Bindings in
+        Platform_05/06 and BUILD-062/024 must reference §7.1 without dropping the
+        frozen invariant phrase. Also pins the Agent-ingress upgrade/migration
+        cutover gate after supersession of zero-pending-as-mandatory-migration-
+        blocker (Platform_16 §5.1 / §7.1.9–§7.1.15 / BUILD-127), authority-
+        checkpoint recovery, and crash/restart exact retry fixture under
+        BUILD-062. Skipped when Platform_17 is absent.
+        """
+        p17_path = (
+            self.docs_root
+            / "Platform_17_API_Event_and_Data_Model_Contracts.md"
+        )
+        if not p17_path.is_file():
+            return
+        p17 = p17_path.read_text(encoding="utf-8")
+
+        # Minimal fixture trees often stub Platform_17 without the PR #81
+        # durability note. Enforce only when that contract surface is present.
+        has_durability = "## 7. Telemetry durability" in p17
+        has_section_71 = "### 7.1 Agent-ingress pending-reservation" in p17
+        if not has_durability and not has_section_71:
+            return
+
+        frozen = (
+            "A deterministic pre-publication non-terminal rejection MUST NOT "
+            "leave an unpublished durable pending reservation blocking continuity."
+        )
+        if frozen not in p17:
+            self.fail(
+                "Platform_17 must freeze Agent-ingress pending-reservation "
+                f"invariant: {frozen!r}"
+            )
+
+        # Prefer the dedicated §7.1 owner; fail if the frozen phrase exists only
+        # as a dangling cross-reference without the section heading.
+        if not has_section_71:
+            self.fail(
+                "Platform_17 must own pending-reservation safety under "
+                "### 7.1 Agent-ingress pending-reservation …"
+            )
+
+        required_p17 = (
+            "### 7.1.1 Disposition classes",
+            "### 7.1.2 Normative processing order",
+            "### 7.1.3 Stale / unknown / revoked / fenced assignment authority",
+            "### 7.1.4 Pending reservation safety and conditional release",
+            "### 7.1.5 Retryable infrastructure / publication failure",
+            "### 7.1.6 Cleanup failure",
+            "### 7.1.7 Terminal disposition remains distinct",
+            "### 7.1.8 Mandatory acceptance tests / fixtures",
+            "### 7.1.9 Schema migration / release-guard upgrade precondition",
+            "TERMINALLY_REJECTED",
+            "ERR_AGENT_IDENTITY_CONFLICT",
+            "ERR_AGENT_ASSIGNMENT_UNKNOWN",
+            "pending_first_sequence IS NULL",
+            "historical disposition lookup",
+            "mutable assignment",
+            "conditional release",
+            "publisher-owned",
+            "Sensor retains custody",
+            "same unsettled sequence",
+            "Historical pending publication state is **not inferable**",
+            "SUPERSEDED contract — zero-pending as mandatory migration blocker",
+            "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            "LEGACY_UNKNOWN",
+            "AUTHORITY_VALIDATED",
+            "UNVALIDATED",
+            "LEGACY_PENDING_RECONCILIATION_REQUIRED",
+            "SensorAcceptanceEvidenceV1",
+            "PendingCanonicalBindingV1",
+            "raw `acceptedAt` alone is insufficient",
+            "0 <= clock_max_error_ms <= 5000",
+            "0 <= clock_sync_age_ms <= 300000",
+            "clock_max_error_ms = -1",
+            "clock_sync_age_ms = -1",
+            "acceptance_lower <= accepted_at_utc",
+            "accepted_at_utc <= acceptance_upper",
+            "acceptance_lower <= acceptance_upper",
+            "acceptance_upper == revoked_at",
+            "UNQUALIFIED / INVALID",
+            "MUST NEVER become more permissive than missing clock evidence",
+            "No transition to `AUTHORITY_VALIDATED`",
+            "checked duration arithmetic",
+            "No wrapping, saturation or silent coercion",
+            "ERR_AGENT_ASSIGNMENT_REVOKED_AT_ACCEPTANCE",
+            "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+            "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+            "U5A",
+            "U5B",
+            "pending_canonical_batch_sha256",
+            "do **NOT** re-resolve entity identity against the current live entity binding",
+            "replay uses persisted Entity A",
+            "does **not** resolve to Entity B",
+            "Publisher claim before `AUTHORITY_VALIDATED` is forbidden",
+            "Crash after mutable validation failure, before pending release",
+            "Manual pending deletion/reset is **not** accepted remediation",
+            "STAGE 1 — DRAIN MODE",
+            "STAGE 2 — HARD CUTOVER FENCE",
+            "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+            "check-then-unlock-then-migrate gap",
+            "CUTOVER-RACE-1",
+            "CUTOVER-RACE-2",
+            "CUTOVER-RACE-3",
+            "CUTOVER-RACE-4",
+            "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+            "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+            "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+            "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+            "CUTOVER-LOCK-1",
+            "CUTOVER-LOCK-2",
+            "CUTOVER-LOCK-3",
+            "CUTOVER-LOCK-4",
+            "CUTOVER-LOCK-5",
+            "CUTOVER-LOCK-6",
+            "CUTOVER-LOCK-7",
+            "CUTOVER-LOCK-8",
+            "CUTOVER-LOCK-9",
+            "CUTOVER-LOCK-10",
+            "per-Sensor lock alone does **not** fence",
+            "both Cores must honor the same PostgreSQL global cutover lock",
+            "#### 7.1.10 Durable authority checkpoint",
+            "#### 7.1.11 Historical temporal authority",
+            "##### 7.1.11.1 SensorAcceptanceEvidenceV1",
+            "##### 7.1.11.4 UNVALIDATED exact retry",
+            "##### 7.1.10.2 PendingCanonicalBindingV1",
+            "#### 7.1.12 AUTHORITY_VALIDATED retry",
+            "#### 7.1.13 LEGACY_UNKNOWN migration and recovery",
+            "#### 7.1.14 Publication-uncertain authority change — mandatory case J7",
+            "U1 clean migration",
+            "U2 dormant legacy pending migration",
+            "U4 active publisher blocks migration",
+            "U6 insufficient historical proof",
+            "U7 accepted/settled history unchanged",
+        )
+        for needle in required_p17:
+            if needle not in p17:
+                self.fail(
+                    f"Platform_17 §7.1 missing required pending-reservation "
+                    f"contract text: {needle!r}"
+                )
+
+        # SensorAcceptanceEvidenceV1 clock-range / uncertainty regressions.
+        # Upper-bound-only text without nonnegative floors is insufficient and
+        # would silently permit negative clock errors (more permissive than
+        # missing evidence).
+        clock_section_match = re.search(
+            r"##### 7\.1\.11\.2 Phase-1 clock qualification\n(.*?)(?=\n##### 7\.1\.11\.3 |\n#### 7\.1\.12 )",
+            p17,
+            re.DOTALL,
+        )
+        if not clock_section_match:
+            self.fail(
+                "Platform_17 must own ##### 7.1.11.2 Phase-1 clock qualification"
+            )
+        else:
+            clock_section = clock_section_match.group(1)
+            if "0 <= clock_max_error_ms <= 5000" not in clock_section:
+                self.fail(
+                    "SensorAcceptanceEvidenceV1 must require "
+                    "0 <= clock_max_error_ms <= 5000 (nonnegative floor)"
+                )
+            if "0 <= clock_sync_age_ms <= 300000" not in clock_section:
+                self.fail(
+                    "SensorAcceptanceEvidenceV1 must require "
+                    "0 <= clock_sync_age_ms <= 300000 (nonnegative floor)"
+                )
+            # Reject upper-bound-only forms that omit the nonnegative floor.
+            if re.search(
+                r"(?<!0 <= )clock_max_error_ms <= 5000", clock_section
+            ) and "0 <= clock_max_error_ms <= 5000" not in clock_section:
+                self.fail(
+                    "clock_max_error_ms upper-bound-only form without "
+                    "nonnegative floor is forbidden"
+                )
+            if re.search(
+                r"(?<!0 <= )clock_sync_age_ms <= 300000", clock_section
+            ) and "0 <= clock_sync_age_ms <= 300000" not in clock_section:
+                self.fail(
+                    "clock_sync_age_ms upper-bound-only form without "
+                    "nonnegative floor is forbidden"
+                )
+            for ordering in (
+                "acceptance_lower <= accepted_at_utc",
+                "accepted_at_utc <= acceptance_upper",
+                "acceptance_lower <= acceptance_upper",
+            ):
+                if ordering not in clock_section:
+                    self.fail(
+                        "SensorAcceptanceEvidenceV1 checked uncertainty "
+                        f"ordering missing: {ordering!r}"
+                    )
+            if (
+                "acceptance_upper == revoked_at" not in clock_section
+                or "NOT** authorized" not in clock_section
+            ):
+                self.fail(
+                    "revocation-boundary equality must remain NOT authorized"
+                )
+            if (
+                "MUST NEVER become more permissive than missing clock evidence"
+                not in clock_section
+            ):
+                self.fail(
+                    "malformed clock evidence must never be more permissive "
+                    "than missing clock evidence"
+                )
+            if "No transition to `AUTHORITY_VALIDATED`" not in clock_section:
+                self.fail(
+                    "malformed clock evidence must not transition to "
+                    "AUTHORITY_VALIDATED"
+                )
+            # Negative values must be explicitly rejected, never authorized.
+            for reject_needle in (
+                "clock_max_error_ms = -1",
+                "clock_sync_age_ms = -1",
+                "negative values",
+            ):
+                if reject_needle not in clock_section:
+                    self.fail(
+                        "SensorAcceptanceEvidenceV1 must reject negative "
+                        f"clock fields ({reject_needle!r})"
+                    )
+            # Forbid prose that authorizes negative clock errors.
+            if re.search(
+                r"negative\s+clock_max_error_ms\s+(?:is\s+)?(?:valid|authorized|accepted|permitted)",
+                clock_section,
+                re.IGNORECASE,
+            ):
+                self.fail(
+                    "negative clock_max_error_ms must not be authorized"
+                )
+            # Equality at revoked_at must remain explicitly NOT authorized.
+            for match in re.finditer(
+                r"acceptance_upper\s*==\s*revoked_at[^\n]{0,160}",
+                clock_section,
+                re.IGNORECASE,
+            ):
+                window = match.group(0)
+                if re.search(
+                    r"(?:authorized|valid|accepted|permitted)",
+                    window,
+                    re.IGNORECASE,
+                ) and not re.search(
+                    r"(?:NOT|not|never)",
+                    window,
+                ):
+                    self.fail(
+                        "acceptance_upper == revoked_at must not become "
+                        "authorized"
+                    )
+
+        # Processing-order steps must remain ahead of mutable validation.
+        order_markers = (
+            "Authenticate Sensor",
+            "Derive server-authoritative tenant and Sensor identity",
+            "Validate immutable request structure",
+            "exact durable prior-disposition",
+            "mutable assignment / entity / binding validation",
+        )
+        for needle in order_markers:
+            if needle not in p17:
+                self.fail(
+                    f"Platform_17 §7.1 processing order missing step text: "
+                    f"{needle!r}"
+                )
+
+        p05_path = self.docs_root / "Platform_05_LLD.md"
+        if p05_path.is_file():
+            p05 = p05_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                frozen,
+                "ERR_AGENT_IDENTITY_CONFLICT",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+            ):
+                if needle not in p05:
+                    self.fail(
+                        f"Platform_05 must bind Platform_17 §7.1 "
+                        f"(missing {needle!r})"
+                    )
+
+        p14_path = (
+            self.docs_root / "Platform_14_Test_Performance_and_Release_Quality.md"
+        )
+        if p14_path.is_file():
+            p14 = p14_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 3.2 Agent-ingress authority-checkpoint",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "U5A",
+                "U5B",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "raw `acceptedAt` alone is insufficient",
+                "0 <= clock_max_error_ms <= 5000",
+                "0 <= clock_sync_age_ms <= 300000",
+                "clock_max_error_ms = -1",
+                "clock_sync_age_ms = -1",
+                "clock_max_error_ms > 5000",
+                "clock_sync_age_ms > 300000",
+                "acceptance_lower <= accepted_at_utc",
+                "accepted_at_utc <= acceptance_upper",
+                "acceptance_lower <= acceptance_upper",
+                "acceptance_upper == revoked_at",
+                "UNQUALIFIED / INVALID",
+                "MUST NEVER become more permissive than missing clock evidence",
+                "MUST NOT transition to `AUTHORITY_VALIDATED`",
+                "ERR_AGENT_ACCEPTANCE_ORDER_UNCERTAIN",
+            ):
+                if needle not in p14:
+                    self.fail(
+                        "Platform_14 must freeze authority-checkpoint "
+                        f"acceptance obligations (missing {needle!r})"
+                    )
+
+        p12_path = self.docs_root / "Platform_12_Decision_Source_Register.md"
+        if p12_path.is_file():
+            p12 = p12_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 29.10 Agent-ingress authority-checkpoint",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "U5A",
+                "U5B",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "0 <= clock_max_error_ms <= 5000",
+                "0 <= clock_sync_age_ms <= 300000",
+                "acceptance_lower <= accepted_at_utc <= acceptance_upper",
+                "MUST NEVER be more permissive than missing clock evidence",
+                "UNQUALIFIED / INVALID",
+            ):
+                if needle not in p12:
+                    self.fail(
+                        "Platform_12 must freeze authority-checkpoint "
+                        f"decision register entries (missing {needle!r})"
+                    )
+
+        p06_path = self.docs_root / "Platform_06_Dataflow.md"
+        if p06_path.is_file():
+            p06 = p06_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                frozen,
+                "### 119.21 Upgrade / rollback",
+                "active Agent-ingress publisher/writer ownership = non-zero",
+                "LEGACY_UNKNOWN",
+                "STAGE 1 drain mode",
+                "STAGE 2 hard cutover fence",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+                "No Core partial-schema state is valid",
+                "AUTHORITY_CHECKPOINT_RECOVERY",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1",
+                "PENDING_CANONICAL_BINDING_V1",
+                "U5A",
+                "U5B",
+            ):
+                if needle not in p06:
+                    self.fail(
+                        f"Platform_06 must bind Platform_17 §7.1 / "
+                        f"authority-checkpoint upgrade preflight "
+                        f"(missing {needle!r})"
+                    )
+
+        p16_path = (
+            self.docs_root
+            / "Platform_16_Installation_Upgrade_Rollback_and_Operations.md"
+        )
+        if p16_path.is_file():
+            p16 = p16_path.read_text(encoding="utf-8")
+            for needle in (
+                "### 5.1 Phase-1 standalone preflight — Agent-ingress "
+                "pending-reservation upgrade gate",
+                "SUPERSEDED: zero-pending as mandatory migration blocker",
+                "active Agent-ingress publisher/writer ownership = non-zero",
+                "LEGACY_UNKNOWN",
+                "MUST NOT delete pending Agent-ingress rows manually",
+                "Verify no active Agent-ingress publisher leases remain",
+                "Verify no in-flight Agent-ingress writers",
+                "STAGE 1 — DRAIN MODE",
+                "STAGE 2 — HARD CUTOVER FENCE",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "check-then-unlock-then-migrate gap is forbidden",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+                "PROFILE_BLOCKED / UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+                "GLOBAL CUTOVER SHARED → PER-SENSOR / ROW",
+                "SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+                "AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION",
+                "U5A",
+                "U5B",
+                "Do not introduce a third witness/coordinator",
+            ):
+                if needle not in p16:
+                    self.fail(
+                        "Platform_16 must freeze Agent-ingress "
+                        f"authority-checkpoint upgrade gate (missing {needle!r})"
+                    )
+
+        register_path = (
+            self.repo_root / "Platform_Master_Build_Sequence_Register_v1.0.md"
+        )
+        if register_path.is_file():
+            register = register_path.read_text(encoding="utf-8")
+            for needle in (
+                "Platform_17` §7.1",
+                "pending-reservation",
+                "BUILD-062",
+                "BUILD-024",
+                "BUILD-127",
+                "LEGACY_UNKNOWN",
+                "AUTHORITY_CHECKPOINT_RECOVERY",
+                "SENSOR_ACCEPTANCE_EVIDENCE_V1",
+                "PENDING_CANONICAL_BINDING_V1",
+                "SensorAcceptanceEvidenceV1",
+                "PendingCanonicalBindingV1",
+                "J8_UNVALIDATED_CRASH_THEN_REVOCATION",
+                "U5A",
+                "U5B",
+                "supersedes zero-pending-as-mandatory-migration-blocker",
+                "crash after mutable-validation failure before pending release",
+                "CUTOVER-RACE-1",
+                "CUTOVER-LOCK-1",
+                "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1",
+                "ERR_PLATFORM_UPGRADE_IN_PROGRESS",
+                "hard cutover fence",
+                "UNSUPPORTED_DIRECT_SCHEMA_CUTOVER",
+                "U1",
+                "U4",
+            ):
+                if needle not in register:
+                    self.fail(
+                        "Build Register must bind Platform_17 §7.1 "
+                        f"pending-reservation safety (missing {needle!r})"
+                    )
+            # Ownership must stay on 062/024; do not reopen BUILD-003 CERTIFIED.
+            summary_003 = ""
+            summary_062 = ""
+            summary_127 = ""
+            for line in register.splitlines():
+                if line.startswith("| BUILD-003 |"):
+                    summary_003 = line
+                elif line.startswith("| BUILD-062 |"):
+                    summary_062 = line
+                elif line.startswith("| BUILD-127 |"):
+                    summary_127 = line
+            if summary_003 and "CERTIFIED" not in summary_003:
+                self.fail(
+                    "BUILD-003 historical CERTIFIED status must remain intact "
+                    "when binding §7.1 pending-reservation safety"
+                )
+            if summary_003 and "does **not** reopen this certified record" not in summary_003:
+                self.fail(
+                    "BUILD-003 summary must state §7.1 does not reopen the "
+                    "certified record"
+                )
+            if summary_062 and "runtime" not in summary_062.lower():
+                self.fail(
+                    "BUILD-062 must own runtime pending/replay behavior for "
+                    "Agent-ingress pending-reservation safety"
+                )
+            if summary_127 and "LEGACY_UNKNOWN" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own LEGACY_UNKNOWN Agent-ingress migration "
+                    "preserve acceptance"
+                )
+            if (
+                summary_127
+                and "zero-pending-as-mandatory-migration-blocker" not in summary_127
+            ):
+                self.fail(
+                    "BUILD-127 must record supersession of "
+                    "zero-pending-as-mandatory-migration-blocker"
+                )
+            if summary_127 and "hard cutover fence" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own race-safe hard cutover fence acceptance"
+                )
+            if summary_062 and "AUTHORITY_CHECKPOINT_RECOVERY" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own AUTHORITY_CHECKPOINT_RECOVERY runtime "
+                    "maturity honesty"
+                )
+            if summary_062 and "SENSOR_ACCEPTANCE_EVIDENCE_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own SENSOR_ACCEPTANCE_EVIDENCE_V1 maturity"
+                )
+            if summary_062 and "PENDING_CANONICAL_BINDING_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own PENDING_CANONICAL_BINDING_V1 maturity"
+                )
+            if summary_062 and "J8_UNVALIDATED_CRASH_THEN_REVOCATION" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own J8_UNVALIDATED_CRASH_THEN_REVOCATION"
+                )
+            if summary_062 and "ERR_PLATFORM_UPGRADE_IN_PROGRESS" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own hard-cutover fence admission "
+                    "(ERR_PLATFORM_UPGRADE_IN_PROGRESS)"
+                )
+            if summary_062 and "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" not in summary_062:
+                self.fail(
+                    "BUILD-062 must own runtime SHARED participation in "
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1"
+                )
+            if (
+                summary_127
+                and "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1" not in summary_127
+            ):
+                self.fail(
+                    "BUILD-127 must own EXCLUSIVE "
+                    "AGENT_INGRESS_SCHEMA_CUTOVER_LOCK_V1 cutover fence"
+                )
+            if summary_127 and "CUTOVER-LOCK-1" not in summary_127:
+                self.fail(
+                    "BUILD-127 must own CUTOVER-LOCK-1..10 acceptance fixtures"
+                )
+            # Preserve prior Network/Flow status truth closures.
+            for build_id, required in (
+                ("BUILD-043", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+                ("BUILD-044", "SPECIFIED_ONLY / NOT_IMPLEMENTED"),
+                ("BUILD-051", "NOT_IMPLEMENTED"),
+            ):
+                row = ""
+                for line in register.splitlines():
+                    if line.startswith(f"| {build_id} |"):
+                        row = line
+                        break
+                if row and required not in row:
+                    self.fail(
+                        f"{build_id} maturity truth must remain {required!r} "
+                        "when binding Agent-ingress upgrade gate"
+                    )
+
+    def validate_host_global_runtime_exclusion_contract(self) -> None:
+        """Pin shared-host Docker runtime exclusion across Platform_13/14/15.
+
+        Concurrent Compose/runtime mutation on the self-hosted AmrudAi
+        development/CI host is forbidden. One OS advisory lock
+        (``flock`` / ``fcntl.flock``) on the stable path is mandatory; CI
+        Integration is a heavy owner; Test 20 foreign-container failure must
+        not be weakened by an ``agent-e2e-*`` allowlist. Skipped when the
+        Docker standards owner document is absent (minimal fixture trees).
+        """
+        p13_path = (
+            self.docs_root
+            / "Platform_13_Engineering_Development_and_Docker_Standards.md"
+        )
+        if not p13_path.is_file():
+            return
+        p13 = p13_path.read_text(encoding="utf-8")
+        if "## 22. Host-global shared Docker runtime exclusion" not in p13:
+            # Minimal stubs without the Docker contract surface are skipped.
+            if "Docker Compose" not in p13 and "Compose profiles" not in p13:
+                return
+            self.fail(
+                "Platform_13 must own host-global shared Docker runtime "
+                "exclusion under ## 22. Host-global shared Docker runtime "
+                "exclusion"
+            )
+            return
+
+        lock_path = (
+            "/home/gagan/amrudai-evidence/runtime/platform-dev-runner.lock"
+        )
+        for required in (
+            lock_path,
+            "flock",
+            "fcntl.flock",
+            "Kernel lock ownership is authoritative",
+            "Never unlink",
+            "runtime-busy",
+            "agent-e2e-*",
+            "CODEX Desktop heavy E2E",
+            "GitHub Actions jobs on `[self-hosted, Linux, X64, platform-ci]`",
+            "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+            ".github/workflows/platform-ci.yml",
+            "PENDING_IMPLEMENTATION",
+            "SPECIFIED / NOT YET EXECUTED",
+            "Do **not** describe the lock as currently active in GitHub Actions",
+        ):
+            if required not in p13:
+                self.fail(
+                    "Platform_13 §22 host-global runtime exclusion missing "
+                    f"{required!r}"
+                )
+
+        p15_path = (
+            self.docs_root / "Platform_15_CI_CD_Packaging_and_Distribution.md"
+        )
+        if p15_path.is_file():
+            p15 = p15_path.read_text(encoding="utf-8")
+            if "### 3." in p15 or "CI/CD" in p15:
+                for required in (
+                    "### 3.8 Self-hosted host-global runtime exclusion",
+                    "Integration, PostgreSQL, contract, security",
+                    lock_path,
+                    "before any Platform Docker mutation",
+                    "owned cleanup",
+                    "always()",
+                    "runtime-busy",
+                    "agent-e2e-*",
+                    "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+                    ".github/workflows/platform-ci.yml",
+                    "PENDING_IMPLEMENTATION",
+                    "SPECIFIED / NOT YET EXECUTED",
+                    "Do **not** describe the lock as currently active in GitHub Actions",
+                ):
+                    if required not in p15:
+                        self.fail(
+                            "Platform_15 §3.8 Integration runtime-lock "
+                            f"binding missing {required!r}"
+                        )
+                # Source-status table must record exact workflow path state.
+                if (
+                    "| `.github/workflows/platform-ci.yml` |" not in p15
+                    or "PENDING_IMPLEMENTATION" not in p15
+                ):
+                    self.fail(
+                        "Platform_15 source-status table must record "
+                        ".github/workflows/platform-ci.yml as "
+                        "PENDING_IMPLEMENTATION"
+                    )
+
+        p14_path = (
+            self.docs_root
+            / "Platform_14_Test_Performance_and_Release_Quality.md"
+        )
+        if p14_path.is_file():
+            p14 = p14_path.read_text(encoding="utf-8")
+            if "Current CI evidence boundary" in p14 or "release quality" in p14.lower():
+                for required in (
+                    "### Host-global runtime exclusion acceptance",
+                    "Persistence, Structured JSON Logs, and Workstation Isolation",
+                    "not** an allowlist for `agent-e2e-*`",
+                    "Local E2E owns the lock",
+                    "CI owns the lock",
+                    "Foreign containers remain unchanged throughout Test 20",
+                    "CI cancellation / process death releases the lock",
+                    "CI cleanup never deletes foreign `agent-e2e-*`",
+                    "Same-inode independent nonblocking acquisition",
+                    "Two GitHub Integration jobs cannot become simultaneous",
+                    "SELF_HOSTED_RUNTIME_LOCK_IMPLEMENTATION = REQUIRED / PENDING_IMPLEMENTATION",
+                    "SPECIFIED / NOT YET EXECUTED",
+                    "PENDING_IMPLEMENTATION",
+                ):
+                    if required not in p14:
+                        self.fail(
+                            "Platform_14 host-global runtime exclusion "
+                            f"acceptance missing {required!r}"
+                        )
+
     def validate(self) -> list[str]:
         self.errors = []
         constitutional = self.validate_constitutional_set()
@@ -1343,9 +2927,15 @@ class MotherReferenceValidator:
         self.validate_legacy_and_malformed(manifest, paths)
         self.validate_cross_references(manifest, paths)
         self.validate_normalized_structure(paths)
+        self.validate_unique_section_identifiers(paths)
+        self.validate_postgres_enum_varchar_widths(paths)
         self.validate_maturity_language(paths)
         self.validate_normalized_rtm_licence_grace(paths)
         self.validate_a23_oss_namespace_and_ui_truth(manifest, paths)
+        self.validate_network_flow_source_reality_status()
+        self.validate_dependency_activation_combine_operator()
+        self.validate_agent_ingress_pending_reservation_safety()
+        self.validate_host_global_runtime_exclusion_contract()
         return self.errors
 
 
