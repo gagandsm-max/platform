@@ -5,6 +5,9 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 : "${PLATFORM_E2E_RUN_DIR:?Set a new durable evidence directory for this run}"
 [[ $PLATFORM_E2E_RUN_DIR == /* && ! -e $PLATFORM_E2E_RUN_DIR ]] || { echo 'Run directory must be absolute and new' >&2; exit 1; }
 mkdir -m 0700 "$PLATFORM_E2E_RUN_DIR"
+if [[ ${PLATFORM_E2E_REAL_SENSOR_GAP:-0} == 1 ]]; then
+    : > "$PLATFORM_E2E_RUN_DIR/timesync-marker"
+fi
 export PLATFORM_E2E_PREFIX="agent-e2e-$(date -u +%Y%m%d%H%M%S)-$$"
 export PLATFORM_E2E_CA_DIR="$PLATFORM_E2E_RUN_DIR/pki/deploy/docker/certs"
 export PLATFORM_E2E_CERT_DIR="$PLATFORM_E2E_RUN_DIR/agent-certs"

@@ -227,6 +227,10 @@ if [[ "${PLATFORM_E2E_SEQUENCE_DISPOSITION:-0}" == "1" ]]; then
     python3 "${E2E_DIR}/sequence_disposition.py" "$PLATFORM_E2E_PREFIX" "$RECEIVER_PORT" "$EVIDENCE_DIR"
     exit 0
 fi
+if [[ "${PLATFORM_E2E_REAL_SENSOR_GAP:-0}" == "1" ]]; then
+    python3 "${E2E_DIR}/real_sensor_commit_gap.py" "$PLATFORM_E2E_PREFIX" "$RECEIVER_PORT" "$EVIDENCE_DIR"
+    exit 0
+fi
 
 true # Agent image built by run-isolated.sh
 "${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init

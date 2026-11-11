@@ -2,6 +2,7 @@
 """Render/verify a fresh run namespace; never accept shared runtime names."""
 import copy
 import json
+import os
 from pathlib import Path
 import re
 import sys
@@ -38,6 +39,22 @@ def verify(config, prefix):
 def isolate(config, prefix, root, evidence):
     c = copy.deepcopy(config)
     c["name"] = prefix
+    if os.environ.get("PLATFORM_E2E_REAL_SENSOR_GAP") == "1":
+        # E2E-only clock fixture: the production Linux clock sampler still
+        # supplies kernel max-error and samples acceptedAt after spool fsync.
+        c["services"]["sensor-infra"]["volumes"].append({
+            "type": "bind", "source": str(evidence / "timesync-marker"),
+            "target": "/run/systemd/timesync/synchronized", "read_only": True,
+        })
+        for name in ("sensor-net.crt", "sensor-net.key"):
+            c["services"]["sensor-infra"]["volumes"].append({
+                "type": "bind", "source": str(evidence / "pki/deploy/docker/certs" / name),
+                "target": "/certs/" + name, "read_only": True,
+            })
+        c["services"]["sensor-infra"]["environment"].update({
+            "SENSOR_AGENT_DRAIN_IDLE_INTERVAL_SECONDS": "3600",
+            "SENSOR_AGENT_DRAIN_MAX_BACKOFF_SECONDS": "3600",
+        })
     c["services"]["unit-contracts"] = {
         "image": "golang:1.27.1-alpine3.24", "user": "1000:1000",
         "working_dir": "/source", "read_only": True, "cpus": 2,
