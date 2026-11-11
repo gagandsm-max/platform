@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"platform/sensor/internal/agentacceptance"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/spool"
 )
@@ -334,6 +335,16 @@ func New(cfg Config, sp Spool, tr Transport) (*Drain, error) {
 		done:                make(chan struct{}),
 		wait:                waitContext,
 		jitter:              jitterDuration,
+	}
+	if reporter, ok := sp.(ackedThroughReporter); ok {
+		if acked, err := reporter.AckedThrough(); err == nil && acked > 0 {
+			if guard, lockErr := agentacceptance.Lock(cfg.AgentSpoolDir); lockErr == nil {
+				if cleanupErr := guard.RemoveThrough(acked); cleanupErr != nil {
+					logger.Warn("acceptance evidence cleanup pending", "error", cleanupErr)
+				}
+				_ = guard.Close()
+			}
+		}
 	}
 	return d, nil
 }
@@ -791,6 +802,14 @@ func (d *Drain) RunOnce(ctx context.Context) (bool, error) {
 		// Full CompleteOutboundBatch success proves commitment for accepted; clear
 		// only a matching pending intent (never erase a different older intent).
 		d.clearPendingPartialAckReconcileMatching(accepted)
+		if guard, lockErr := agentacceptance.Lock(d.cfg.AgentSpoolDir); lockErr == nil {
+			if cleanupErr := guard.RemoveRange(batch.FirstSequence, accepted); cleanupErr != nil {
+				d.logger.Warn("acceptance evidence cleanup pending", "error", cleanupErr)
+			}
+			_ = guard.Close()
+		} else {
+			d.logger.Warn("acceptance evidence cleanup pending", "error", lockErr)
+		}
 		d.metrics.Successes.Add(1)
 		d.metrics.DurableAcks.Add(1)
 		d.metrics.LastSuccessUnix.Store(time.Now().Unix())
@@ -900,7 +919,19 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 				deliveryRecords = env.Records
 			}
 		}
-		acceptedAt := payload.Timestamp.UTC().Format(time.RFC3339Nano)
+		guard, err := agentacceptance.Lock(d.cfg.AgentSpoolDir)
+		if err != nil {
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodeSpool, "acceptance evidence lock unavailable", err, true)
+		}
+		entry, evidenceErr := guard.Resolve(rec, d.cfg.StreamID)
+		closeErr := guard.Close()
+		if evidenceErr != nil {
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodeSpool, "acceptance evidence unavailable", evidenceErr, true)
+		}
+		if closeErr != nil {
+			return coreclient.AgentTelemetryBatch{}, codeErr(CodeSpool, "acceptance evidence lock release failed", closeErr, true)
+		}
+		acceptedAt := entry.AcceptedAtUTC
 		ingress := coreclient.AgentIngressRecord{
 			SensorIngressSequence: rec.Sequence,
 			SensorIngressRecordID: fmt.Sprintf("agent-spool-%d", rec.Sequence),
@@ -913,17 +944,9 @@ func (d *Drain) makeRequest(batch spool.Batch) (coreclient.AgentTelemetryBatch, 
 			AgentBatchID:          payload.BatchID,
 			CorrelationID:         payload.CorrelationID,
 			AcceptedAt:            acceptedAt,
-			AcceptanceEvidence:    &payload.AcceptanceEvidence,
+			AcceptanceEvidence:    &entry.Evidence,
 			Records:               deliveryRecords,
 		}
-		if ingress.AcceptanceEvidence.EvidenceVersion == 0 {
-			ingress.AcceptanceEvidence = &coreclient.SensorAcceptanceEvidenceV1{
-				EvidenceVersion: 1, AcceptedAtUTC: acceptedAt,
-				ClockQuality: "UNQUALIFIED", ClockSource: "LEGACY_SPOOL",
-				SensorServiceInstanceID: "legacy-unknown",
-			}
-		}
-		ingress.AcceptanceEvidence.DurableSpoolSequence = rec.Sequence
 		// Stable checksum shared with Core AgentIngestionValidator (scalar identity fields).
 		var line = fmt.Sprintf("%d|%s|%d|%d|%d|%s|%s|%s",
 			ingress.SensorIngressSequence, ingress.AgentBatchID,

@@ -16,6 +16,11 @@ volumes:
     name: ${PLATFORM_AGENT_E2E_STATE_VOLUME:-platform_agent_e2e_state}
 
 services:
+  core:
+    environment:
+      SPRING_PROFILES_ACTIVE: agent-ingress-e2e
+      PLATFORM_AGENT_INGRESS_E2E_FAIL_AFTER_RESERVE: "10,12"
+
   sensor-agent-spool-init:
     image: alpine:3.24
     container_name: platform-sensor-agent-spool-init

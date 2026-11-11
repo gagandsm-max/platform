@@ -1,8 +1,7 @@
 package coreclient
 
-// SensorAcceptanceEvidenceV1 is stamped by the accepting Sensor and persisted
-// with its Agent spool payload. The spool sequence is filled from the durable
-// record when the exact request is built for Core.
+// SensorAcceptanceEvidenceV1 is stamped after durable Sensor spool append and
+// persisted in a sequence and payload bound sidecar before Core delivery.
 type SensorAcceptanceEvidenceV1 struct {
 	EvidenceVersion         int    `json:"evidenceVersion"`
 	AcceptedAtUTC           string `json:"acceptedAtUtc"`

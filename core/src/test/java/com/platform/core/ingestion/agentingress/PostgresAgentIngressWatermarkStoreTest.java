@@ -232,6 +232,67 @@ class PostgresAgentIngressWatermarkStoreTest {
     }
 
     @Test
+    void bindingMetadataCorruptionRejectsPublisherClaimAndExactReplayDigest() {
+        String checksum = "a".repeat(64);
+        String requestDigest = "d".repeat(64);
+        String[] fields = {"entity_identifier_id", "entity_id", "binding_version", "host_id",
+                "agent_id", "assignment_generation", "reservation_id"};
+        for (int i = 0; i < fields.length; i++) {
+            String sensor = "sensor-corruption-" + i;
+            ReplayReservation pending = store.reserveBatchWithBody(tenantId, sensor, streamId,
+                    1, 1, checksum, "batch", "corr", requestDigest);
+            UUID reservation = pending.pendingReservationId();
+            assertNotNull(store.checkpointAuthority(tenantId, sensor, streamId, 1, 1,
+                    checksum, "batch", "corr", requestDigest, reservation,
+                    () -> testCheckpoint(tenantId, sensor, 1, 1, UUID.randomUUID())));
+            Object changed;
+            switch (fields[i]) {
+                case "entity_id" -> {
+                    UUID entity = UUID.randomUUID();
+                    pg.jdbc().update("""
+                            INSERT INTO platform.entity (tenant_id, entity_id, entity_type, display_name,
+                              lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                            VALUES (?, ?, 'HOST', 'other', 'ACTIVE', now(), now(), now(), now())
+                            """, tenantId, entity);
+                    changed = entity;
+                }
+                case "agent_id" -> {
+                    String agent = "other-agent-" + i;
+                    pg.jdbc().update("INSERT INTO platform.agent "
+                            + "(tenant_id, agent_id, status, created_at, updated_at) "
+                            + "VALUES (?, ?, 'ACTIVE', now(), now())", tenantId, agent);
+                    changed = agent;
+                }
+                case "entity_identifier_id", "reservation_id" -> changed = UUID.randomUUID();
+                case "binding_version", "assignment_generation" -> changed = 2L;
+                case "host_id" -> changed = "other-host";
+                default -> throw new IllegalStateException(fields[i]);
+            }
+            pg.jdbc().update("UPDATE platform.sensor_agent_ingress_pending_canonical_binding SET "
+                    + fields[i] + "=? WHERE tenant_id=? AND sensor_id=? AND reservation_id=?",
+                    changed, tenantId, sensor, reservation);
+            PublisherClaimResult claim = store.claimPublisherLeaseExact(tenantId, sensor,
+                    streamId, 1, 1, checksum, "batch", "corr", requestDigest, reservation);
+            assertEquals(PublisherClaimResult.Status.REJECTED, claim.status(), fields[i]);
+            ReplayReservation retry = store.reserveBatchWithBody(tenantId, sensor, streamId,
+                    1, 1, checksum, "batch", "corr", requestDigest);
+            assertEquals(ReplayReservation.Status.RETRY_PENDING, retry.status(), fields[i]);
+            String observationDigest = pg.jdbc().queryForObject("""
+                    SELECT pending_canonical_observation_sha256
+                      FROM platform.sensor_agent_ingress_watermark WHERE tenant_id=? AND sensor_id=?
+                    """, String.class, tenantId, sensor);
+            if (retry.pendingBindings().isEmpty()) {
+                assertEquals("reservation_id", fields[i]);
+            } else {
+                assertNotEquals(retry.pendingCanonicalBatchSha256(), CanonicalBindingDigest.combine(
+                        tenantId, sensor, reservation, observationDigest, retry.pendingBindings()), fields[i]);
+            }
+            System.out.println("BINDING_CORRUPTION_REJECTED field=" + fields[i]
+                    + " claim=" + claim.status() + " retry=" + retry.status());
+        }
+    }
+
+    @Test
     void legacyUnknownCannotClaimBeforeHistoricalValidation() {
         String sensor = "sensor-legacy-unknown-claim";
         String checksum = "a".repeat(64);

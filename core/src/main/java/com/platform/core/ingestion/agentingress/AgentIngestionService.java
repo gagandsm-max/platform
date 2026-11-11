@@ -92,6 +92,16 @@ public class AgentIngestionService {
                 request.correlationId(), requestSha256
         );
 
+        // Isolated E2E profile only: the reservation transaction has returned
+        // (and committed), while authority validation/checkpoint has not begun.
+        if (reservation.status() == ReplayReservation.Status.RESERVED
+                && "agent-ingress-e2e".equals(System.getenv("SPRING_PROFILES_ACTIVE"))
+                && "10,12".equals(System.getenv("PLATFORM_AGENT_INGRESS_E2E_FAIL_AFTER_RESERVE"))
+                && (request.firstIngressSequence() == 10 || request.firstIngressSequence() == 12)) {
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_E2E_AFTER_RESERVE", "E2E reservation failure injection");
+        }
+
         if (reservation.status() == ReplayReservation.Status.TERMINALLY_REJECTED) {
             if (request.records().size() != 1 || !watermarkStore.terminalReplayMatchesRecord(
                     scope.tenantId(), scope.sensorId(), reservation.terminalDispositionId(),
@@ -143,7 +153,10 @@ public class AgentIngestionService {
                 observations = validator.extractValidatedSnapshot(request, scope, reservation.pendingBindings());
                 if (reservation.pendingCanonicalBatchSha256() == null
                         || !reservation.pendingCanonicalBatchSha256().equals(
-                                validator.canonicalBatchDigest(observations))) {
+                                CanonicalBindingDigest.combine(scope.tenantId(), scope.sensorId(),
+                                        reservation.pendingReservationId(),
+                                        validator.canonicalBatchDigest(observations),
+                                        reservation.pendingBindings()))) {
                     throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
                             "ERR_AGENT_CANONICAL_DIGEST_MISMATCH",
                             "Validated canonical batch digest does not match the pending authority checkpoint");

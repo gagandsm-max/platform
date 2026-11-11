@@ -15,6 +15,10 @@ import java.util.UUID;
 @Repository
 public class EntityIdentifierRepository {
 
+    /** Persisted write provenance; never inferred from the current identifier row. */
+    public record HistoricalBinding(UUID identifierId, UUID entityId, long historyVersion,
+            Instant validFrom, Instant validTo, String provenance) {}
+
     private static final RowMapper<EntityIdentifier> MAPPER = (rs, rowNum) -> new EntityIdentifier(
             rs.getObject("identifier_id", UUID.class),
             rs.getObject("tenant_id", UUID.class),
@@ -72,6 +76,31 @@ public class EntityIdentifierRepository {
                 ),
                 MAPPER);
         return rows.stream().findFirst();
+    }
+
+    public Optional<HistoricalBinding> findHistoricalBinding(UUID tenantId, String namespace,
+            String identifierType, String identifierValue, Instant lower, Instant upper) {
+        if (lower == null || upper == null || upper.isBefore(lower)) return Optional.empty();
+        List<HistoricalBinding> rows = jdbc.query("""
+                SELECT entity_identifier_id, entity_id, history_version, valid_from, valid_to, provenance
+                  FROM platform.entity_identifier_binding_history
+                 WHERE tenant_id = :tenantId AND namespace = :namespace
+                   AND identifier_type = :identifierType AND identifier_value = :identifierValue
+                   AND valid_from <= :lower AND (valid_to IS NULL OR valid_to > :upper)
+                   AND confidence = 1.0
+                   AND provenance = 'ENTITY_IDENTIFIER_WRITE_V021'
+                 ORDER BY history_version
+                 LIMIT 2
+                """, new MapSqlParameterSource()
+                    .addValue("tenantId", tenantId).addValue("namespace", namespace)
+                    .addValue("identifierType", identifierType).addValue("identifierValue", identifierValue)
+                    .addValue("lower", JdbcTime.ts(lower)).addValue("upper", JdbcTime.ts(upper)),
+                (rs, n) -> new HistoricalBinding(
+                        rs.getObject("entity_identifier_id", UUID.class),
+                        rs.getObject("entity_id", UUID.class), rs.getLong("history_version"),
+                        JdbcTime.instant(rs.getTimestamp("valid_from")),
+                        JdbcTime.instant(rs.getTimestamp("valid_to")), rs.getString("provenance")));
+        return rows.size() == 1 ? Optional.of(rows.get(0)) : Optional.empty();
     }
 
     /** One tenant-scoped query for the bounded host evidence in one ingress record. */

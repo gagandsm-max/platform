@@ -198,6 +198,15 @@ class AgentIngestionValidatorTest {
         )));
     }
 
+    private void stubHistoricalEntity() {
+        when(identifierRepo.findHistoricalBinding(eq(tenantId), eq("platform.agent"), eq("HOST_ID"),
+                eq("host-abc"), any(), any())).thenReturn(Optional.of(
+                new EntityIdentifierRepository.HistoricalBinding(
+                        UUID.fromString("018f0e0a-0000-7000-8000-000000000020"), entityId, 1,
+                        Instant.parse("2026-01-01T00:00:00Z"), null,
+                        "ENTITY_IDENTIFIER_WRITE_V021")));
+    }
+
     @Test
     void knownConflictingHostRejectedBeforeReservationAndPublication() throws Exception {
         UUID otherEntity = UUID.fromString("018f0e0a-0000-7000-8000-000000000022");
@@ -519,6 +528,7 @@ class AgentIngestionValidatorTest {
                         AgentAssignmentStatus.REVOKED, created, created, revoked
                 )));
         stubEntity();
+        stubHistoricalEntity();
         List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
         assertEquals(1, obs.size());
         assertEquals("AGENT_HOST", obs.get(0).sourceProtocol());
@@ -543,10 +553,40 @@ class AgentIngestionValidatorTest {
                 .thenReturn(Optional.of(new EntityAgentBinding(tenantId, entityId, "agent-1",
                         "a".repeat(64), "host-abc", "linux", created, revoked, "ACTIVE", 1)));
         stubEntity();
+        when(identifierRepo.findHistoricalBinding(eq(tenantId), eq("platform.agent"), eq("HOST_ID"),
+                eq("host-abc"), any(), any())).thenReturn(Optional.of(
+                new EntityIdentifierRepository.HistoricalBinding(
+                        UUID.fromString("018f0e0a-0000-7000-8000-000000000021"), entityId, 7,
+                        created, revoked, "ENTITY_IDENTIFIER_WRITE_V021")));
         AgentIngestionValidator.ValidatedBatch validated = validator.validateLegacyAndSnapshot(batch, scope);
         assertEquals(List.of(entityId), validated.bindings().stream().map(PendingCanonicalBindingV1::entityId).toList());
         assertEquals(1, validated.observations().size());
         assertEquals(entityId.toString(), validated.observations().get(0).entityId());
+    }
+
+    @Test
+    void identifierRepointToEntityBDoesNotRewriteHistoricalEntityA() throws Exception {
+        AgentIngressRecord record = sampleRecord(1, "sensor-infra-01", 2);
+        AgentTelemetryBatchRequest batch = batchWith(record, "sensor-infra-01");
+        Instant created = Instant.parse("2026-09-11T09:00:00Z");
+        Instant revoked = Instant.parse("2026-09-11T11:00:00Z");
+        UUID entityB = UUID.fromString("018f0e0a-0000-7000-8000-000000000012");
+        when(agentRepo.findAssignmentByGeneration(tenantId, "agent-1", 2))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), tenantId,
+                        "agent-1", "sensor-infra-01", 2, AgentAssignmentStatus.REVOKED,
+                        created, created, revoked)));
+        stubEntity();
+        when(identifierRepo.findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc"))
+                .thenReturn(Optional.of(new EntityIdentifier(
+                        UUID.randomUUID(), tenantId, entityB, "HOST_ID", "platform.agent", "host-abc",
+                        BigDecimal.ONE, created, revoked)));
+        when(identifierRepo.findHistoricalBinding(eq(tenantId), eq("platform.agent"), eq("HOST_ID"),
+                eq("host-abc"), any(), any())).thenReturn(Optional.of(
+                new EntityIdentifierRepository.HistoricalBinding(UUID.randomUUID(), entityId, 7,
+                        created, revoked, "ENTITY_IDENTIFIER_WRITE_V021")));
+        var validated = validator.validateLegacyAndSnapshot(batch, scope);
+        assertEquals(entityId, validated.bindings().get(0).entityId());
+        verify(identifierRepo, never()).findByResolutionKey(tenantId, "platform.agent", "HOST_ID", "host-abc");
     }
 
     @Test
@@ -633,6 +673,7 @@ class AgentIngestionValidatorTest {
                         AgentAssignmentStatus.REVOKED, created, created, revoked
                 )));
         stubEntity();
+        stubHistoricalEntity();
         List<CanonicalObservation> obs = validator.validateAndExtract("{}".getBytes(), batch, scope);
         assertEquals(1, obs.size());
     }

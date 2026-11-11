@@ -92,7 +92,9 @@ class AgentIngestionServiceTest {
         when(watermarkStore.reserveBatchWithBody(tenantId, "sensor-infra-01", STREAM,
                 8L, 8L, "chk-validated", "batch-1", "corr-1", BODY_SHA))
                 .thenReturn(ReplayReservation.retryPending(7, PENDING_ID,
-                        "AUTHORITY_VALIDATED", List.of(binding(8)), "d".repeat(64)));
+                        "AUTHORITY_VALIDATED", List.of(binding(8)),
+                        CanonicalBindingDigest.combine(tenantId, "sensor-infra-01", PENDING_ID,
+                                "d".repeat(64), List.of(binding(8)))));
         when(validator.extractValidatedSnapshot(request, scope, List.of(binding(8)))).thenReturn(obs());
 
         AgentTelemetryAckResponse ack = service.ingestAgentTelemetry("{}".getBytes(), request, "batch-1", c);

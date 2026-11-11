@@ -80,12 +80,15 @@ class AgentIngressPendingReleaseMigrationTest {
         assertEquals(1, count("SELECT count(*) FROM platform.schema_history WHERE version='V021'"));
         assertEquals(1, count("SELECT count(*) FROM information_schema.tables WHERE table_schema='platform' "
                 + "AND table_name='sensor_agent_ingress_pending_canonical_binding'"));
-        assertEquals(5, count("""
+        assertEquals(6, count("""
                 SELECT count(*) FROM information_schema.columns
                  WHERE table_schema='platform' AND table_name='sensor_agent_ingress_watermark'
                    AND column_name IN ('pending_reservation_id','pending_publication_attempted',
-                       'pending_authority_state','pending_authority_validated_at','pending_canonical_batch_sha256')
+                       'pending_authority_state','pending_authority_validated_at',
+                       'pending_canonical_batch_sha256','pending_canonical_observation_sha256')
                 """));
+        assertEquals(1, count("SELECT count(*) FROM information_schema.tables "
+                + "WHERE table_schema='platform' AND table_name='entity_identifier_binding_history'"));
         assertEquals(1, count("""
                 SELECT count(*) FROM pg_constraint
                  WHERE conrelid='platform.sensor_agent_ingress_watermark'::regclass
@@ -154,7 +157,7 @@ class AgentIngressPendingReleaseMigrationTest {
     }
 
     @Test
-    void u5LegacyExactRetryValidatesRevokedHistoryPublishesAndFinalizes() throws Exception {
+    void u5aPreHistoryIdentifierCannotProveHistoricalEntity() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
         UUID entity = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae01");
         LegacyRequest legacy = legacyRequest(mapper);
@@ -165,8 +168,8 @@ class AgentIngressPendingReleaseMigrationTest {
                    SET pending_checksum=?, pending_request_sha256=?
                  WHERE tenant_id=? AND sensor_id='sensor-a'
                 """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
-        pg.migrate();
         seedCanonicalIdentity(entity, Instant.parse("2026-11-09T09:00:00Z"));
+        pg.migrate();
         assertEquals("LEGACY_UNKNOWN", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
         SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
         AgentControlRepository agentRepo = mock(AgentControlRepository.class);
@@ -189,30 +192,90 @@ class AgentIngressPendingReleaseMigrationTest {
                 agentRepo, identifiers, new IngestionMetrics());
         AgentIngestionService service = new AgentIngestionService(validator, store(), kafka,
                 new IngestionMetrics());
-        var ack = service.ingestAgentTelemetry(legacy.body(), legacy.request(),
-                legacy.request().batchId(), certificate);
-        assertEquals("ACCEPTED", ack.status());
-        verify(kafka).publishBatchTransactionally(any(TelemetryObservationBatch.class));
-        assertEquals(3L, state(TENANT_A, "sensor-a").get("settled_through_sequence"));
-        assertNull(state(TENANT_A, "sensor-a").get("pending_first_sequence"));
-        assertEquals("NONE", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
+        IngestionException failure = assertThrows(IngestionException.class, () ->
+                service.ingestAgentTelemetry(legacy.body(), legacy.request(),
+                        legacy.request().batchId(), certificate));
+        assertEquals("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED", failure.getCode());
+        verifyNoInteractions(kafka);
+        assertEquals("LEGACY_UNKNOWN", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
         assertEquals(0, count("SELECT count(*) FROM platform.sensor_agent_ingress_pending_canonical_binding"));
+    }
+
+    @Test
+    void historyRecordsAThenBWithoutRewritingAcceptanceInterval() {
+        pg.migrate();
+        UUID a = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae11");
+        UUID b = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae12");
+        for (UUID entity : List.of(a, b)) {
+            pg.jdbc().update("""
+                    INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                      lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                    VALUES (?, ?, 'HOST', 'history-test', 'ACTIVE', now(), now(), now(), now())
+                    """, entity, TENANT_A);
+        }
+        UUID identifier = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier (identifier_id, tenant_id, entity_id,
+                  identifier_type, namespace, identifier_value, confidence, first_seen_at, last_seen_at)
+                VALUES (?, ?, ?, 'HOST_ID', 'platform.agent', 'historical-a-b', 1.0, now(), now())
+                """, identifier, TENANT_A, a);
+        Instant acceptedAt = pg.jdbc().queryForObject("SELECT clock_timestamp()", java.sql.Timestamp.class).toInstant();
+        pg.jdbc().update("UPDATE platform.entity_identifier SET entity_id=? "
+                + "WHERE tenant_id=? AND identifier_id=?", b, TENANT_A, identifier);
+        EntityIdentifierRepository repo = new EntityIdentifierRepository(new NamedParameterJdbcTemplate(pg.dataSource()));
+        var historical = repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b", acceptedAt, acceptedAt);
+        assertTrue(historical.isPresent());
+        assertEquals(a, historical.get().entityId());
+        assertEquals(identifier, historical.get().identifierId());
+        assertNotNull(historical.get().validTo());
+        assertEquals(b, repo.findByResolutionKey(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b").orElseThrow().entityId());
+        assertEquals(2, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
+                + "WHERE tenant_id='" + TENANT_A + "' AND identifier_value='historical-a-b'"));
+        assertThrows(org.springframework.dao.DataAccessException.class, () -> pg.jdbc().update(
+                "UPDATE platform.entity_identifier_binding_history SET entity_id=? "
+                        + "WHERE tenant_id=? AND identifier_value='historical-a-b'", b, TENANT_A));
+        assertThrows(org.springframework.dao.DataAccessException.class, () -> pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier_binding_history
+                  (tenant_id, namespace, identifier_type, identifier_value, entity_identifier_id,
+                   entity_id, confidence, valid_from, provenance)
+                VALUES (?, 'platform.agent', 'HOST_ID', 'forged', ?, ?, 1.0, now(),
+                        'ENTITY_IDENTIFIER_WRITE_V021')
+                """, TENANT_A, UUID.randomUUID(), b));
     }
 
     @Test
     void u5bLegacyExactRetryWithNewEntityBRequiresReconciliation() throws Exception {
         ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
-        LegacyRequest legacy = legacyRequest(mapper);
         seedAccepted(TENANT_A, "sensor-a");
         seedPending(TENANT_A, "sensor-a");
+        UUID originalA = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae01");
+        seedCanonicalIdentity(originalA, Instant.now().minusSeconds(60));
+        Instant acceptedInstant = pg.jdbc().queryForObject("SELECT clock_timestamp()",
+                java.sql.Timestamp.class).toInstant();
+        LegacyRequest legacy = legacyRequest(mapper, acceptedInstant.toString());
         pg.jdbc().update("""
                 UPDATE platform.sensor_agent_ingress_watermark
                    SET pending_checksum=?, pending_request_sha256=?
                  WHERE tenant_id=? AND sensor_id='sensor-a'
                 """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
+        // A existed before V021, but that mutable row did not preserve its
+        // historical entity value. Migration must never invent A history.
         pg.migrate();
         UUID entity = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae02");
-        seedCanonicalIdentity(entity, Instant.parse("2026-11-09T11:00:00Z"));
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                  lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'repointed-b', 'ACTIVE', now(), now(), now(), now())
+                """, entity, TENANT_A);
+        pg.jdbc().update("UPDATE platform.entity_identifier SET entity_id=? "
+                + "WHERE tenant_id=? AND identifier_value='host-a'", entity, TENANT_A);
+        assertEquals(entity, pg.jdbc().queryForObject("SELECT entity_id FROM platform.entity_identifier "
+                + "WHERE tenant_id=? AND identifier_value='host-a'", UUID.class, TENANT_A));
+        assertEquals(0, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
+                + "WHERE tenant_id='" + TENANT_A + "' AND identifier_value='host-a' "
+                + "AND entity_id='" + originalA + "'"));
         Map<String, Object> before = state(TENANT_A, "sensor-a");
         SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
         AgentControlRepository agentRepo = mock(AgentControlRepository.class);
@@ -222,8 +285,9 @@ class AgentIngressPendingReleaseMigrationTest {
         X509Certificate certificate = mock(X509Certificate.class);
         when(authority.resolve(certificate)).thenReturn(
                 new SensorScope("sensor-a", TENANT_A, null, Set.of(entity), true));
-        Instant created = Instant.parse("2026-11-09T09:00:00Z");
-        Instant revoked = Instant.parse("2026-11-09T11:00:00Z");
+        Instant created = acceptedInstant.minusSeconds(60);
+        Instant revoked = pg.jdbc().queryForObject("SELECT clock_timestamp()",
+                java.sql.Timestamp.class).toInstant();
         when(agentRepo.findAssignmentByGeneration(TENANT_A, "agent-a", 1))
                 .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), TENANT_A,
                         "agent-a", "sensor-a", 1, AgentAssignmentStatus.REVOKED,
@@ -277,19 +341,23 @@ class AgentIngressPendingReleaseMigrationTest {
     }
 
     private static LegacyRequest legacyRequest(ObjectMapper mapper) throws Exception {
+        return legacyRequest(mapper, "2026-11-09T10:00:00Z");
+    }
+
+    private static LegacyRequest legacyRequest(ObjectMapper mapper, String acceptedAt) throws Exception {
         AgentIngressRecord record = new AgentIngressRecord(3, "ingress-3", TENANT_A.toString(),
                 "agent-a", "sensor-a", 1, 10, 10, "agent-batch", "agent-corr",
-                "2026-11-09T10:00:00Z",
+                acceptedAt,
                 new com.platform.core.ingestion.agentingress.dto.SensorAcceptanceEvidenceV1(
-                        mapper.valueToTree(1), "2026-11-09T10:00:00Z", "QUALIFIED",
+                        mapper.valueToTree(1), acceptedAt, "QUALIFIED",
                         mapper.valueToTree(0), mapper.valueToTree(0), "TEST_CLOCK",
                         "migration-sensor-instance", mapper.valueToTree(3)),
                 List.of(mapper.readTree("""
                     {"sequence":10,"id":"delivery-10","checksum":"abc",
-                     "payload":{"hostId":"host-a","collectedAt":"2026-11-09T10:00:00Z",
+                     "payload":{"hostId":"host-a","collectedAt":"%s",
                      "observations":[{"metricKey":"cpu.util","value":42.5,
-                                      "observedAt":"2026-11-09T10:00:00Z"}]}}
-                    """)));
+                                      "observedAt":"%s"}]}}
+                    """.formatted(acceptedAt, acceptedAt))));
         String line = "3|agent-batch|10|10|1|" + TENANT_A + "|agent-a|sensor-a|10|delivery-10|abc";
         String checksum = sha256(line.getBytes(StandardCharsets.UTF_8));
         AgentTelemetryBatchRequest request = new AgentTelemetryBatchRequest(2, "sensor-a", STREAM,

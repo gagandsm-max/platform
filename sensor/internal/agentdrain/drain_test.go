@@ -15,10 +15,67 @@ import (
 	"testing"
 	"time"
 
+	"platform/sensor/internal/agentacceptance"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/spool"
 	"platform/sensor/internal/supportability"
 )
+
+func TestMismatchedAcceptanceSidecarNeverBuildsCoreRequest(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := spool.Open(spool.Config{Dir: dir, Kind: spool.KindAgentIngress,
+		MaxRecordBytes: 1024 * 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sp.Close()
+	payload := durableBatchPayload{TenantID: "tenant-a", AgentID: "agent-a", SensorID: "sensor-a",
+		Generation: 1, FirstSequence: 1, LastSequence: 1, BatchID: "batch-a", CorrelationID: "corr-a"}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := sp.Append(spool.AppendRequest{Class: spool.ClassOperational,
+		Type: agentBatchRecordType, Payload: encoded})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := agentacceptance.Lock(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	evidence := coreclient.SensorAcceptanceEvidenceV1{EvidenceVersion: 1,
+		AcceptedAtUTC: now.Format(time.RFC3339Nano), ClockQuality: "QUALIFIED",
+		ClockSource: "TEST", SensorServiceInstanceID: "test-instance", DurableSpoolSequence: rec.Sequence}
+	if err := guard.Persist(rec, sp.StreamID(), now, evidence); err != nil {
+		t.Fatal(err)
+	}
+	_ = guard.Close()
+	path := filepath.Join(dir, "acceptance-evidence", "00000000000000000001.json")
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sidecar map[string]any
+	if err := json.Unmarshal(content, &sidecar); err != nil {
+		t.Fatal(err)
+	}
+	sidecar["payloadSha256"] = strings.Repeat("0", 64)
+	corrupt, err := json.Marshal(sidecar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, corrupt, 0640); err != nil {
+		t.Fatal(err)
+	}
+	d := &Drain{cfg: Config{SensorID: "sensor-a", StreamID: sp.StreamID(), AgentSpoolDir: dir}}
+	_, err = d.makeRequest(spool.Batch{FirstSequence: rec.Sequence,
+		LastSequence: rec.Sequence, Records: []spool.Record{rec}})
+	if err == nil {
+		t.Fatal("mismatched acceptance evidence built a Core request")
+	}
+}
 
 type fakeTransport struct {
 	ack  coreclient.AgentTelemetryAck

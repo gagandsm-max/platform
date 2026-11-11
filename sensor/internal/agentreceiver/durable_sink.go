@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"platform/sensor/internal/agentacceptance"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/spool"
 	"platform/sensor/internal/supportability"
@@ -97,6 +98,7 @@ type durableBatchPayload struct {
 // watermark.
 type SpoolAcceptanceSink struct {
 	spool                 *spool.DiskSpool
+	spoolDir              string
 	indexDir              string
 	stateDir              string
 	mu                    sync.Mutex
@@ -113,7 +115,8 @@ type SpoolAcceptanceSink struct {
 	// append-succeeds/index-publication-fails boundary. Production leaves it nil.
 	indexPublisher func(string, batchIndexEntry) error
 	// appendHook is an unexported test seam invoked immediately before spool append.
-	appendHook func(DeliveryEnvelope) error
+	appendHook     func(DeliveryEnvelope) error
+	postAppendHook func(spool.Record) error
 	// ownerPublisher replaces atomicWriteJSONFile for lineage-owner publication (tests).
 	ownerPublisher func(dir, path, tmpPattern string, v any) error
 	// streamStatePublisher replaces atomicWriteJSONFile for stream-state publication (tests).
@@ -168,6 +171,7 @@ func NewSpoolAcceptanceSink(agentSpool *spool.DiskSpool, agentSpoolDir string, o
 
 	sink := &SpoolAcceptanceSink{
 		spool:                 agentSpool,
+		spoolDir:              dir,
 		indexDir:              indexDir,
 		stateDir:              stateDir,
 		ranges:                make(map[string][]batchIndexEntry),
@@ -480,8 +484,6 @@ func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, st
 	for _, r := range env.Records {
 		recordIDs = append(recordIDs, r.ID)
 	}
-	acceptedAt := time.Now().UTC()
-	clock := s.clockEvidenceProvider.Sample(acceptedAt)
 	payload := durableBatchPayload{
 		TenantID:      env.TenantID,
 		AgentID:       env.AgentID,
@@ -493,17 +495,7 @@ func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, st
 		BatchChecksum: checksum,
 		BatchID:       env.BatchID,
 		CorrelationID: env.CorrelationID,
-		Timestamp:     acceptedAt,
-		AcceptanceEvidence: coreclient.SensorAcceptanceEvidenceV1{
-			EvidenceVersion:         1,
-			AcceptedAtUTC:           acceptedAt.Format(time.RFC3339Nano),
-			ClockQuality:            clock.Quality,
-			ClockMaxErrorMs:         clock.MaxErrorMs,
-			ClockSyncAgeMs:          clock.SyncAgeMs,
-			ClockSource:             clock.Source,
-			SensorServiceInstanceID: s.serviceInstanceID,
-		},
-		Envelope: env,
+		Envelope:      env,
 	}
 	if streamID != "" {
 		payload.Version = modernDurableVersion
@@ -514,14 +506,36 @@ func (s *SpoolAcceptanceSink) acceptAgainstStreamLocked(env DeliveryEnvelope, st
 		return AcceptanceResult{}, fmt.Errorf("%s: failed to encode durable agent batch: %w", ErrCodeSinkFailed, err)
 	}
 
+	guard, err := agentacceptance.Lock(s.spoolDir)
+	if err != nil {
+		return AcceptanceResult{}, fmt.Errorf("%s: acceptance evidence lock: %w", ErrCodeSinkFailed, err)
+	}
+	defer guard.Close()
 	rec, err := s.spool.Append(spool.AppendRequest{
-		Class:     spool.ClassOperational,
-		Type:      agentBatchRecordType,
-		Payload:   encoded,
-		CreatedAt: payload.Timestamp,
+		Class:   spool.ClassOperational,
+		Type:    agentBatchRecordType,
+		Payload: encoded,
 	})
 	if err != nil {
 		return AcceptanceResult{}, err
+	}
+	if s.postAppendHook != nil {
+		if err := s.postAppendHook(rec); err != nil {
+			s.reconcileRequired = true
+			return AcceptanceResult{}, err
+		}
+	}
+	acceptedAt := time.Now().UTC()
+	clock := s.clockEvidenceProvider.Sample(acceptedAt)
+	evidence := coreclient.SensorAcceptanceEvidenceV1{
+		EvidenceVersion: 1, AcceptedAtUTC: acceptedAt.Format(time.RFC3339Nano),
+		ClockQuality: clock.Quality, ClockMaxErrorMs: clock.MaxErrorMs,
+		ClockSyncAgeMs: clock.SyncAgeMs, ClockSource: clock.Source,
+		SensorServiceInstanceID: s.serviceInstanceID, DurableSpoolSequence: rec.Sequence,
+	}
+	if err := guard.Persist(rec, s.spool.StreamID(), acceptedAt, evidence); err != nil {
+		s.reconcileRequired = true
+		return AcceptanceResult{}, fmt.Errorf("%s: acceptance evidence finalization: %w", ErrCodeSinkFailed, err)
 	}
 
 	entry := batchIndexEntry{
@@ -1222,6 +1236,13 @@ func (s *SpoolAcceptanceSink) SetAppendHookForTest(hook func(DeliveryEnvelope) e
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.appendHook = hook
+}
+
+// SetPostAppendHookForTest runs after durable append and before evidence finalization.
+func (s *SpoolAcceptanceSink) SetPostAppendHookForTest(hook func(spool.Record) error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.postAppendHook = hook
 }
 
 // SetStreamStatePublisherForTest replaces durable stream-state publication.

@@ -448,42 +448,50 @@ public class AgentIngestionValidator {
                                 "ERR_AGENT_ENTITY_BINDING_INACTIVE", "Active canonical Agent binding is required"));
             }
             String hostId = recordHostId(ingress);
-            EntityIdentifier identifier = entityIdentifierRepository.findByResolutionKey(
-                    recordTenantId, AGENT_ENTITY_NAMESPACE, AGENT_HOST_ID_TYPE, hostId)
-                    .orElseThrow(() -> new IngestionException(HttpStatus.FORBIDDEN,
-                            "ERR_AGENT_ENTITY_IDENTIFIER_UNPROVEN", "Canonical host identifier is unavailable"));
-            if (!recordTenantId.equals(identifier.tenantId()) || identifier.entityId() == null
-                    || !AGENT_ENTITY_NAMESPACE.equals(identifier.namespace())
-                    || !AGENT_HOST_ID_TYPE.equals(identifier.identifierType())
-                    || !hostId.equals(identifier.identifierValue())) {
-                throw new IngestionException(HttpStatus.FORBIDDEN,
-                        "ERR_AGENT_IDENTITY_CONFLICT", "Canonical host identifier scope mismatch");
-            }
+            UUID identifierId;
+            UUID canonicalEntityId;
             long bindingVersion;
             if (historical) {
                 ClockInterval interval = acceptanceInterval(ingress);
-                if (interval == null || identifier.firstSeenAt() == null
-                        || identifier.firstSeenAt().isAfter(interval.lower())
-                        || !identifierCreatedNoLaterThan(identifier.identifierId(), interval.lower())
-                        || identifier.confidence() == null
-                        || identifier.confidence().compareTo(java.math.BigDecimal.ONE) != 0) {
+                var proved = interval == null ? java.util.Optional
+                        .<EntityIdentifierRepository.HistoricalBinding>empty()
+                        : entityIdentifierRepository.findHistoricalBinding(recordTenantId,
+                                AGENT_ENTITY_NAMESPACE, AGENT_HOST_ID_TYPE, hostId,
+                                interval.lower(), interval.upper());
+                if (proved.isEmpty() || proved.get().identifierId() == null
+                        || proved.get().entityId() == null || proved.get().historyVersion() < 1) {
                     throw new IngestionException(HttpStatus.FORBIDDEN,
                             "ERR_AGENT_LEGACY_ENTITY_UNPROVEN", "Historical canonical entity mapping is unproven");
                 }
-                bindingVersion = asg.generation();
+                identifierId = proved.get().identifierId();
+                canonicalEntityId = proved.get().entityId();
+                bindingVersion = proved.get().historyVersion();
             } else {
+                EntityIdentifier identifier = entityIdentifierRepository.findByResolutionKey(
+                        recordTenantId, AGENT_ENTITY_NAMESPACE, AGENT_HOST_ID_TYPE, hostId)
+                        .orElseThrow(() -> new IngestionException(HttpStatus.FORBIDDEN,
+                                "ERR_AGENT_ENTITY_IDENTIFIER_UNPROVEN", "Canonical host identifier is unavailable"));
+                if (!recordTenantId.equals(identifier.tenantId()) || identifier.entityId() == null
+                        || !AGENT_ENTITY_NAMESPACE.equals(identifier.namespace())
+                        || !AGENT_HOST_ID_TYPE.equals(identifier.identifierType())
+                        || !hostId.equals(identifier.identifierValue())) {
+                    throw new IngestionException(HttpStatus.FORBIDDEN,
+                            "ERR_AGENT_IDENTITY_CONFLICT", "Canonical host identifier scope mismatch");
+                }
                 if (!recordTenantId.equals(activeBinding.tenantId())
                         || !ingress.agentId().trim().equals(activeBinding.agentId())
                         || !identifier.entityId().equals(activeBinding.entityId())) {
                     throw new IngestionException(HttpStatus.FORBIDDEN,
                             "ERR_AGENT_IDENTITY_CONFLICT", "Canonical Agent binding or host mapping conflicts");
                 }
+                identifierId = identifier.identifierId();
+                canonicalEntityId = identifier.entityId();
                 bindingVersion = activeBinding.reinstallGeneration();
             }
             PendingCanonicalBindingV1 canonical = new PendingCanonicalBindingV1(
                     ingress.sensorIngressSequence(), ingress.agentId().trim(),
-                    ingress.assignmentGeneration(), hostId, identifier.identifierId(),
-                    identifier.entityId(), bindingVersion);
+                    ingress.assignmentGeneration(), hostId, identifierId,
+                    canonicalEntityId, bindingVersion);
             bindings.add(canonical);
 
             for (JsonNode deliveryRecord : ingress.records()) {
@@ -517,6 +525,9 @@ public class AgentIngestionValidator {
             validateIngressRecordAuthority(ingress, scope.sensorId(), scope.tenantId());
             PendingCanonicalBindingV1 binding = bindings.get(i);
             if (binding == null || binding.entityId() == null || binding.entityIdentifierId() == null
+                    || binding.bindingVersion() < 1 || binding.assignmentGeneration() < 1
+                    || binding.agentId() == null || binding.agentId().isBlank()
+                    || binding.hostId() == null || binding.hostId().isBlank()
                     || binding.sensorIngressSequence() != ingress.sensorIngressSequence()
                     || !binding.agentId().equals(ingress.agentId().trim())
                     || binding.assignmentGeneration() != ingress.assignmentGeneration()
@@ -561,12 +572,6 @@ public class AgentIngestionValidator {
                     "ERR_AGENT_AUTHORITY_ORDER_UNCERTAIN",
                     "Qualified Sensor acceptance interval does not fit the historical assignment");
         }
-    }
-
-    private static boolean identifierCreatedNoLaterThan(UUID identifierId, Instant boundary) {
-        if (identifierId == null || identifierId.version() != 7) return false;
-        long mintedAtMs = identifierId.getMostSignificantBits() >>> 16;
-        return !Instant.ofEpochMilli(mintedAtMs).isAfter(boundary);
     }
 
     private JsonNode collectionNode(JsonNode deliveryRecord) {
