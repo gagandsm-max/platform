@@ -90,6 +90,16 @@ class Matrix:
                         "ORDER BY history_version) t")
         return json.loads(rows)
 
+    def activate_identifier_history(self, host=GOOD_HOST):
+        activated = self.sql("SELECT platform.activate_entity_identifier_binding_history("
+                             "h.history_version,h.tenant_id,h.entity_identifier_id,h.entity_id,"
+                             "h.namespace,h.identifier_type,h.identifier_value) "
+                             "FROM platform.entity_identifier_binding_history h WHERE h.tenant_id='" +
+                             TENANT + "' AND h.namespace='platform.agent' AND h.identifier_type='HOST_ID' "
+                             "AND h.identifier_value='" + host +
+                             "' AND h.activation_state='PENDING_COMMIT_VISIBILITY'")
+        assert activated == "t", (host, activated)
+
     def wait_watermark(self, acked, settled, seconds=90):
         until = time.monotonic() + seconds
         last = None
@@ -575,6 +585,7 @@ class Matrix:
                  "confidence, first_seen_at, last_seen_at) VALUES ('" + fresh_uuid7() + "','" +
                  TENANT + "','" + ENTITY_B + "','HOST_ID','platform.agent','" + GOOD_HOST +
                  "',1.0,now(),now())")
+        self.activate_identifier_history()
         self.sql("UPDATE platform.entity_agent_binding SET entity_id='" + ENTITY_B +
                  "', binding_state='ACTIVE' WHERE tenant_id='" + TENANT + "' AND agent_id='" + AGENT + "'")
         live_b = self.sql("SELECT entity_id FROM platform.entity_identifier WHERE tenant_id='" + TENANT +
@@ -632,6 +643,7 @@ class Matrix:
                  "confidence, first_seen_at, last_seen_at) VALUES ('" + fresh_uuid7() + "','" +
                  TENANT + "','" + ENTITY_A + "','HOST_ID','platform.agent','" + GOOD_HOST +
                  "',1.0,now(),now())")
+        self.activate_identifier_history()
         next_nine = self.direct_batch(9, stream, "p0.sequence.next.9", generation=1)
         code, accepted_nine = self.core(next_nine)
         assert code == 200 and accepted_nine["status"] == "ACCEPTED", (code, accepted_nine)

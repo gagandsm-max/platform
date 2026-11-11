@@ -132,9 +132,19 @@ INSERT INTO platform.entity_identifier (
     1.0, now(), now()
 );
 COMMIT;
+SELECT CASE WHEN platform.activate_entity_identifier_binding_history(
+    h.history_version, h.tenant_id, h.entity_identifier_id, h.entity_id,
+    h.namespace, h.identifier_type, h.identifier_value)
+    THEN 'HISTORY_ACTIVE' ELSE 'HISTORY_UNPROVEN' END
+  FROM platform.entity_identifier_binding_history h
+ WHERE h.tenant_id = '{TENANT}' AND h.entity_identifier_id = '{IDENTIFIER_ID}'
+   AND h.activation_state = 'PENDING_COMMIT_VISIBILITY';
 SELECT 'seeded-agent=' || '{AGENT_ID}' || ' fingerprint=' || '{fp}';
 """
     out = psql(sql)
+    if "HISTORY_ACTIVE" not in out or "HISTORY_UNPROVEN" in out:
+        print("[ERROR] seeded identifier history did not activate after commit", file=sys.stderr)
+        return 1
     print(out.strip())
     return 0
 

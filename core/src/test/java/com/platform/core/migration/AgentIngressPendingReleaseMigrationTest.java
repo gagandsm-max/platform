@@ -17,6 +17,7 @@ import com.platform.core.ingestion.authority.SensorAuthorityResolver;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
 import com.platform.core.persistence.EntityIdentifierRepository;
+import com.platform.core.domain.inventory.EntityIdentifier;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.ingestion.replay.ReplayReservation;
@@ -36,6 +37,13 @@ import java.security.MessageDigest;
 import java.security.cert.X509Certificate;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
+import java.sql.Connection;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Timestamp;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
@@ -219,16 +227,31 @@ class AgentIngressPendingReleaseMigrationTest {
                   identifier_type, namespace, identifier_value, confidence, first_seen_at, last_seen_at)
                 VALUES (?, ?, ?, 'HOST_ID', 'platform.agent', 'historical-a-b', 1.0, now(), now())
                 """, identifier, TENANT_A, a);
+        assertEquals("PENDING_COMMIT_VISIBILITY", historyState(identifier));
+        EntityIdentifierRepository repo = new EntityIdentifierRepository(new NamedParameterJdbcTemplate(pg.dataSource()));
+        Instant beforeActivation = dbNow();
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b", beforeActivation, beforeActivation).isEmpty());
+        assertTrue(activateHistory(identifier));
         Instant acceptedAt = pg.jdbc().queryForObject("SELECT clock_timestamp()", java.sql.Timestamp.class).toInstant();
         pg.jdbc().update("UPDATE platform.entity_identifier SET entity_id=? "
                 + "WHERE tenant_id=? AND identifier_id=?", b, TENANT_A, identifier);
-        EntityIdentifierRepository repo = new EntityIdentifierRepository(new NamedParameterJdbcTemplate(pg.dataSource()));
+        assertEquals("PENDING_COMMIT_VISIBILITY", historyState(identifier));
+        Instant gap = dbNow();
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b", gap, gap).isEmpty());
         var historical = repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
                 "historical-a-b", acceptedAt, acceptedAt);
         assertTrue(historical.isPresent());
         assertEquals(a, historical.get().entityId());
         assertEquals(identifier, historical.get().identifierId());
         assertNotNull(historical.get().validTo());
+        assertTrue(activateHistory(identifier));
+        Instant afterActivation = dbNow();
+        assertEquals(b, repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b", afterActivation, afterActivation).orElseThrow().entityId());
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "historical-a-b", gap, gap).isEmpty());
         assertEquals(b, repo.findByResolutionKey(TENANT_A, "platform.agent", "HOST_ID",
                 "historical-a-b").orElseThrow().entityId());
         assertEquals(2, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
@@ -239,10 +262,345 @@ class AgentIngressPendingReleaseMigrationTest {
         assertThrows(org.springframework.dao.DataAccessException.class, () -> pg.jdbc().update("""
                 INSERT INTO platform.entity_identifier_binding_history
                   (tenant_id, namespace, identifier_type, identifier_value, entity_identifier_id,
-                   entity_id, confidence, valid_from, provenance)
+                   entity_id, confidence, change_started_at, activation_state, provenance)
                 VALUES (?, 'platform.agent', 'HOST_ID', 'forged', ?, ?, 1.0, now(),
-                        'ENTITY_IDENTIFIER_WRITE_V021')
+                        'PENDING_COMMIT_VISIBILITY', 'ENTITY_IDENTIFIER_WRITE_V021')
                 """, TENANT_A, UUID.randomUUID(), b));
+    }
+
+    @Test
+    void uncommittedAtoBDoesNotBecomeHistoricalAuthority() throws Exception {
+        seedAccepted(TENANT_A, "sensor-a");
+        seedPending(TENANT_A, "sensor-a");
+        pg.migrate();
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        seedCanonicalIdentity(a, dbNow().minusSeconds(60));
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                  lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'race-entity-b', 'ACTIVE', now(), now(), now(), now())
+                """, b, TENANT_A);
+        UUID identifier = UUID.fromString("018f0e0a-0000-7000-8000-00000000a101");
+        assertTrue(activateHistory(identifier));
+        CountDownLatch triggerDone = new CountDownLatch(1);
+        CountDownLatch allowCommit = new CountDownLatch(1);
+        AtomicReference<Instant> closedAt = new AtomicReference<>();
+        AtomicReference<Throwable> writerFailure = new AtomicReference<>();
+        Thread writer = new Thread(() -> {
+            try (Connection connection = pg.dataSource().getConnection()) {
+                connection.setAutoCommit(false);
+                try (PreparedStatement update = connection.prepareStatement(
+                        "UPDATE platform.entity_identifier SET entity_id=? WHERE tenant_id=? AND identifier_id=?")) {
+                    update.setObject(1, b);
+                    update.setObject(2, TENANT_A);
+                    update.setObject(3, identifier);
+                    assertEquals(1, update.executeUpdate());
+                }
+                try (PreparedStatement select = connection.prepareStatement("""
+                        SELECT valid_to FROM platform.entity_identifier_binding_history
+                         WHERE tenant_id=? AND identifier_value='host-a' AND entity_id=?
+                        """)) {
+                    select.setObject(1, TENANT_A);
+                    select.setObject(2, a);
+                    try (ResultSet row = select.executeQuery()) {
+                        assertTrue(row.next());
+                        closedAt.set(row.getTimestamp(1).toInstant());
+                    }
+                }
+                try (PreparedStatement premature = connection.prepareStatement("""
+                        SELECT platform.activate_entity_identifier_binding_history(
+                            h.history_version, h.tenant_id, h.entity_identifier_id, h.entity_id,
+                            h.namespace, h.identifier_type, h.identifier_value)
+                          FROM platform.entity_identifier_binding_history h
+                         WHERE h.tenant_id=? AND h.identifier_value='host-a'
+                           AND h.entity_id=? AND h.activation_state='PENDING_COMMIT_VISIBILITY'
+                        """)) {
+                    premature.setObject(1, TENANT_A);
+                    premature.setObject(2, b);
+                    try (ResultSet row = premature.executeQuery()) {
+                        assertTrue(row.next());
+                        assertFalse(row.getBoolean(1));
+                    }
+                }
+                System.out.println("HISTORY_T1_PRECOMMIT A_valid_to=" + closedAt.get()
+                        + " B_state=PENDING_COMMIT_VISIBILITY B_valid_from=NULL premature_activation=DENIED");
+                triggerDone.countDown();
+                assertTrue(allowCommit.await(30, TimeUnit.SECONDS));
+                connection.commit();
+            } catch (Throwable ex) {
+                writerFailure.set(ex);
+                triggerDone.countDown();
+            }
+        }, "identifier-history-uncommitted-writer");
+        writer.start();
+        try {
+            assertTrue(triggerDone.await(30, TimeUnit.SECONDS));
+            assertNull(writerFailure.get());
+            Instant t1 = dbNow();
+            assertTrue(t1.isAfter(closedAt.get()));
+            assertEquals(a, pg.jdbc().queryForObject("""
+                    SELECT entity_id FROM platform.entity_identifier
+                     WHERE tenant_id=? AND identifier_id=?
+                    """, UUID.class, TENANT_A, identifier));
+            ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+            LegacyRequest legacy = legacyRequest(mapper, t1.toString());
+            allowCommit.countDown();
+            writer.join(30000);
+            assertFalse(writer.isAlive());
+            assertNull(writerFailure.get());
+            assertTrue(activateHistory(identifier));
+            EntityIdentifierRepository repo = new EntityIdentifierRepository(
+                    new NamedParameterJdbcTemplate(pg.dataSource()));
+            assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                    "host-a", t1, t1).isEmpty());
+            Instant activatedAt = pg.jdbc().queryForObject("""
+                    SELECT activated_at FROM platform.entity_identifier_binding_history
+                     WHERE tenant_id=? AND identifier_value='host-a' AND entity_id=?
+                    """, Timestamp.class, TENANT_A, b).toInstant();
+            assertEquals(activatedAt, pg.jdbc().queryForObject("""
+                    SELECT valid_from FROM platform.entity_identifier_binding_history
+                     WHERE tenant_id=? AND identifier_value='host-a' AND entity_id=?
+                    """, Timestamp.class, TENANT_A, b).toInstant());
+            assertTrue(activatedAt.isAfter(t1));
+            pg.jdbc().update("""
+                    UPDATE platform.sensor_agent_ingress_watermark
+                       SET pending_checksum=?, pending_request_sha256=?
+                     WHERE tenant_id=? AND sensor_id='sensor-a'
+                    """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
+            SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
+            AgentControlRepository agentRepo = mock(AgentControlRepository.class);
+            KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
+            X509Certificate certificate = mock(X509Certificate.class);
+            when(authority.resolve(certificate)).thenReturn(
+                    new SensorScope("sensor-a", TENANT_A, null, Set.of(b), true));
+            Instant revoked = dbNow();
+            when(agentRepo.findAssignmentByGeneration(TENANT_A, "agent-a", 1))
+                    .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), TENANT_A,
+                            "agent-a", "sensor-a", 1, AgentAssignmentStatus.REVOKED,
+                            t1.minusSeconds(60), t1.minusSeconds(60), revoked)));
+            when(agentRepo.findActiveEntityBinding(TENANT_A, "agent-a"))
+                    .thenReturn(Optional.of(new EntityAgentBinding(TENANT_A, b, "agent-a",
+                            "a".repeat(64), "host-a", "linux", revoked, revoked, "ACTIVE", 1)));
+            AgentIngestionService service = new AgentIngestionService(
+                    new AgentIngestionValidator(mapper, authority, agentRepo, repo,
+                            new IngestionMetrics()), store(), kafka, new IngestionMetrics());
+            IngestionException failure = assertThrows(IngestionException.class, () ->
+                    service.ingestAgentTelemetry(legacy.body(), legacy.request(),
+                            legacy.request().batchId(), certificate));
+            assertEquals("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED", failure.getCode());
+            verifyNoInteractions(kafka);
+            assertEquals("LEGACY_UNKNOWN", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
+            System.out.println("HISTORY_COMMIT_RACE t0=" + closedAt.get()
+                    + " t1=" + t1 + " activation=" + activatedAt
+                    + " committed_reader=A historical_t1=NONE disposition=U5B");
+            assertEquals(b, repo.findByResolutionKey(TENANT_A, "platform.agent", "HOST_ID",
+                    "host-a").orElseThrow().entityId());
+        } finally {
+            allowCommit.countDown();
+            writer.join(30000);
+        }
+    }
+
+    @Test
+    void failedActivationAndRapidRepointNeverInventHistory() {
+        pg.migrate();
+        UUID a = UUID.randomUUID();
+        UUID b = UUID.randomUUID();
+        UUID c = UUID.randomUUID();
+        for (UUID entity : List.of(a, b, c)) {
+            pg.jdbc().update("""
+                    INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                      lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                    VALUES (?, ?, 'HOST', 'rapid-entity', 'ACTIVE', now(), now(), now(), now())
+                    """, entity, TENANT_A);
+        }
+        UUID identifier = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier (identifier_id, tenant_id, entity_id,
+                  identifier_type, namespace, identifier_value, confidence, first_seen_at, last_seen_at)
+                VALUES (?, ?, ?, 'HOST_ID', 'platform.agent', 'rapid-a-b-c', 1.0, now(), now())
+                """, identifier, TENANT_A, a);
+        assertTrue(activateHistory(identifier));
+        pg.jdbc().update("UPDATE platform.entity_identifier SET entity_id=? WHERE identifier_id=?", b, identifier);
+        long bVersion = pg.jdbc().queryForObject("""
+                SELECT history_version FROM platform.entity_identifier_binding_history
+                 WHERE entity_identifier_id=? AND entity_id=?
+                """, Long.class, identifier, b);
+        assertFalse(Boolean.TRUE.equals(pg.jdbc().queryForObject("""
+                SELECT platform.activate_entity_identifier_binding_history(
+                    ?, ?, ?, ?, 'platform.agent', 'HOST_ID', 'rapid-a-b-c')
+                """, Boolean.class, bVersion, TENANT_A, identifier, a)));
+        Instant bGap = dbNow();
+        EntityIdentifierRepository repo = new EntityIdentifierRepository(pg.namedJdbc());
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "rapid-a-b-c", bGap, bGap).isEmpty());
+        pg.jdbc().update("UPDATE platform.entity_identifier SET entity_id=? WHERE identifier_id=?", c, identifier);
+        assertEquals("SUPERSEDED", pg.jdbc().queryForObject("""
+                SELECT activation_state FROM platform.entity_identifier_binding_history
+                 WHERE history_version=?
+                """, String.class, bVersion));
+        assertFalse(Boolean.TRUE.equals(pg.jdbc().queryForObject("""
+                SELECT platform.activate_entity_identifier_binding_history(
+                    ?, ?, ?, ?, 'platform.agent', 'HOST_ID', 'rapid-a-b-c')
+                """, Boolean.class, bVersion, TENANT_A, identifier, b)));
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "rapid-a-b-c", bGap, bGap).isEmpty());
+        assertTrue(activateHistory(identifier));
+        Instant afterC = dbNow();
+        assertEquals(c, repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "rapid-a-b-c", afterC, afterC).orElseThrow().entityId());
+        assertEquals(0, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
+                + "WHERE entity_identifier_id='" + identifier + "' AND entity_id='" + b
+                + "' AND activation_state='ACTIVE'"));
+    }
+
+    @Test
+    void ambiguousActiveHistoryIsRejectedEvenIfCurrentIdentifierMatches() {
+        pg.migrate();
+        UUID entity = UUID.randomUUID();
+        UUID identifier = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                  lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'ambiguous-entity', 'ACTIVE', now(), now(), now(), now())
+                """, entity, TENANT_A);
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier (identifier_id, tenant_id, entity_id,
+                  identifier_type, namespace, identifier_value, confidence, first_seen_at, last_seen_at)
+                VALUES (?, ?, ?, 'HOST_ID', 'platform.agent', 'ambiguous-history', 1.0, now(), now())
+                """, identifier, TENANT_A, entity);
+        assertTrue(activateHistory(identifier));
+        Instant sample = dbNow();
+        // Controlled corruption fixture: bypass both DB guards only inside this private test schema.
+        pg.jdbc().execute("ALTER TABLE platform.entity_identifier_binding_history DISABLE TRIGGER trg_guard_entity_identifier_binding_history");
+        pg.jdbc().execute("DROP INDEX platform.uq_identifier_history_open_key");
+        pg.jdbc().update("""
+                INSERT INTO platform.entity_identifier_binding_history
+                  (tenant_id, namespace, identifier_type, identifier_value, entity_identifier_id,
+                   entity_id, confidence, change_started_at, valid_from, activation_state,
+                   activated_at, provenance)
+                SELECT tenant_id, namespace, identifier_type, identifier_value, entity_identifier_id,
+                       entity_id, confidence, change_started_at, valid_from, activation_state,
+                       activated_at, provenance
+                  FROM platform.entity_identifier_binding_history WHERE entity_identifier_id=?
+                """, identifier);
+        EntityIdentifierRepository repo = new EntityIdentifierRepository(pg.namedJdbc());
+        assertTrue(repo.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "ambiguous-history", sample, sample).isEmpty());
+    }
+
+    @Test
+    void repositoryActivatesOnlyAfterCommittedInsertAndSkipsRollback() {
+        pg.migrate();
+        UUID entity = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (entity_id, tenant_id, entity_type, display_name,
+                  lifecycle_state, first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'managed-history', 'ACTIVE', now(), now(), now(), now())
+                """, entity, TENANT_A);
+        EntityIdentifierRepository managed = new EntityIdentifierRepository(pg.namedJdbc(),
+                new DataSourceTransactionManager(pg.dataSource()));
+        Instant now = dbNow();
+        UUID committedId = UUID.randomUUID();
+        pg.tx().executeWithoutResult(status -> {
+            managed.insert(new EntityIdentifier(committedId, TENANT_A, entity, "HOST_ID",
+                    "platform.agent", "managed-commit", java.math.BigDecimal.ONE, now, now));
+            assertEquals("PENDING_COMMIT_VISIBILITY", historyState(committedId));
+        });
+        assertEquals("ACTIVE", historyState(committedId));
+        UUID rolledBackId = UUID.randomUUID();
+        pg.tx().executeWithoutResult(status -> {
+            managed.insert(new EntityIdentifier(rolledBackId, TENANT_A, entity, "HOST_ID",
+                    "platform.agent", "managed-rollback", java.math.BigDecimal.ONE, now, now));
+            assertEquals("PENDING_COMMIT_VISIBILITY", historyState(rolledBackId));
+            status.setRollbackOnly();
+        });
+        assertEquals(0, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
+                + "WHERE entity_identifier_id='" + rolledBackId + "'"));
+        UUID supersededId = UUID.randomUUID();
+        pg.tx().executeWithoutResult(status -> {
+            managed.insert(new EntityIdentifier(supersededId, TENANT_A, entity, "HOST_ID",
+                    "platform.agent", "managed-superseded", java.math.BigDecimal.ONE, now, now));
+            pg.jdbc().update("UPDATE platform.entity_identifier SET confidence=0.5 "
+                    + "WHERE identifier_id=?", supersededId);
+        });
+        assertEquals(0, count("SELECT count(*) FROM platform.entity_identifier_binding_history "
+                + "WHERE entity_identifier_id='" + supersededId + "' AND activation_state='ACTIVE'"));
+        assertEquals("PENDING_COMMIT_VISIBILITY", historyState(supersededId));
+    }
+
+    private Instant dbNow() {
+        return pg.jdbc().queryForObject("SELECT clock_timestamp()", Timestamp.class).toInstant();
+    }
+
+    private String historyState(UUID identifier) {
+        return pg.jdbc().queryForObject("""
+                SELECT activation_state FROM platform.entity_identifier_binding_history
+                 WHERE tenant_id=? AND entity_identifier_id=? ORDER BY history_version DESC LIMIT 1
+                """, String.class, TENANT_A, identifier);
+    }
+
+    private boolean activateHistory(UUID identifier) {
+        return Boolean.TRUE.equals(pg.jdbc().queryForObject("""
+                SELECT platform.activate_entity_identifier_binding_history(
+                    h.history_version, h.tenant_id, h.entity_identifier_id, h.entity_id,
+                    h.namespace, h.identifier_type, h.identifier_value)
+                  FROM platform.entity_identifier_binding_history h
+                 WHERE h.tenant_id=? AND h.entity_identifier_id=?
+                   AND h.activation_state='PENDING_COMMIT_VISIBILITY'
+                """, Boolean.class, TENANT_A, identifier));
+    }
+
+    @Test
+    void u5aLegacyPendingPublishesOnlyWithActiveCommittedHistory() throws Exception {
+        seedAccepted(TENANT_A, "sensor-a");
+        seedPending(TENANT_A, "sensor-a");
+        pg.migrate();
+        UUID entity = UUID.fromString("018f0e0a-0000-7000-8000-00000000ae01");
+        UUID identifier = UUID.fromString("018f0e0a-0000-7000-8000-00000000a101");
+        seedCanonicalIdentity(entity, dbNow().minusSeconds(60));
+        assertEquals("PENDING_COMMIT_VISIBILITY", historyState(identifier));
+        assertTrue(activateHistory(identifier));
+        assertEquals("ACTIVE", historyState(identifier));
+        Instant acceptedAt = dbNow();
+        ObjectMapper mapper = new ObjectMapper().findAndRegisterModules();
+        LegacyRequest legacy = legacyRequest(mapper, acceptedAt.toString());
+        pg.jdbc().update("""
+                UPDATE platform.sensor_agent_ingress_watermark
+                   SET pending_checksum=?, pending_request_sha256=?
+                 WHERE tenant_id=? AND sensor_id='sensor-a'
+                """, legacy.checksum(), sha256(legacy.body()), TENANT_A);
+        SensorAuthorityResolver authority = mock(SensorAuthorityResolver.class);
+        AgentControlRepository agentRepo = mock(AgentControlRepository.class);
+        KafkaTelemetryProducer kafka = mock(KafkaTelemetryProducer.class);
+        X509Certificate certificate = mock(X509Certificate.class);
+        when(authority.resolve(certificate)).thenReturn(
+                new SensorScope("sensor-a", TENANT_A, null, Set.of(entity), true));
+        Instant created = acceptedAt.minusSeconds(60);
+        Instant revoked = dbNow();
+        when(agentRepo.findAssignmentByGeneration(TENANT_A, "agent-a", 1))
+                .thenReturn(Optional.of(new AgentSensorAssignment(UUID.randomUUID(), TENANT_A,
+                        "agent-a", "sensor-a", 1, AgentAssignmentStatus.REVOKED,
+                        created, created, revoked)));
+        when(agentRepo.findActiveEntityBinding(TENANT_A, "agent-a"))
+                .thenReturn(Optional.of(new EntityAgentBinding(TENANT_A, entity, "agent-a",
+                        "a".repeat(64), "host-a", "linux", created, revoked, "ACTIVE", 1)));
+        EntityIdentifierRepository identifiers = new EntityIdentifierRepository(pg.namedJdbc());
+        assertEquals(entity, identifiers.findHistoricalBinding(TENANT_A, "platform.agent", "HOST_ID",
+                "host-a", acceptedAt, acceptedAt).orElseThrow().entityId());
+        AgentIngestionService service = new AgentIngestionService(
+                new AgentIngestionValidator(mapper, authority, agentRepo, identifiers,
+                        new IngestionMetrics()), store(), kafka, new IngestionMetrics());
+        var ack = service.ingestAgentTelemetry(legacy.body(), legacy.request(),
+                legacy.request().batchId(), certificate);
+        assertEquals("ACCEPTED", ack.status());
+        assertEquals(3L, state(TENANT_A, "sensor-a").get("settled_through_sequence"));
+        assertNull(state(TENANT_A, "sensor-a").get("pending_first_sequence"));
+        assertEquals("NONE", pendingState(TENANT_A, "sensor-a").get("pending_authority_state"));
+        verify(kafka, times(1)).publishBatchTransactionally(any(TelemetryObservationBatch.class));
+        System.out.println("HISTORY_U5A_ACTIVE_LEGACY accepted_at=" + acceptedAt
+                + " history_state=ACTIVE entity=A publication=1 pending=CLEARED");
     }
 
     @Test
