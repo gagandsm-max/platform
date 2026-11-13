@@ -5493,6 +5493,152 @@ class MotherReferenceValidatorTests(unittest.TestCase):
             )
             self.assertIn("host-global", joined.lower())
 
+    def test_103_nested_non_normative_strip_skips_child_overlap(self) -> None:
+        """Parent non-normative strip must not resurrect nested sibling prose."""
+        from validate_mother_references import strip_non_normative_heading_sections
+
+        text = (
+            "## Keep heading\n\nKeep.\n\n"
+            "## Non-normative ownership index\n\n"
+            "Parent intro `REQ-X-001`.\n\n"
+            "### Summary-only nested catalogue\n\n"
+            "Nested summary `REQ-X-001`.\n\n"
+            "### Ordinary nested subsection\n\n"
+            "Resurrected REQUIREMENT prose Platform SHALL enforce (`REQ-X-001`).\n\n"
+            "## 2. Real section\n\n"
+            "Real Platform SHALL enforce (`REQ-X-002`).\n"
+        )
+        cleaned = strip_non_normative_heading_sections(text)
+        self.assertNotIn("Resurrected REQUIREMENT", cleaned)
+        self.assertNotIn("Ordinary nested subsection", cleaned)
+        self.assertNotIn("Nested summary", cleaned)
+        self.assertIn("## Keep heading", cleaned)
+        self.assertIn("## 2. Real section", cleaned)
+        self.assertIn("REQ-X-002", cleaned)
+
+    def test_103b_adjacent_non_normative_sections_both_stripped(self) -> None:
+        """Adjacent non-normative siblings must both remain excluded."""
+        from validate_mother_references import strip_non_normative_heading_sections
+
+        text = (
+            "## 1. Keep\n\nKeep body.\n\n"
+            "## Non-normative ownership index\n\n"
+            "First excluded `REQ-A-001`.\n\n"
+            "## Summary-only catalogue\n\n"
+            "Second excluded `REQ-A-002`.\n\n"
+            "## 2. Real\n\n"
+            "Platform SHALL enforce (`REQ-A-003`).\n"
+        )
+        cleaned = strip_non_normative_heading_sections(text)
+        self.assertNotIn("First excluded", cleaned)
+        self.assertNotIn("Second excluded", cleaned)
+        self.assertIn("## 1. Keep", cleaned)
+        self.assertIn("## 2. Real", cleaned)
+        self.assertIn("REQ-A-003", cleaned)
+
+    def test_103c_nested_synthetic_family_strip_skips_child_overlap(self) -> None:
+        """Synthetic-family strip must not resurrect nested sibling prose."""
+        from validate_mother_references import strip_synthetic_family_normative_sections
+
+        text = (
+            "## 6. Alerts\n\nKeep.\n\n"
+            "### 6.0 Normative requirements — REQ-ALT family\n\n"
+            "Parent synth.\n\n"
+            "#### 6.0.0 Normative requirements — nested synth\n\n"
+            "Nested synth body.\n\n"
+            "#### 6.0.1 Ordinary nested under parent\n\n"
+            "SHOULD NOT RESURRECT Platform SHALL (`REQ-ALT-099`).\n\n"
+            "### 6.1 Real\n\n"
+            "Real Platform SHALL (`REQ-ALT-001`).\n"
+        )
+        cleaned = strip_synthetic_family_normative_sections(text)
+        self.assertNotIn("SHOULD NOT RESURRECT", cleaned)
+        self.assertNotIn("Ordinary nested under parent", cleaned)
+        self.assertNotIn("Nested synth body", cleaned)
+        self.assertIn("### 6.1 Real", cleaned)
+        self.assertIn("REQ-ALT-001", cleaned)
+
+    def test_103d_adjacent_synthetic_family_sections_both_stripped(self) -> None:
+        """Adjacent synthetic-family sections must both remain excluded."""
+        from validate_mother_references import strip_synthetic_family_normative_sections
+
+        text = (
+            "## 6. Alerts\n\nKeep.\n\n"
+            "### 6.0 Normative requirements — REQ-ALT family\n\n"
+            "First synth `REQ-ALT-010`.\n\n"
+            "### 7.0 Normative requirements — REQ-OSS family\n\n"
+            "Second synth `REQ-OSS-010`.\n\n"
+            "### 6.1 Real\n\n"
+            "Real Platform SHALL (`REQ-ALT-001`).\n"
+        )
+        cleaned = strip_synthetic_family_normative_sections(text)
+        self.assertNotIn("First synth", cleaned)
+        self.assertNotIn("Second synth", cleaned)
+        self.assertIn("### 6.1 Real", cleaned)
+        self.assertIn("REQ-ALT-001", cleaned)
+
+    def test_104_issue308_outbound_source_event_identity_contract(self) -> None:
+        """Outbound operation_hash must bind immutable source-event identity."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (docs / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(
+            encoding="utf-8"
+        )
+        p06 = (docs / "Platform_06_Dataflow.md").read_text(encoding="utf-8")
+        self.assertIn("source_event_id", p17)
+        self.assertIn("created_in_txn_event_id", p17)
+        self.assertRegex(p17, r"operation_hash[\s\S]{0,500}source_event_id")
+        self.assertNotRegex(
+            p17,
+            r"Immutable hash of \(tenant_id, connector_id, object_type, "
+            r"object_id, mapping_version, canonical payload\)",
+        )
+        self.assertIn("A→B→A", p17)
+        self.assertIn("event_seq", p06)
+        self.assertIn("A→B→A", p06)
+
+    def test_105_issue308_policy_lifecycle_seq_contract(self) -> None:
+        """Policy lifecycle events order by lifecycle_seq, not version_no alone."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (docs / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("lifecycle_seq", p17)
+        self.assertIn("`(policy_id, lifecycle_seq)`", p17)
+        self.assertNotIn(
+            "| PolicyChangePayload | tenant_id, policy_id UUID, version_no INT32, "
+            "lifecycle_state",
+            p17,
+        )
+
+    def test_106_issue308_discovery_backfill_parity_contract(self) -> None:
+        """Backfill parity uses distinct derived identities + source-row coverage."""
+        docs = Path(__file__).resolve().parents[1]
+        p17 = (docs / "Platform_17_API_Event_and_Data_Model_Contracts.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("distinct derived", p17.lower())
+        self.assertIn("source-row", p17.lower())
+        self.assertNotIn(
+            "count(`discovery_candidate`) eligible rows = count(`onboarding_candidate`)",
+            p17,
+        )
+
+    def test_107_issue308_storage_byte_unit_factors(self) -> None:
+        """Storage display units use SI 10^9/10^12 and IEC 2^30/2^40."""
+        docs = Path(__file__).resolve().parents[1]
+        p11 = (docs / "Platform_11_Sizing_Capacity_Storage_Master.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("10⁹", p11)
+        self.assertIn("10¹²", p11)
+        self.assertIn("2³⁰", p11)
+        self.assertIn("2⁴⁰", p11)
+        self.assertNotIn("GB unit (10³)", p11)
+        self.assertNotIn("GB/TB** (10³/10⁶)", p11)
+        self.assertNotIn("GiB/TiB** (2¹⁰/2²⁰)", p11)
+        self.assertIn("1_000_000_000", p11)
+        self.assertIn("1_073_741_824", p11)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -307,6 +307,10 @@ def strip_non_normative_heading_sections(text: str) -> str:
     parts: list[str] = []
     idx = 0
     for match in NON_NORMATIVE_SECTION_HEADING_RE.finditer(text):
+        # Skip nested matches already covered by a parent exclusion window.
+        # Processing them would move idx backward and resurrect stripped prose.
+        if match.start() < idx:
+            continue
         parts.append(text[idx : match.start()])
         level = _heading_level_at(text, match.start()) or 2
         end = _end_of_section_at_level(text, match.end(), level)
@@ -366,6 +370,10 @@ def strip_synthetic_family_normative_sections(text: str) -> str:
     parts: list[str] = []
     idx = 0
     for match in SYNTHETIC_FAMILY_SECTION_HEADING_RE.finditer(text):
+        # Skip nested matches already covered by a parent exclusion window.
+        # Processing them would move idx backward and resurrect stripped prose.
+        if match.start() < idx:
+            continue
         parts.append(text[idx : match.start()])
         level = len(match.group(1))
         end = _end_of_section_at_level(text, match.end(), level)
