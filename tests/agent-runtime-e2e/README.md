@@ -1,45 +1,31 @@
 # Agent runtime E2E (test-only)
 
-## BUILD-001 classification — OPTIONAL NON-CI / ISOLATION-PENDING
+## Isolated optional runtime gate
 
-This harness is **not** part of BUILD-001 certification.
-
-- It uses the shared Compose project/resource namespace `platform`.
-- It uses fixed host/resource assumptions (default receiver host port `28444`, named volumes/containers).
-- It can `docker pause` / restart `platform-core` and mutate Sensor Agent spool state.
-- It **MUST NOT** be run concurrently with a developer Platform stack or normal Platform CI.
-- Isolation/hardening is deferred; do not treat green local runs as a canonical CI gate.
-- Shared-host CI/container contention remains Issue **#107** (do not duplicate here).
-
-BUILD-001 certifies source-only transport harness capability (including the production
-`SpoolAcceptanceSink` → `agentdrain` → mTLS Mock Core pipeline slice under `-tags=pipeline`).
-This Compose overlay remains an optional, isolation-pending real-path tool only.
-
----
-
-Bounded overlay for Issue #46 / PR #47. It does **not** change the production
-`compose.yaml` default `SENSOR_AGENT_RECEIVER_ENABLED=false`.
-
-Paths in `compose.override.yaml` are relative to the repository root (Compose
-project directory), not this folder.
+Run only while holding the admitted Issue #211 runtime allocation. The harness is
+optional and does not confer BUILD/module/native certification.
 
 ```bash
-make certs
-make test-agent-runtime-e2e
+PLATFORM_E2E_RUN_DIR=/absolute/durable/evidence/new-run make test-agent-runtime-e2e
 ```
 
-`make test-agent-runtime-e2e` does **not** regenerate `deploy/docker/certs`
-(that would rotate the Root CA while Core still holds the previous keystore in
-memory). If CA files are missing, `run.sh` calls `make certs` once. Do not run
-`make certs` against a live stack.
+The directory must be new. `run-isolated.sh` renders the existing Compose contract
+into a fresh `agent-e2e-*` project: unique container/image/volume/network names,
+ephemeral loopback receiver port, and private test PKI. It verifies isolation
+before any mutation and uses the existing guarded Kafka fresh-volume procedure.
+`run.sh` rejects invocation without the verified isolated configuration.
 
-Each run deletes only the test-only named volume `platform_agent_e2e_state`.
-The Sensor Agent spool volume is retained so Core agent-ingress sequences do
-not rewind (`ERR_SEQUENCE_REGRESSION`). Drained `batch-index` receipts from a
-previous run are removed at start because the Agent queue reset restarts source
-sequences at 1; that wipe is test-only. Mid-run Sensor restart keeps receipts so
-lost-ACK replay after drain remains valid. Oversized leftover spool records are
-parked as terminal poison on HTTP 413.
+The run builds current Core, Sensor and Agent sources, then exercises the existing
+scalar path. Enrollment is explicitly **SQL-seeded test authority**, not proof of
+a production Agent enrollment API. Process/service/inventory/eBPF typed evidence
+is not carried by this scalar harness. The canonical ClickHouse readback checks
+stored identity, time, value and replay count; Agent observation provenance is
+currently Kafka-only and must not be claimed as persisted in ClickHouse.
+
+No old shared Agent volume, Sensor acceptance receipt or shared PKI is reset.
+Cleanup captures logs and removes only this fresh project and its provenance-
+checked Kafka volume. Interrupted cleanup is a HOLD requiring resource inspection.
+Native installation, systemd, physical reboot and power-loss are separate gates.
 
 Kafka assertions consume **all partitions** from a saved end-offset snapshot.
 `telemetry.numeric.v1` is partitioned; a single `--from-beginning` consumer
@@ -51,21 +37,16 @@ The overlay also sets that cap explicitly. Operator overrides above 384 KiB are
 rejected at Agent config load (`CONFIG_MAX_BATCH_BYTES_OUT_OF_BOUNDS`) so the
 process cannot start a deterministic HTTP 413 retry loop. Sensor Agent Receiver
 default max body is 512 KiB. Agent HTTP 413 `ERR_REQUEST_TOO_LARGE` is classified
-`OVERSIZED` (queue retained, no hot retry). Core 413 `ERR_RECORD_TOO_LARGE` is a
-terminal drain poison (not an infinite retry).
+`OVERSIZED` (queue retained, no hot retry). Core 413 `ERR_RECORD_TOO_LARGE`
+retains the frozen Sensor spool head and reports degraded delivery until an
+exact durable Core disposition permits removal.
 
 Post-drain duplicate replay uses the durable batch-index acceptance receipt. The
 pending Agent spool record may be gone after downstream drain; an identical
 retry must still return the original `accepted_through_sequence`. Mutated reuse
 of the same sequence range returns `ERR_REPLAY_CONFLICT`.
 
-```bash
-# only if ca.crt is missing, and only while Compose is down:
-# make certs
-make test-agent-runtime-e2e
-```
-
-Path proven:
+Path exercised when the run passes (inspect exact run receipts):
 
 Agent process → local durable queue → mTLS `POST /api/v1/agent/telemetry` →
 Sensor Agent Receiver (infrastructure Sensor) → dedicated Agent spool →
@@ -73,3 +54,21 @@ drain `POST /api/v1/sensor/agent-telemetry` → Core → Kafka `telemetry.numeri
 
 Agent enrollment uses test-only SQL against the existing Agent Control tables
 because no public enroll/assign HTTP API exists on this branch.
+
+## Canonical authority and numeric semantics
+
+V019 fixtures explicitly bind A (`agent-e2e-01`, entity suffix `ae01`,
+`host-e2e-agent-01`) and B (`agent-e2e-probe-01`, entity suffix `ae02`,
+`host-e2e-probe-01`) to separate certificate fingerprints. Legitimate scalar
+readback verifies each canonical entity. `identity_probe.py` authenticates both
+spoof directions at the Sensor, then verifies each forged delivery has an exact
+durable Core terminal disposition and advanced settled continuity. The harness
+also checks Kafka and ClickHouse absence for both metrics. Sensor local-custody
+ACK remains distinct from Core settlement.
+
+The Master ruling permits at most one ULP for ordinary finite Float64 operational
+values. `readback.py` uses an explicit IEEE-754 ordered-bit distance, never a loose
+absolute/relative epsilon. Counter64 uses exact unsigned integer comparison and
+rejects float coercion. The scalar readback does not establish a raw-Counter64
+physical path. Timestamp truncation to existing DateTime64(3) is recorded
+separately and never described as nanosecond preservation.

@@ -151,6 +151,16 @@ class AgentControlAuthorityIntegrationTest {
         // Duplicate fingerprint bind fails
         assertThrows(AgentControlException.class, () -> agentControl.bindCertificate("agent-01", cert1));
 
+        UUID boundEntity = UUID.randomUUID();
+        pg.jdbc().update("""
+                INSERT INTO platform.entity (tenant_id, entity_id, entity_type, display_name, lifecycle_state,
+                    first_seen_at, last_seen_at, created_at, updated_at)
+                VALUES (?, ?, 'HOST', 'Agent host', 'ACTIVE', now(), now(), now(), now())
+                """, tenant.tenantId(), boundEntity);
+        agentControl.establishEntityBinding(tenant.tenantId(), "agent-01", boundEntity, fp1, "host-a",
+                "{\"family\":\"linux\"}", true);
+        assertEquals(boundEntity, agentRepo.findActiveEntityBinding(tenant.tenantId(), "agent-01").orElseThrow().entityId());
+
         // NETWORK sensor lacks AGENT_INGRESS
         AgentControlException noIngress = assertThrows(AgentControlException.class,
                 () -> agentControl.assignToSensor(tenant.tenantId(), "agent-01", "sensor-net-01"));
@@ -197,6 +207,7 @@ class AgentControlAuthorityIntegrationTest {
         AgentSensorAssignment a2 = agentControl.reassignToSensor(
                 tenant.tenantId(), "agent-01", "sensor-infra-02", 1L);
         assertEquals(2L, a2.generation());
+        assertEquals(boundEntity, agentRepo.findActiveEntityBinding(tenant.tenantId(), "agent-01").orElseThrow().entityId());
 
         // P0 fencing completeness with claimed generation:
         // Sensor1 + gen N rejected after reassign to Sensor2 gen N+1
@@ -224,6 +235,10 @@ class AgentControlAuthorityIntegrationTest {
         String fp2 = CertificateFingerprints.sha256DerHex(cert2);
         assertNotEquals(fp1, fp2);
         agentControl.rotateCertificate("agent-01", cert2);
+        var rotatedBinding = agentRepo.findActiveEntityBinding(tenant.tenantId(), "agent-01").orElseThrow();
+        assertEquals(boundEntity, rotatedBinding.entityId());
+        assertEquals(fp2, rotatedBinding.certificateIdentity());
+        assertEquals(1, rotatedBinding.reinstallGeneration());
         IngestionException superseded = assertThrows(IngestionException.class,
                 () -> authorityQuery.resolveForSensor(sensor2, fp1));
         assertEquals("ERR_AGENT_CREDENTIAL_REVOKED", superseded.getCode());
@@ -237,6 +252,9 @@ class AgentControlAuthorityIntegrationTest {
 
         // Revoke credential
         agentControl.revokeCredential(fp2);
+        // Already accepted Sensor custody retains canonical entity; new credential
+        // admission still fails below. Binding revocation is a separate authority.
+        assertEquals(boundEntity, agentRepo.findActiveEntityBinding(tenant.tenantId(), "agent-01").orElseThrow().entityId());
         IngestionException revokedCred = assertThrows(IngestionException.class,
                 () -> authorityQuery.resolveForSensor(sensor2, fp2));
         assertEquals("ERR_AGENT_CREDENTIAL_REVOKED", revokedCred.getCode());

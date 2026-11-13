@@ -10,8 +10,11 @@ import sys
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
+from binding_history_activation import seed_activation_ok, seed_post_commit_activation_sql
+
 ROOT = Path(__file__).resolve().parents[2]
-META = Path(__file__).resolve().parent / "certs" / "metadata.json"
+META = Path(os.environ["PLATFORM_E2E_CERT_DIR"]) / "metadata.json"
+PREFIX = os.environ["PLATFORM_E2E_PREFIX"]
 
 TENANT = "018f0e0a-0000-7000-8000-000000000001"
 AGENT_ID = "agent-e2e-01"
@@ -22,6 +25,17 @@ CREDENTIAL_ID = "018f0e0a-0000-7000-8000-00000000ac01"
 ASSIGNMENT_ID = "018f0e0a-0000-7000-8000-00000000aa01"
 IDENTIFIER_ID = "018f0e0a-0000-7000-8000-00000000a101"
 
+if sys.argv[1:] == ["--probe"]:
+    META = META.with_name("probe-metadata.json")
+    AGENT_ID = "agent-e2e-probe-01"
+    HOST_ID = "host-e2e-probe-01"
+    ENTITY_ID = ENTITY_ID[:-1] + "2"
+    CREDENTIAL_ID = CREDENTIAL_ID[:-1] + "2"
+    ASSIGNMENT_ID = ASSIGNMENT_ID[:-1] + "2"
+    IDENTIFIER_ID = IDENTIFIER_ID[:-1] + "2"
+elif sys.argv[1:]:
+    raise SystemExit("Only --probe is supported")
+
 
 def psql(sql: str) -> str:
     env = os.environ
@@ -31,7 +45,7 @@ def psql(sql: str) -> str:
         "docker",
         "exec",
         "-i",
-        "platform-postgres",
+        PREFIX + "-postgres",
         "psql",
         "-U",
         user,
@@ -64,6 +78,7 @@ def main() -> int:
 
     sql = f"""
 BEGIN;
+DELETE FROM platform.entity_agent_binding WHERE tenant_id = '{TENANT}' AND agent_id = '{AGENT_ID}';
 DELETE FROM platform.agent_sensor_assignment
  WHERE tenant_id = '{TENANT}' AND agent_id = '{AGENT_ID}';
 DELETE FROM platform.agent_certificate_credential
@@ -101,9 +116,16 @@ INSERT INTO platform.entity (
     entity_id, tenant_id, entity_type, display_name, lifecycle_state,
     first_seen_at, last_seen_at, created_at, updated_at
 ) VALUES (
-    '{ENTITY_ID}', '{TENANT}', 'HOST', 'agent-e2e-01', 'ACTIVE',
+    '{ENTITY_ID}', '{TENANT}', 'HOST', '{AGENT_ID}', 'ACTIVE',
     now(), now(), now(), now()
 );
+
+INSERT INTO platform.entity_agent_binding (
+    tenant_id, entity_id, agent_id, certificate_identity, system_name, os_identity,
+    first_enrolled_at, last_heartbeat_at, binding_state, reinstall_generation
+) VALUES ('{TENANT}', '{ENTITY_ID}', '{AGENT_ID}', '{fp}', '{HOST_ID}',
+          CAST('{{"family":"linux","fixture":"e2e"}}' AS jsonb),
+          now(), now(), 'ACTIVE', 1);
 
 INSERT INTO platform.entity_identifier (
     identifier_id, tenant_id, entity_id, identifier_type, namespace, identifier_value,
@@ -113,9 +135,14 @@ INSERT INTO platform.entity_identifier (
     1.0, now(), now()
 );
 COMMIT;
+{seed_post_commit_activation_sql(TENANT, AGENT_ID, IDENTIFIER_ID)}
 SELECT 'seeded-agent=' || '{AGENT_ID}' || ' fingerprint=' || '{fp}';
 """
     out = psql(sql)
+    if not seed_activation_ok(out):
+        print("[ERROR] seeded identifier/Agent binding history did not activate after commit",
+              file=sys.stderr)
+        return 1
     print(out.strip())
     return 0
 

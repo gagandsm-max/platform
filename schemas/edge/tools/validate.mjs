@@ -284,6 +284,52 @@ function assertStrictContiguousAgentSequences(records, first, last, codes, pathP
   }
 }
 
+/** Optional SensorAcceptanceEvidenceV1 nested under Agent-ingress records. */
+function validateAcceptanceEvidence(evidence, pathPrefix, codes) {
+  const allowed = new Set([
+    'evidenceVersion', 'acceptedAtUtc', 'clockQuality', 'clockMaxErrorMs', 'clockSyncAgeMs',
+    'clockSource', 'sensorServiceInstanceId', 'durableSpoolSequence',
+  ]);
+  const required = [
+    'evidenceVersion', 'acceptedAtUtc', 'clockQuality', 'clockSource',
+    'sensorServiceInstanceId', 'durableSpoolSequence',
+  ];
+  assertExactKeys(evidence, allowed, required, codes);
+  if (!isPlainObject(evidence)) return;
+  if (evidence.evidenceVersion !== 1) {
+    fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.evidenceVersion must be 1`);
+  }
+  assertUtcTs(evidence.acceptedAtUtc, `${pathPrefix}.acceptedAtUtc`, codes);
+  if (evidence.clockQuality !== 'QUALIFIED' && evidence.clockQuality !== 'UNQUALIFIED') {
+    fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.clockQuality`);
+  }
+  if (typeof evidence.clockSource !== 'string' || evidence.clockSource.length < 1) {
+    fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.clockSource`);
+  }
+  if (typeof evidence.sensorServiceInstanceId !== 'string' || evidence.sensorServiceInstanceId.length < 1) {
+    fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.sensorServiceInstanceId`);
+  }
+  assertSafeSequence(evidence.durableSpoolSequence, `${pathPrefix}.durableSpoolSequence`, codes);
+  const hasMaxError = Object.prototype.hasOwnProperty.call(evidence, 'clockMaxErrorMs');
+  const hasSyncAge = Object.prototype.hasOwnProperty.call(evidence, 'clockSyncAgeMs');
+  if (evidence.clockQuality === 'QUALIFIED') {
+    if (!hasMaxError || !hasSyncAge) {
+      fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix} QUALIFIED requires clock bounds`);
+    } else {
+      if (typeof evidence.clockMaxErrorMs !== 'number' || !Number.isSafeInteger(evidence.clockMaxErrorMs)
+          || evidence.clockMaxErrorMs < 0 || evidence.clockMaxErrorMs > 5000) {
+        fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.clockMaxErrorMs`);
+      }
+      if (typeof evidence.clockSyncAgeMs !== 'number' || !Number.isSafeInteger(evidence.clockSyncAgeMs)
+          || evidence.clockSyncAgeMs < 0 || evidence.clockSyncAgeMs > 300000) {
+        fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix}.clockSyncAgeMs`);
+      }
+    }
+  } else if (hasMaxError || hasSyncAge) {
+    fail(codes, 'INVALID_ACCEPTANCE_EVIDENCE', `${pathPrefix} UNQUALIFIED forbids clock bounds`);
+  }
+}
+
 function validateAgentDeliveryRecord(rec, pathPrefix, codes) {
   const rAllowed = new Set(['sequence', 'id', 'createdAt', 'checksum', 'payload']);
   assertExactKeys(rec, rAllowed, ['sequence', 'id', 'createdAt', 'checksum', 'payload'], codes);
@@ -491,9 +537,14 @@ function validateIngressBatch(doc, codes) {
     const rAllowed = new Set([
       'sensorIngressSequence', 'sensorIngressRecordId', 'tenantId', 'agentId', 'acceptingSensorId',
       'assignmentGeneration', 'agentFirstSequence', 'agentLastSequence', 'agentBatchId',
-      'correlationId', 'acceptedAt', 'records',
+      'correlationId', 'acceptedAt', 'acceptanceEvidence', 'records',
     ]);
-    assertExactKeys(rec, rAllowed, [...rAllowed], codes);
+    const rRequired = [
+      'sensorIngressSequence', 'sensorIngressRecordId', 'tenantId', 'agentId', 'acceptingSensorId',
+      'assignmentGeneration', 'agentFirstSequence', 'agentLastSequence', 'agentBatchId',
+      'correlationId', 'acceptedAt', 'records',
+    ];
+    assertExactKeys(rec, rAllowed, rRequired, codes);
     assertUuid(rec.tenantId, `records[${i}].tenantId`, codes);
     assertAgentId(rec.agentId, `records[${i}].agentId`, codes);
     assertSensorId(rec.acceptingSensorId, `records[${i}].acceptingSensorId`, codes);
@@ -503,6 +554,9 @@ function validateIngressBatch(doc, codes) {
     assertAgentDeliveryBatchId(rec.agentBatchId, `records[${i}].agentBatchId`, codes);
     assertCorr(rec.correlationId, `records[${i}].correlationId`, codes);
     assertUtcTs(rec.acceptedAt, `records[${i}].acceptedAt`, codes);
+    if (Object.prototype.hasOwnProperty.call(rec, 'acceptanceEvidence')) {
+      validateAcceptanceEvidence(rec.acceptanceEvidence, `records[${i}].acceptanceEvidence`, codes);
+    }
     if (!Array.isArray(rec.records)) {
       fail(codes, 'INVALID_CONTRACT', `records[${i}].records`);
       continue;

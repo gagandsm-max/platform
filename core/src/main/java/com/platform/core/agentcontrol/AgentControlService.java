@@ -1,5 +1,7 @@
 package com.platform.core.agentcontrol;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.platform.core.control.ControlGenerationLimits;
 import com.platform.core.id.UuidV7;
 import com.platform.core.security.audit.AuditActions;
@@ -15,6 +17,7 @@ import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.security.cert.X509Certificate;
 import java.time.Instant;
 import java.util.List;
@@ -32,6 +35,9 @@ import java.util.UUID;
  */
 @Service
 public class AgentControlService {
+
+    private static final ObjectMapper OS_IDENTITY_JSON = new ObjectMapper();
+    private static final int OS_IDENTITY_MAX_OCTETS = 512;
 
     private final AgentControlRepository repository;
     private final SensorControlRepository sensorRepository;
@@ -128,6 +134,44 @@ public class AgentControlService {
         return credential;
     }
 
+    /** Internal authorized onboarding operation; never derives authority from telemetry hostId. */
+    @Transactional("transactionManager")
+    public EntityAgentBinding establishEntityBinding(UUID tenantId, String agentId, UUID entityId,
+                                                     String fingerprint, String systemName, String osIdentity,
+                                                     boolean approved) {
+        Objects.requireNonNull(tenantId, "tenantId");
+        Objects.requireNonNull(entityId, "entityId");
+        AgentPrincipal principal = requirePrincipal(agentId);
+        if (!tenantId.equals(principal.tenantId())) {
+            throw new AgentControlException("ERR_AGENT_BINDING_TENANT_MISMATCH", "Agent tenant mismatch");
+        }
+        principal = requireActivePrincipalForCredentialIssuance(
+                repository.lockPrincipalForUpdate(tenantId, principal.agentId()));
+        var credential = repository.findCredentialByFingerprint(fingerprint)
+                .orElseThrow(() -> new AgentControlException("ERR_AGENT_BINDING_CERTIFICATE_INVALID", "Unknown credential"));
+        Instant now = Instant.now();
+        if (!tenantId.equals(credential.tenantId()) || !principal.agentId().equals(credential.agentId())
+                || credential.status() != AgentCredentialStatus.ACTIVE
+                || now.isBefore(credential.notBefore()) || now.isAfter(credential.notAfter())) {
+            throw new AgentControlException("ERR_AGENT_BINDING_CERTIFICATE_INVALID", "Inactive or mismatched credential");
+        }
+        if (systemName == null || systemName.isBlank() || systemName.length() > 255) {
+            throw new AgentControlException("ERR_AGENT_BINDING_INVALID", "Invalid host identity evidence bounds");
+        }
+        String normalizedOsIdentity = normalizeOsIdentityJson(osIdentity);
+        var binding = new EntityAgentBinding(tenantId, entityId, principal.agentId(), fingerprint,
+                systemName.trim(), normalizedOsIdentity, now, now,
+                approved ? "ACTIVE" : "PENDING_APPROVAL", 1);
+        // Same-tenant entity/Agent/certificate FKs and uniqueness enforce fail-closed insertion.
+        // Existing bindings require governed reconciliation, never an implicit upsert.
+        repository.insertEntityBinding(binding);
+        auditEmitter.emitControlEvent(AuditCategory.SECURITY_ADMINISTRATION, AuditActions.AGENT_ENROLL,
+                AuditOutcome.SUCCESS, tenantId, "AGENT_ENTITY_BOUND",
+                Map.of("agent_id", principal.agentId(), "entity_id", entityId.toString(),
+                        "binding_state", binding.bindingState()));
+        return binding;
+    }
+
     /**
      * Rotate certificate for the same agent. Supersedes prior ACTIVE credentials then inserts the new binding.
      * On insert failure the whole transaction rolls back so prior credentials remain ACTIVE.
@@ -168,6 +212,10 @@ public class AgentControlService {
                 now
         );
         repository.insertCredential(bound);
+        for (AgentCertificateCredential existing : active) {
+            repository.rotateEntityBindingCertificate(principal.tenantId(), principal.agentId(),
+                    existing.fingerprintSha256(), fingerprint);
+        }
         auditEmitter.emitControlEvent(
                 AuditCategory.CREDENTIAL,
                 AuditActions.AGENT_CREDENTIAL_ROTATE,
@@ -535,6 +583,26 @@ public class AgentControlService {
                 now,
                 now
         );
+    }
+
+    /** os_identity is nullable JSONB; non-null values must be valid JSON within the physical bound. */
+    private static String normalizeOsIdentityJson(String osIdentity) {
+        if (osIdentity == null) {
+            return null;
+        }
+        String trimmed = osIdentity.trim();
+        if (trimmed.isEmpty()) {
+            throw new AgentControlException("ERR_AGENT_BINDING_INVALID", "Invalid host identity evidence bounds");
+        }
+        try {
+            OS_IDENTITY_JSON.readTree(trimmed);
+        } catch (JsonProcessingException e) {
+            throw new AgentControlException("ERR_AGENT_BINDING_INVALID", "os_identity must be valid JSON");
+        }
+        if (trimmed.getBytes(StandardCharsets.UTF_8).length > OS_IDENTITY_MAX_OCTETS) {
+            throw new AgentControlException("ERR_AGENT_BINDING_INVALID", "Invalid host identity evidence bounds");
+        }
+        return trimmed;
     }
 
     private static String requireAgentId(String agentId) {

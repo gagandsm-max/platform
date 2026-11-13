@@ -20,6 +20,16 @@
       "agentBatchId": "batch-agent-01-00000000000000000001-00000000000000000001-aaaaaaaaaaaaaaaa",
       "correlationId": "corr-ingress-001",
       "acceptedAt": "2026-09-24T10:00:00.000Z",
+      "acceptanceEvidence": {
+        "evidenceVersion": 1,
+        "acceptedAtUtc": "2026-09-24T10:00:00.000Z",
+        "clockQuality": "QUALIFIED",
+        "clockMaxErrorMs": 0,
+        "clockSyncAgeMs": 0,
+        "clockSource": "TEST_QUALIFIED",
+        "sensorServiceInstanceId": "sensor-instance-001",
+        "durableSpoolSequence": 1
+      },
       "records": [
         {
           "sequence": 1,

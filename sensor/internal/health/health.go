@@ -20,25 +20,26 @@ import (
 )
 
 const (
-	componentName              = "platform-sensor"
-	defaultVersion             = "0.1.0-dev"
-	hardStoragePercent         = 80.0
-	reasonShuttingDown         = "SENSOR_SHUTTING_DOWN"
-	reasonSpoolCheck           = "SENSOR_SPOOL_UNWRITABLE"
-	reasonSpoolPressure        = "SENSOR_SPOOL_HARD_PRESSURE"
-	reasonAgentSpoolCheck      = "SENSOR_AGENT_SPOOL_UNWRITABLE"
-	reasonAgentSpoolHard       = "SENSOR_AGENT_SPOOL_HARD_PRESSURE"
-	reasonAgentDeliveryBlocked = "SENSOR_AGENT_DELIVERY_BLOCKED"
-	reasonPackUnavailable      = "SENSOR_PACK_SYNC_UNAVAILABLE"
-	reasonPackTrust            = "SENSOR_PACK_TRUST_NOT_ESTABLISHED"
-	reasonPackAuthority        = "SENSOR_PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
-	reasonPackDegraded         = "SENSOR_PACK_DEGRADED"
-	reasonSchedulerAbsent      = "SENSOR_SCHEDULER_UNAVAILABLE"
-	reasonSchedulerState       = "SENSOR_SCHEDULER_NOT_RUNNING"
-	reasonSchedulerQueue       = "SENSOR_SCHEDULER_QUEUE_SATURATED"
-	reasonControlAbsent        = "SENSOR_CONTROL_UNAVAILABLE"
-	reasonControlUntrust       = "SENSOR_CONTROL_STATE_UNTRUSTED"
-	reasonControlDegraded      = "SENSOR_CONTROL_DEGRADED"
+	componentName                  = "platform-sensor"
+	defaultVersion                 = "0.1.0-dev"
+	hardStoragePercent             = 80.0
+	reasonShuttingDown             = "SENSOR_SHUTTING_DOWN"
+	reasonSpoolCheck               = "SENSOR_SPOOL_UNWRITABLE"
+	reasonSpoolPressure            = "SENSOR_SPOOL_HARD_PRESSURE"
+	reasonAgentSpoolCheck          = "SENSOR_AGENT_SPOOL_UNWRITABLE"
+	reasonAgentSpoolHard           = "SENSOR_AGENT_SPOOL_HARD_PRESSURE"
+	reasonAgentDeliveryBlocked     = "SENSOR_AGENT_DELIVERY_BLOCKED"
+	reasonAgentIdentityQuarantined = "SENSOR_AGENT_IDENTITY_QUARANTINED"
+	reasonPackUnavailable          = "SENSOR_PACK_SYNC_UNAVAILABLE"
+	reasonPackTrust                = "SENSOR_PACK_TRUST_NOT_ESTABLISHED"
+	reasonPackAuthority            = "SENSOR_PACK_CORE_AUTHORITY_NOT_ESTABLISHED"
+	reasonPackDegraded             = "SENSOR_PACK_DEGRADED"
+	reasonSchedulerAbsent          = "SENSOR_SCHEDULER_UNAVAILABLE"
+	reasonSchedulerState           = "SENSOR_SCHEDULER_NOT_RUNNING"
+	reasonSchedulerQueue           = "SENSOR_SCHEDULER_QUEUE_SATURATED"
+	reasonControlAbsent            = "SENSOR_CONTROL_UNAVAILABLE"
+	reasonControlUntrust           = "SENSOR_CONTROL_STATE_UNTRUSTED"
+	reasonControlDegraded          = "SENSOR_CONTROL_DEGRADED"
 )
 
 type storageStatusProvider interface {
@@ -311,7 +312,11 @@ func (hs *HealthServer) evaluate() evaluation {
 		ev.agentDeliveryPresent = true
 		ev.agentDelivery = agentDelivery.Snapshot()
 		if ev.agentDelivery.Blocked || ev.agentDelivery.State == agentdrain.DeliveryStateDegraded {
-			ev.degrade(reasonAgentDeliveryBlocked)
+			reason := reasonAgentDeliveryBlocked
+			if ev.agentDelivery.Quarantined && !ev.agentDelivery.Blocked {
+				reason = reasonAgentIdentityQuarantined
+			}
+			ev.degrade(reason)
 		}
 	}
 
@@ -415,6 +420,7 @@ func (hs *HealthServer) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	}
 	if ev.agentDeliveryPresent {
 		body["agent_delivery_status"] = agentDeliverySupportStatus(ev.agentDelivery)
+		body["agent_identity_conflict_quarantined"] = ev.agentDelivery.Quarantined
 		if ev.agentDelivery.ReasonCode != "" {
 			body["agent_delivery_reason_code"] = ev.agentDelivery.ReasonCode
 		}

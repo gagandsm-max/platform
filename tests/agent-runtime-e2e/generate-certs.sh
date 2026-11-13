@@ -4,8 +4,8 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-CA_DIR="${ROOT_DIR}/deploy/docker/certs"
-OUT_DIR="${ROOT_DIR}/tests/agent-runtime-e2e/certs"
+CA_DIR="${PLATFORM_E2E_CA_DIR:-${ROOT_DIR}/deploy/docker/certs}"
+OUT_DIR="${PLATFORM_E2E_CERT_DIR:-${ROOT_DIR}/tests/agent-runtime-e2e/certs}"
 
 if [[ ! -f "${CA_DIR}/ca.crt" || ! -f "${CA_DIR}/ca.key" ]]; then
     echo "[ERROR] Platform CA missing; run 'make certs' first" >&2
@@ -14,7 +14,7 @@ fi
 
 mkdir -p "${OUT_DIR}"
 
-if [[ "${FORCE_CERTS:-}" != "1" && -f "${OUT_DIR}/metadata.json" && -f "${OUT_DIR}/agent-e2e.crt" && -f "${OUT_DIR}/agent-e2e.key" && -f "${OUT_DIR}/sensor-infra-agent-server.crt" && -f "${OUT_DIR}/agent-e2e-expired.crt" && -f "${OUT_DIR}/agent-e2e-notyet.crt" ]]; then
+if [[ "${FORCE_CERTS:-}" != "1" && -f "${OUT_DIR}/probe-metadata.json" && -f "${OUT_DIR}/agent-probe.crt" && -f "${OUT_DIR}/metadata.json" && -f "${OUT_DIR}/agent-e2e.crt" && -f "${OUT_DIR}/agent-e2e.key" && -f "${OUT_DIR}/sensor-infra-agent-server.crt" && -f "${OUT_DIR}/agent-e2e-expired.crt" && -f "${OUT_DIR}/agent-e2e-notyet.crt" ]]; then
     if openssl verify -CAfile "${CA_DIR}/ca.crt" "${OUT_DIR}/sensor-infra-agent-server.crt" "${OUT_DIR}/agent-e2e.crt" >/dev/null 2>&1; then
         echo "[OK] Reusing existing Agent E2E certs in ${OUT_DIR} (FORCE_CERTS=1 to regenerate)"
         python3 -c 'import json,sys; print("fingerprint", json.load(open(sys.argv[1]))["fingerprint_sha256"])' "${OUT_DIR}/metadata.json"
@@ -126,6 +126,8 @@ EOF
 
 sign_leaf "sensor-infra-agent-server" "sensor-infra-agent-server.platform.local" "${OUT_DIR}/agent-server.cnf" 365
 sign_leaf "agent-e2e" "agent-e2e-01.agent.platform.local" "${OUT_DIR}/agent-client.cnf" 365
+sed 's/agent-e2e-01/agent-e2e-probe-01/g' "${OUT_DIR}/agent-client.cnf" > "${OUT_DIR}/probe-client.cnf"
+sign_leaf "agent-probe" "agent-e2e-probe-01.agent.platform.local" "${OUT_DIR}/probe-client.cnf" 365
 
 # Handshake-negative leaves signed by the real CA.
 sign_dated_leaf "agent-e2e-expired" "agent-e2e-expired.agent.platform.local" "${OUT_DIR}/agent-client.cnf" 20200101000000Z 20200102000000Z
@@ -178,6 +180,9 @@ meta = {
     "notyet_not_after": validity(notyet, "not_after"),
 }
 (out / "metadata.json").write_text(json.dumps(meta, indent=2) + "\n")
+probe = out / "agent-probe.crt"
+probe_meta = dict(meta, agent_cert=str(probe), fingerprint_sha256=fp(probe), serial_number=serial(probe), issuer_dn=issuer(probe))
+(out / "probe-metadata.json").write_text(json.dumps(probe_meta, indent=2) + "\n")
 print("fingerprint", meta["fingerprint_sha256"])
 print("expired window", meta["expired_not_before"], "->", meta["expired_not_after"])
 print("notyet window", meta["notyet_not_before"], "->", meta["notyet_not_after"])

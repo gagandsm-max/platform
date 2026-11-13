@@ -1,10 +1,19 @@
 package com.platform.core.agentcontrol;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.RowMapper;
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -16,7 +25,15 @@ import java.util.UUID;
 @Repository
 public class AgentControlRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(AgentControlRepository.class);
+
+    /** Persisted Agent↔entity write provenance; never inferred from the current binding row. */
+    public record HistoricalAgentBinding(UUID entityId, String certificateIdentity, long historyVersion,
+            String bindingState, long reinstallGeneration, Instant validFrom, Instant validTo,
+            String provenance) {}
+
     private final NamedParameterJdbcTemplate jdbc;
+    private final PlatformTransactionManager transactionManager;
 
     private static final RowMapper<AgentPrincipal> PRINCIPAL_MAPPER = (rs, rowNum) -> new AgentPrincipal(
             rs.getString("agent_id"),
@@ -59,8 +76,135 @@ public class AgentControlRepository {
                     toInstant(rs.getTimestamp("revoked_at"))
             );
 
-    public AgentControlRepository(NamedParameterJdbcTemplate jdbc) {
+    @Autowired
+    public AgentControlRepository(NamedParameterJdbcTemplate jdbc,
+            PlatformTransactionManager transactionManager) {
         this.jdbc = jdbc;
+        this.transactionManager = transactionManager;
+    }
+
+    /** Standalone repository queries in migration/integration tests activate explicitly when needed. */
+    public AgentControlRepository(NamedParameterJdbcTemplate jdbc) {
+        this(jdbc, null);
+    }
+
+    /**
+     * Core custody uses explicit active identity authority, never host evidence.
+     * The Sensor authenticated the credential at admission. Do not re-evaluate its
+     * current expiry/status here: accepted historical spool records must remain
+     * drainable after certificate expiry/rotation. New admissions use the existing
+     * AgentAuthorityQueryService credential checks.
+     */
+    public Optional<EntityAgentBinding> findActiveEntityBinding(UUID tenantId, String agentId) {
+        return jdbc.query("""
+                SELECT b.* FROM platform.entity_agent_binding b
+                JOIN platform.agent a ON a.tenant_id=b.tenant_id AND a.agent_id=b.agent_id
+                JOIN platform.agent_certificate_credential c
+                  ON c.tenant_id=b.tenant_id AND c.agent_id=b.agent_id
+                 AND c.fingerprint_sha256=b.certificate_identity
+                WHERE b.tenant_id=:tenantId AND b.agent_id=:agentId
+                  AND b.binding_state='ACTIVE' AND a.status='ACTIVE'
+                """, Map.of("tenantId", tenantId, "agentId", agentId), (rs, rowNum) ->
+                new EntityAgentBinding(rs.getObject("tenant_id", UUID.class),
+                        rs.getObject("entity_id", UUID.class), rs.getString("agent_id"),
+                        rs.getString("certificate_identity"), rs.getString("system_name"),
+                        rs.getString("os_identity"), toInstant(rs.getTimestamp("first_enrolled_at")),
+                        toInstant(rs.getTimestamp("last_heartbeat_at")), rs.getString("binding_state"),
+                        rs.getLong("reinstall_generation"))).stream().findFirst();
+    }
+
+    public void insertEntityBinding(EntityAgentBinding binding) {
+        try {
+            jdbc.update("""
+                    INSERT INTO platform.entity_agent_binding
+                        (tenant_id, entity_id, agent_id, certificate_identity, system_name, os_identity,
+                         first_enrolled_at, last_heartbeat_at, binding_state, reinstall_generation)
+                    VALUES (:tenant, :entity, :agent, :certificate, :name, CAST(:os AS jsonb),
+                            :first, :heartbeat, :state, :generation)
+                    """, bindingParams(binding));
+        } catch (DuplicateKeyException e) {
+            throw new AgentControlException(
+                    AgentControlException.ERR_AGENT_BINDING_IDENTITY_CONFLICT,
+                    "Existing Agent, entity or certificate binding requires reconciliation");
+        } catch (DataIntegrityViolationException e) {
+            throw new AgentControlException(
+                    AgentControlException.ERR_AGENT_BINDING_IDENTITY_CONFLICT,
+                    "Existing Agent, entity or certificate binding requires reconciliation");
+        }
+        scheduleAgentBindingHistoryActivation(binding.tenantId(), binding.agentId(), binding.entityId(),
+                binding.certificateIdentity(), binding.bindingState(), binding.reinstallGeneration());
+    }
+
+    public int rotateEntityBindingCertificate(UUID tenantId, String agentId, String oldFingerprint,
+                                              String newFingerprint) {
+        // Called under the same principal lock/transaction as credential rotation.
+        // No entity, generation or approval-state change is permitted here.
+        int updated = jdbc.update("""
+                UPDATE platform.entity_agent_binding SET certificate_identity=:next
+                 WHERE tenant_id=:tenant AND agent_id=:agent AND certificate_identity=:previous
+                """, Map.of("tenant", tenantId, "agent", agentId,
+                "previous", oldFingerprint, "next", newFingerprint));
+        if (updated == 1) {
+            List<EntityAgentBinding> current = jdbc.query("""
+                    SELECT * FROM platform.entity_agent_binding
+                     WHERE tenant_id=:tenant AND agent_id=:agent AND certificate_identity=:next
+                    """, Map.of("tenant", tenantId, "agent", agentId, "next", newFingerprint),
+                    (rs, rowNum) -> new EntityAgentBinding(
+                            rs.getObject("tenant_id", UUID.class),
+                            rs.getObject("entity_id", UUID.class),
+                            rs.getString("agent_id"),
+                            rs.getString("certificate_identity"),
+                            rs.getString("system_name"),
+                            rs.getString("os_identity"),
+                            toInstant(rs.getTimestamp("first_enrolled_at")),
+                            toInstant(rs.getTimestamp("last_heartbeat_at")),
+                            rs.getString("binding_state"),
+                            rs.getLong("reinstall_generation")));
+            if (current.size() == 1) {
+                EntityAgentBinding row = current.get(0);
+                scheduleAgentBindingHistoryActivation(tenantId, agentId, row.entityId(),
+                        newFingerprint, row.bindingState(), row.reinstallGeneration());
+            }
+        }
+        return updated;
+    }
+
+    /**
+     * Historical Agent↔entity authority covering the qualified acceptance interval.
+     * HOST_ID history alone is insufficient; callers must still corroborate host evidence.
+     */
+    public Optional<HistoricalAgentBinding> findHistoricalAgentEntityBinding(
+            UUID tenantId, String agentId, Instant lower, Instant upper) {
+        if (tenantId == null || agentId == null || agentId.isBlank()
+                || lower == null || upper == null || upper.isBefore(lower)) {
+            return Optional.empty();
+        }
+        List<HistoricalAgentBinding> rows = jdbc.query("""
+                SELECT entity_id, certificate_identity, history_version, binding_state,
+                       reinstall_generation, valid_from, valid_to, provenance
+                  FROM platform.entity_agent_binding_history
+                 WHERE tenant_id = :tenantId AND agent_id = :agentId
+                   AND activation_state = 'ACTIVE' AND valid_from IS NOT NULL
+                   AND valid_from <= :lower AND (valid_to IS NULL OR valid_to > :upper)
+                   AND binding_state = 'ACTIVE'
+                   AND provenance = 'ENTITY_AGENT_BINDING_WRITE_V022'
+                 ORDER BY history_version
+                 LIMIT 2
+                """, new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("agentId", agentId)
+                        .addValue("lower", Timestamp.from(lower))
+                        .addValue("upper", Timestamp.from(upper)),
+                (rs, n) -> new HistoricalAgentBinding(
+                        rs.getObject("entity_id", UUID.class),
+                        rs.getString("certificate_identity"),
+                        rs.getLong("history_version"),
+                        rs.getString("binding_state"),
+                        rs.getLong("reinstall_generation"),
+                        toInstant(rs.getTimestamp("valid_from")),
+                        toInstant(rs.getTimestamp("valid_to")),
+                        rs.getString("provenance")));
+        return rows.size() == 1 ? Optional.of(rows.get(0)) : Optional.empty();
     }
 
     public void insertPrincipal(AgentPrincipal principal) {
@@ -390,6 +534,77 @@ public class AgentControlRepository {
                 .addValue("updatedAt", Timestamp.from(assignment.updatedAt()))
                 .addValue("revokedAt",
                         assignment.revokedAt() == null ? null : Timestamp.from(assignment.revokedAt()));
+    }
+
+    private static MapSqlParameterSource bindingParams(EntityAgentBinding binding) {
+        return new MapSqlParameterSource()
+                .addValue("tenant", binding.tenantId())
+                .addValue("entity", binding.entityId())
+                .addValue("agent", binding.agentId())
+                .addValue("certificate", binding.certificateIdentity())
+                .addValue("name", binding.systemName())
+                .addValue("os", binding.osIdentity())
+                .addValue("first", Timestamp.from(binding.firstEnrolledAt()))
+                .addValue("heartbeat", Timestamp.from(binding.lastHeartbeatAt()))
+                .addValue("state", binding.bindingState())
+                .addValue("generation", binding.reinstallGeneration());
+    }
+
+    private void scheduleAgentBindingHistoryActivation(
+            UUID tenantId, String agentId, UUID entityId, String certificateIdentity,
+            String bindingState, long reinstallGeneration) {
+        if (transactionManager == null) {
+            return;
+        }
+        Long version = jdbc.queryForObject("""
+                SELECT history_version FROM platform.entity_agent_binding_history
+                 WHERE tenant_id=:tenantId AND agent_id=:agentId AND entity_id=:entityId
+                   AND certificate_identity=:certificate AND binding_state=:state
+                   AND reinstall_generation=:generation
+                   AND activation_state='PENDING_COMMIT_VISIBILITY'
+                """, new MapSqlParameterSource()
+                        .addValue("tenantId", tenantId)
+                        .addValue("agentId", agentId)
+                        .addValue("entityId", entityId)
+                        .addValue("certificate", certificateIdentity)
+                        .addValue("state", bindingState)
+                        .addValue("generation", reinstallGeneration), Long.class);
+        if (version == null) {
+            throw new IllegalStateException("AGENT_BINDING_HISTORY_PENDING_MISSING");
+        }
+        Runnable activate = () -> {
+            try {
+                TransactionTemplate transaction = new TransactionTemplate(transactionManager);
+                transaction.setPropagationBehavior(TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                transaction.setTimeout(5);
+                Boolean activated = transaction.execute(status -> jdbc.queryForObject("""
+                        SELECT platform.activate_entity_agent_binding_history(
+                            :version, :tenantId, CAST(:agentId AS varchar), :entityId,
+                            CAST(:certificate AS varchar), CAST(:state AS varchar), :generation)
+                        """, new MapSqlParameterSource()
+                                .addValue("version", version)
+                                .addValue("tenantId", tenantId)
+                                .addValue("agentId", agentId)
+                                .addValue("entityId", entityId)
+                                .addValue("certificate", certificateIdentity)
+                                .addValue("state", bindingState)
+                                .addValue("generation", reinstallGeneration), Boolean.class));
+                if (!Boolean.TRUE.equals(activated)) {
+                    log.warn("AGENT_BINDING_HISTORY_ACTIVATION_UNPROVEN tenant_id={} agent_id={} history_version={}",
+                            tenantId, agentId, version);
+                }
+            } catch (RuntimeException ex) {
+                log.error("AGENT_BINDING_HISTORY_ACTIVATION_FAILED tenant_id={} agent_id={} history_version={} failure_class={}",
+                        tenantId, agentId, version, ex.getClass().getSimpleName());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { activate.run(); }
+            });
+        } else {
+            activate.run();
+        }
     }
 
     private static Instant toInstant(Timestamp timestamp) {

@@ -6,6 +6,8 @@ import com.platform.core.ingestion.KafkaTelemetryProducer;
 import com.platform.core.ingestion.SensorIngestionService;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryAckResponse;
 import com.platform.core.ingestion.agentingress.dto.AgentTelemetryBatchRequest;
+import com.platform.core.ingestion.agentingress.dto.AgentIngressRecord;
+import com.platform.core.agentcontrol.EntityAgentBinding;
 import com.platform.core.ingestion.authority.SensorScope;
 import com.platform.core.ingestion.dto.CanonicalObservation;
 import com.platform.core.ingestion.dto.TelemetryObservationBatch;
@@ -19,6 +21,9 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 import java.security.cert.X509Certificate;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.UUID;
 
@@ -72,11 +77,11 @@ public class AgentIngestionService {
             );
         }
 
+        validator.validateImmutableBatch(rawBody, request, scope);
         SensorIngestionService.requireIdempotencyKey(idempotencyKey, request.batchId());
+        String requestSha256 = sha256(rawBody);
 
-        List<CanonicalObservation> observations = validator.validateAndExtract(rawBody, request, scope);
-
-        ReplayReservation reservation = watermarkStore.reserveBatch(
+        ReplayReservation reservation = watermarkStore.reserveBatchWithBody(
                 scope.tenantId(),
                 scope.sensorId(),
                 request.sensorAgentSpoolStreamId(),
@@ -84,8 +89,29 @@ public class AgentIngestionService {
                 request.lastIngressSequence(),
                 request.checksum(),
                 request.batchId(),
-                request.correlationId()
+                request.correlationId(), requestSha256
         );
+
+        // Isolated E2E profile only: the reservation transaction has returned
+        // (and committed), while authority validation/checkpoint has not begun.
+        if (reservation.status() == ReplayReservation.Status.RESERVED
+                && "agent-ingress-e2e".equals(System.getenv("SPRING_PROFILES_ACTIVE"))
+                && "10,12".equals(System.getenv("PLATFORM_AGENT_INGRESS_E2E_FAIL_AFTER_RESERVE"))
+                && (request.firstIngressSequence() == 10 || request.firstIngressSequence() == 12)) {
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_E2E_AFTER_RESERVE", "E2E reservation failure injection");
+        }
+
+        if (reservation.status() == ReplayReservation.Status.TERMINALLY_REJECTED) {
+            if (request.records().size() != 1 || !watermarkStore.terminalReplayMatchesRecord(
+                    scope.tenantId(), scope.sensorId(), reservation.terminalDispositionId(),
+                    request.records().get(0))) {
+                throw new IngestionException(HttpStatus.CONFLICT, "ERR_IDEMPOTENCY_CONFLICT",
+                        "Terminal disposition record identity differs from the retry");
+            }
+            metrics.recordDuplicateReplay();
+            return terminalResponse(scope, request, reservation);
+        }
 
         if (reservation.status() == ReplayReservation.Status.ALREADY_ACKED) {
             metrics.recordDuplicateReplay();
@@ -93,13 +119,7 @@ public class AgentIngestionService {
                     scope.tenantId(), scope.sensorId(),
                     request.firstIngressSequence(), request.lastIngressSequence(),
                     reservation.ackedThroughSequence());
-            return new AgentTelemetryAckResponse(
-                    "ACCEPTED",
-                    scope.sensorId(),
-                    request.batchId(),
-                    reservation.ackedThroughSequence(),
-                    request.correlationId()
-            );
+            return acceptedResponse(scope, request, reservation.ackedThroughSequence());
         }
 
         if (reservation.status() == ReplayReservation.Status.REJECTED) {
@@ -107,7 +127,7 @@ public class AgentIngestionService {
             metrics.recordBatchRejected(code);
             if ("ERR_PREVIOUS_BATCH_PENDING".equals(code)) {
                 metrics.recordPreviousBatchPending();
-            } else if ("ERR_IDEMPOTENCY_CONFLICT".equals(code)) {
+            } else if ("ERR_IDEMPOTENCY_CONFLICT".equals(code) || "ERR_REPLAY_CONFLICT".equals(code)) {
                 metrics.recordReplayConflict();
             } else if ("ERR_SEQUENCE_GAP".equals(code)) {
                 metrics.recordSequenceGap();
@@ -116,14 +136,103 @@ public class AgentIngestionService {
             } else if ("ERR_SENSOR_STREAM_CHANGED".equals(code)) {
                 metrics.recordStreamMismatch();
             }
-            HttpStatus status = "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
+            HttpStatus status = "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED".equals(code)
+                    ? HttpStatus.SERVICE_UNAVAILABLE
+                    : "ERR_SEQUENCE_GAP".equals(code) || "ERR_SEQUENCE_OUT_OF_BOUNDS".equals(code)
                     || "ERR_AGENT_STREAM_ID_INVALID".equals(code)
                     ? HttpStatus.BAD_REQUEST
                     : HttpStatus.CONFLICT;
             throw new IngestionException(status, code, reservation.rejectionMessage());
         }
 
-        PublisherClaimResult claim = watermarkStore.claimPublisherLease(
+        boolean legacyPending = "LEGACY_UNKNOWN".equals(reservation.pendingAuthorityState());
+        boolean validatedPending = "AUTHORITY_VALIDATED".equals(reservation.pendingAuthorityState());
+        List<CanonicalObservation> observations;
+        try {
+            if (validatedPending) {
+                observations = validator.extractValidatedSnapshot(request, scope, reservation.pendingBindings());
+                if (reservation.pendingCanonicalBatchSha256() == null
+                        || !reservation.pendingCanonicalBatchSha256().equals(
+                                CanonicalBindingDigest.combine(scope.tenantId(), scope.sensorId(),
+                                        reservation.pendingReservationId(),
+                                        validator.canonicalBatchDigest(observations),
+                                        reservation.pendingBindings()))) {
+                    throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "ERR_AGENT_CANONICAL_DIGEST_MISMATCH",
+                            "Validated canonical batch digest does not match the pending authority checkpoint");
+                }
+            } else {
+                AgentIngressWatermarkStore.AuthorityCheckpoint checkpoint =
+                        watermarkStore.checkpointAuthority(scope.tenantId(), scope.sensorId(),
+                        request.sensorAgentSpoolStreamId(), request.firstIngressSequence(),
+                        request.lastIngressSequence(), request.checksum(), request.batchId(),
+                        request.correlationId(), requestSha256, reservation.pendingReservationId(),
+                        () -> {
+                            AgentIngestionValidator.ValidatedBatch validated = legacyPending
+                                    ? validator.validateLegacyAndSnapshot(request, scope)
+                                    : validator.validateAndSnapshot(request, scope);
+                            if (validated.observations().isEmpty()) {
+                                throw new IngestionException(HttpStatus.BAD_REQUEST,
+                                        "ERR_NO_CANONICAL_OBSERVATIONS",
+                                        "Batch contains zero supported canonical numeric observations");
+                            }
+                            return new AgentIngressWatermarkStore.AuthorityCheckpoint(
+                                    validated.observations(), validated.bindings(),
+                                    validator.canonicalBatchDigest(validated.observations()));
+                        });
+                if (checkpoint == null) {
+                    throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                            "ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN",
+                            "Agent-ingress authority checkpoint is unconfirmed; retain and retry exact batch");
+                }
+                observations = checkpoint.observations();
+            }
+        } catch (IngestionException validationFailure) {
+            if ("ERR_AGENT_AUTHORITY_CHECKPOINT_UNCERTAIN".equals(validationFailure.getCode())) {
+                metrics.recordBatchRejected(validationFailure.getCode());
+                throw validationFailure;
+            }
+            if (legacyPending) {
+                metrics.recordBatchRejected("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED");
+                throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                        "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED",
+                        "Historical Agent authority cannot be proven; retain the exact pending batch",
+                        validationFailure);
+            }
+            metrics.recordBatchRejected(validationFailure.getCode());
+            if (validatedPending) {
+                throw validationFailure;
+            }
+            if (!"ERR_AGENT_IDENTITY_CONFLICT".equals(validationFailure.getCode())
+                    || request.records().size() != 1) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
+                throw validationFailure;
+            }
+            AgentIngressRecord record = request.records().get(0);
+            if (record.records() == null || record.records().size() != 1) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
+                throw validationFailure;
+            }
+            try {
+                EntityAgentBinding binding = validator.validateCurrentTerminalAuthority(record, scope);
+                ReplayReservation terminal = watermarkStore.terminallyRejectIdentityConflict(
+                        scope.tenantId(), scope.sensorId(), request.sensorAgentSpoolStreamId(),
+                        record.sensorIngressSequence(), request.checksum(), request.batchId(),
+                        request.correlationId(), record, binding.entityId(), binding.reinstallGeneration());
+                if (terminal.status() != ReplayReservation.Status.TERMINALLY_REJECTED) {
+                    throw new IngestionException(HttpStatus.CONFLICT,
+                            terminal.rejectionCode(), terminal.rejectionMessage());
+                }
+                log.warn("Agent-ingress identity conflict durably terminally settled tenant={} sensor={} sequence={} disposition={}",
+                        scope.tenantId(), scope.sensorId(), record.sensorIngressSequence(), terminal.terminalDispositionId());
+                return terminalResponse(scope, request, terminal);
+            } catch (IngestionException terminalAuthorityFailure) {
+                releaseRejectedPending(scope, request, requestSha256, reservation);
+                throw terminalAuthorityFailure;
+            }
+        }
+
+        PublisherClaimResult claim = watermarkStore.claimPublisherLeaseExact(
                 scope.tenantId(),
                 scope.sensorId(),
                 request.sensorAgentSpoolStreamId(),
@@ -131,7 +240,7 @@ public class AgentIngestionService {
                 request.lastIngressSequence(),
                 request.checksum(),
                 request.batchId(),
-                request.correlationId()
+                request.correlationId(), requestSha256, reservation.pendingReservationId()
         );
         if (claim.status() == PublisherClaimResult.Status.BUSY) {
             metrics.recordPublisherLeaseContention();
@@ -194,12 +303,65 @@ public class AgentIngestionService {
             throw publishOrFinalizeFailure;
         }
 
-        return new AgentTelemetryAckResponse(
-                "ACCEPTED",
-                scope.sensorId(),
-                request.batchId(),
-                request.lastIngressSequence(),
-                request.correlationId()
-        );
+        long acceptedThrough = reservation.ackedThroughSequence() == request.firstIngressSequence() - 1
+                ? request.lastIngressSequence() : reservation.ackedThroughSequence();
+        return acceptedResponse(scope, request, acceptedThrough);
+    }
+
+    private static AgentTelemetryAckResponse acceptedResponse(SensorScope scope,
+            AgentTelemetryBatchRequest request, long acceptedThrough) {
+        return new AgentTelemetryAckResponse("ACCEPTED", scope.sensorId(), request.batchId(),
+                acceptedThrough, request.lastIngressSequence(), request.correlationId(),
+                null, null, null, null, null, null);
+    }
+
+    private static String sha256(byte[] body) {
+        if (body == null) {
+            throw new IngestionException(HttpStatus.BAD_REQUEST, "ERR_EMPTY_BODY", "Request body is empty");
+        }
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(body));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    private void releaseRejectedPending(SensorScope scope, AgentTelemetryBatchRequest request,
+            String requestSha256, ReplayReservation reservation) {
+        boolean released;
+        try {
+            released = watermarkStore.releaseUnpublishedPending(
+                    scope.tenantId(), scope.sensorId(), request.sensorAgentSpoolStreamId(),
+                    request.firstIngressSequence(), request.lastIngressSequence(), request.checksum(),
+                    request.batchId(), request.correlationId(), requestSha256,
+                    reservation.pendingReservationId());
+        } catch (RuntimeException releaseFailure) {
+            metrics.recordBatchRejected("ERR_AGENT_PENDING_RELEASE_UNCERTAIN");
+            log.warn("code=ERR_AGENT_PENDING_RELEASE_UNCERTAIN tenant={} sensor={} range=[{}..{}] release failed",
+                    scope.tenantId(), scope.sensorId(), request.firstIngressSequence(),
+                    request.lastIngressSequence(), releaseFailure);
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_PENDING_RELEASE_UNCERTAIN",
+                    "Agent-ingress pending cleanup is unconfirmed; retain and retry the exact batch",
+                    releaseFailure);
+        }
+        if (!released) {
+            metrics.recordBatchRejected("ERR_AGENT_PENDING_RELEASE_UNCERTAIN");
+            log.warn("code=ERR_AGENT_PENDING_RELEASE_UNCERTAIN tenant={} sensor={} range=[{}..{}] exact unclaimed release not proven",
+                    scope.tenantId(), scope.sensorId(), request.firstIngressSequence(),
+                    request.lastIngressSequence());
+            throw new IngestionException(HttpStatus.SERVICE_UNAVAILABLE,
+                    "ERR_AGENT_PENDING_RELEASE_UNCERTAIN",
+                    "Agent-ingress pending cleanup is unconfirmed; retain and retry the exact batch");
+        }
+    }
+
+    private static AgentTelemetryAckResponse terminalResponse(SensorScope scope,
+            AgentTelemetryBatchRequest request, ReplayReservation reservation) {
+        return new AgentTelemetryAckResponse("TERMINALLY_REJECTED", scope.sensorId(), request.batchId(),
+                reservation.ackedThroughSequence(), null, request.correlationId(),
+                request.firstIngressSequence(), request.lastIngressSequence(), request.checksum(),
+                reservation.settledThroughSequence(), reservation.terminalDispositionId(),
+                reservation.rejectionCode());
     }
 }
