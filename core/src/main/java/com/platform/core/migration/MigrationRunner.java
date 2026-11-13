@@ -162,6 +162,10 @@ public class MigrationRunner implements ApplicationRunner {
                 statement.execute(stmt);
             }
         } catch (SQLException e) {
+            if ("P0211".equals(e.getSQLState())) {
+                throw new MigrationException("AGENT_INGRESS_PUBLISHER_UPGRADE_BLOCKED",
+                        "Drain active Agent-ingress publisher ownership and leases before retrying V021", e);
+            }
             throw new MigrationException("MIGRATION_SQL_FAILED", "Failed executing migration SQL", e);
         }
     }

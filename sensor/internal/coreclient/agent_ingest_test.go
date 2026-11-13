@@ -11,13 +11,13 @@ func validAgentBatch() AgentTelemetryBatch {
 	return AgentTelemetryBatch{
 		SchemaVersion:            2,
 		SensorAgentSpoolStreamID: "stream-00112233445566778899aabbccddeeff",
-		SensorID:             "sensor-infra-01",
-		BatchID:              "batch-agent-1",
-		FirstIngressSequence: 1,
-		LastIngressSequence:  1,
-		RecordCount:          1,
-		Checksum:             "abc123",
-		CorrelationID:        "corr-agent-1",
+		SensorID:                 "sensor-infra-01",
+		BatchID:                  "batch-agent-1",
+		FirstIngressSequence:     1,
+		LastIngressSequence:      1,
+		RecordCount:              1,
+		Checksum:                 "abc123",
+		CorrelationID:            "corr-agent-1",
 		Records: []AgentIngressRecord{{
 			SensorIngressSequence: 1,
 			SensorIngressRecordID: "r-1",
@@ -57,6 +57,37 @@ func TestUploadAgentTelemetryRequiresBoundAck(t *testing.T) {
 	}
 	if ack.AcceptedThroughIngressSequence != 1 || ack.BatchID != "batch-agent-1" {
 		t.Fatalf("ack=%+v", ack)
+	}
+}
+
+func TestUploadAgentTelemetryRequiresExactDurableTerminalReceipt(t *testing.T) {
+	pki := makeTestPKI(t)
+	batch := validAgentBatch()
+	dispositionID := "018f0e0a-0000-7000-8000-00000000beef"
+	server := startMTLSServer(t, pki, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status": "TERMINALLY_REJECTED", "sensorId": batch.SensorID,
+			"batchId": batch.BatchID, "correlationId": batch.CorrelationID,
+			"acceptedThroughIngressSequence": uint64(0),
+			"firstIngressSequence":           batch.FirstIngressSequence,
+			"lastIngressSequence":            batch.LastIngressSequence,
+			"checksum":                       batch.Checksum, "settledThroughIngressSequence": batch.LastIngressSequence,
+			"dispositionId": dispositionID, "reasonCode": "ERR_AGENT_IDENTITY_CONFLICT",
+		})
+	}))
+	client := newTestClient(t, server.URL, pki, 4096)
+	ack, err := client.UploadAgentTelemetry(context.Background(), batch)
+	if err != nil || ack.Status != "TERMINALLY_REJECTED" || ack.DispositionID != dispositionID {
+		t.Fatalf("typed terminal receipt failed: ack=%+v err=%v", ack, err)
+	}
+	ack.Checksum = "changed"
+	if err := ValidateAgentTelemetryAck(batch, ack); err == nil {
+		t.Fatal("changed checksum must not authorize terminal removal")
+	}
+	ack.Checksum = batch.Checksum
+	ack.DispositionID = "not-a-uuid"
+	if err := ValidateAgentTelemetryAck(batch, ack); err == nil {
+		t.Fatal("invalid disposition identity must not authorize terminal removal")
 	}
 }
 
@@ -152,13 +183,13 @@ func multiRecordAgentBatch() AgentTelemetryBatch {
 	return AgentTelemetryBatch{
 		SchemaVersion:            2,
 		SensorAgentSpoolStreamID: "stream-00112233445566778899aabbccddeeff",
-		SensorID:             "sensor-infra-01",
-		BatchID:              "batch-agent-multi",
-		FirstIngressSequence: 10,
-		LastIngressSequence:  15,
-		RecordCount:          6,
-		Checksum:             "checksum-multi",
-		CorrelationID:        "corr-agent-multi",
+		SensorID:                 "sensor-infra-01",
+		BatchID:                  "batch-agent-multi",
+		FirstIngressSequence:     10,
+		LastIngressSequence:      15,
+		RecordCount:              6,
+		Checksum:                 "checksum-multi",
+		CorrelationID:            "corr-agent-multi",
 		Records: []AgentIngressRecord{
 			{
 				SensorIngressSequence: 10,
@@ -366,6 +397,10 @@ func TestUploadAgentTelemetryRejectsNonExactAcceptedStatus(t *testing.T) {
 }
 
 func TestClassifyAgentTelemetryFailureRetryableAndSpoolRetaining(t *testing.T) {
+	legacy := ClassifyAgentTelemetryFailure(503, []byte(`{"code":"ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED","message":"retain"}`))
+	if IsTransient(legacy) || !IsAgentIngressSpoolRetainingCode("ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED") {
+		t.Fatalf("legacy reconciliation must retain custody and expose a persistent block, got %v", legacy)
+	}
 	pending := ClassifyAgentTelemetryFailure(409, []byte(`{"code":"ERR_PREVIOUS_BATCH_PENDING","message":"x"}`))
 	if !IsTransient(pending) {
 		t.Fatalf("ERR_PREVIOUS_BATCH_PENDING must be transient, got %v", pending)

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -29,28 +30,38 @@ type AgentTelemetryBatch struct {
 
 // AgentIngressRecord preserves immutable accepted evidence from the Sensor Agent spool.
 type AgentIngressRecord struct {
-	SensorIngressSequence  uint64          `json:"sensorIngressSequence"`
-	SensorIngressRecordID  string          `json:"sensorIngressRecordId"`
-	TenantID               string          `json:"tenantId"`
-	AgentID                string          `json:"agentId"`
-	AcceptingSensorID      string          `json:"acceptingSensorId"`
-	AssignmentGeneration   int64           `json:"assignmentGeneration"`
-	AgentFirstSequence     uint64          `json:"agentFirstSequence"`
-	AgentLastSequence      uint64          `json:"agentLastSequence"`
-	AgentBatchID           string          `json:"agentBatchId"`
-	CorrelationID          string          `json:"correlationId"`
-	AcceptedAt             string          `json:"acceptedAt"`
-	Records                json.RawMessage `json:"records"`
+	SensorIngressSequence uint64                      `json:"sensorIngressSequence"`
+	SensorIngressRecordID string                      `json:"sensorIngressRecordId"`
+	TenantID              string                      `json:"tenantId"`
+	AgentID               string                      `json:"agentId"`
+	AcceptingSensorID     string                      `json:"acceptingSensorId"`
+	AssignmentGeneration  int64                       `json:"assignmentGeneration"`
+	AgentFirstSequence    uint64                      `json:"agentFirstSequence"`
+	AgentLastSequence     uint64                      `json:"agentLastSequence"`
+	AgentBatchID          string                      `json:"agentBatchId"`
+	CorrelationID         string                      `json:"correlationId"`
+	AcceptedAt            string                      `json:"acceptedAt"`
+	AcceptanceEvidence    *SensorAcceptanceEvidenceV1 `json:"acceptanceEvidence,omitempty"`
+	Records               json.RawMessage             `json:"records"`
 }
 
 // AgentTelemetryAck is the durable Core acknowledgement for agent-telemetry.
 type AgentTelemetryAck struct {
-	Status                           string `json:"status"`
-	SensorID                         string `json:"sensorId"`
-	BatchID                          string `json:"batchId"`
-	AcceptedThroughIngressSequence   uint64 `json:"acceptedThroughIngressSequence"`
-	CorrelationID                    string `json:"correlationId"`
+	Status                         string `json:"status"`
+	SensorID                       string `json:"sensorId"`
+	BatchID                        string `json:"batchId"`
+	AcceptedThroughIngressSequence uint64 `json:"acceptedThroughIngressSequence"`
+	AcceptedLastIngressSequence    uint64 `json:"acceptedLastIngressSequence,omitempty"`
+	CorrelationID                  string `json:"correlationId"`
+	FirstIngressSequence           uint64 `json:"firstIngressSequence,omitempty"`
+	LastIngressSequence            uint64 `json:"lastIngressSequence,omitempty"`
+	Checksum                       string `json:"checksum,omitempty"`
+	SettledThroughIngressSequence  uint64 `json:"settledThroughIngressSequence,omitempty"`
+	DispositionID                  string `json:"dispositionId,omitempty"`
+	ReasonCode                     string `json:"reasonCode,omitempty"`
 }
+
+var durableDispositionID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
 
 // UnmarshalJSON keeps agent-telemetry ACK strict: unknown fields fail closed.
 func (a *AgentTelemetryAck) UnmarshalJSON(data []byte) error {
@@ -74,8 +85,8 @@ func (a *AgentTelemetryAck) UnmarshalJSON(data []byte) error {
 	if strings.TrimSpace(decoded.BatchID) == "" {
 		return errors.New("agent-telemetry acknowledgement missing batchId")
 	}
-	if decoded.AcceptedThroughIngressSequence == 0 {
-		return errors.New("agent-telemetry acknowledgement missing acceptedThroughIngressSequence")
+	if decoded.Status == "ACCEPTED" && decoded.AcceptedThroughIngressSequence == 0 && decoded.AcceptedLastIngressSequence == 0 {
+		return errors.New("agent-telemetry acknowledgement missing accepted sequence")
 	}
 	if strings.TrimSpace(decoded.CorrelationID) == "" {
 		return errors.New("agent-telemetry acknowledgement missing correlationId")
@@ -86,11 +97,11 @@ func (a *AgentTelemetryAck) UnmarshalJSON(data []byte) error {
 
 // CoreAPIError captures a structured Core error body for terminal classification.
 type CoreAPIError struct {
-	Status    string
-	Code      string
-	Message   string
+	Status     string
+	Code       string
+	Message    string
 	HTTPStatus int
-	transient bool
+	transient  bool
 }
 
 func (e *CoreAPIError) Error() string {
@@ -173,9 +184,6 @@ func (c *Client) UploadAgentTelemetry(ctx context.Context, batch AgentTelemetryB
 }
 
 func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck) error {
-	if ack.Status != "ACCEPTED" {
-		return newError(CodeProtocol, "Core agent-telemetry acknowledgement status is not ACCEPTED", nil, false)
-	}
 	if ack.SensorID != batch.SensorID {
 		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sensorId does not match submitted batch", nil, false)
 	}
@@ -185,16 +193,35 @@ func validateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck)
 	if ack.CorrelationID != batch.CorrelationID {
 		return newError(CodeProtocol, "Core agent-telemetry acknowledgement correlationId does not match submitted batch", nil, false)
 	}
-	if ack.AcceptedThroughIngressSequence != batch.LastIngressSequence {
-		if ack.AcceptedThroughIngressSequence < batch.FirstIngressSequence {
-			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch first sequence", nil, false)
+	switch ack.Status {
+	case "ACCEPTED":
+		acceptedLast := ack.AcceptedLastIngressSequence
+		if acceptedLast == 0 {
+			acceptedLast = ack.AcceptedThroughIngressSequence // pre-V020 response
 		}
-		if ack.AcceptedThroughIngressSequence > batch.LastIngressSequence {
-			return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is above submitted batch last sequence", nil, false)
+		if acceptedLast != batch.LastIngressSequence || ack.AcceptedThroughIngressSequence > acceptedLast ||
+			ack.DispositionID != "" || ack.ReasonCode != "" {
+			return newError(CodeProtocol, "Core accepted range does not match submitted batch", nil, false)
 		}
-		return newError(CodeProtocol, "Core agent-telemetry acknowledgement sequence is below submitted batch last sequence", nil, false)
+	case "TERMINALLY_REJECTED":
+		if batch.FirstIngressSequence != batch.LastIngressSequence || ack.FirstIngressSequence != batch.FirstIngressSequence ||
+			ack.LastIngressSequence != batch.LastIngressSequence || !strings.EqualFold(ack.Checksum, batch.Checksum) ||
+			ack.SettledThroughIngressSequence < batch.LastIngressSequence ||
+			ack.ReasonCode != "ERR_AGENT_IDENTITY_CONFLICT" ||
+			!durableDispositionID.MatchString(strings.ToLower(ack.DispositionID)) ||
+			ack.AcceptedLastIngressSequence != 0 || ack.AcceptedThroughIngressSequence >= batch.LastIngressSequence {
+			return newError(CodeProtocol, "Core terminal disposition does not match submitted batch", nil, false)
+		}
+	default:
+		return newError(CodeProtocol, "Core agent-telemetry disposition status is invalid", nil, false)
 	}
 	return nil
+}
+
+// ValidateAgentTelemetryAck lets drain verify a typed result even when a
+// different transport implementation is injected through its interface.
+func ValidateAgentTelemetryAck(batch AgentTelemetryBatch, ack AgentTelemetryAck) error {
+	return validateAgentTelemetryAck(batch, ack)
 }
 
 func classifyAgentTelemetryStatus(status int, body []byte) error {
@@ -214,6 +241,12 @@ func classifyAgentTelemetryStatus(status int, body []byte) error {
 	switch code {
 	case "ERR_PREVIOUS_BATCH_PENDING", "ERR_BATCH_PUBLICATION_IN_PROGRESS":
 		transient = true
+	case "ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED",
+		"ERR_AGENT_CANONICAL_DIGEST_MISMATCH",
+		"ERR_AGENT_AUTHORITY_CHECKPOINT_UNAVAILABLE":
+		// Retain and retry the frozen head, while exposing a persistent blocked
+		// stream in Sensor self-health until governed reconciliation succeeds.
+		transient = false
 	}
 	if code != "" {
 		return &CoreAPIError{Status: apiErr.Status, Code: code, Message: msg, HTTPStatus: status, transient: transient}
@@ -248,7 +281,8 @@ func IsAgentIngressSpoolRetainingCode(code string) bool {
 		"ERR_AGENT_ASSIGNMENT_SENSOR_MISMATCH",
 		"ERR_AGENT_ACCEPTING_SENSOR_MISMATCH",
 		"ERR_TENANT_SCOPE_MISMATCH",
-		"ERR_AGENT_ENTITY_UNRESOLVED":
+		"ERR_AGENT_ENTITY_UNRESOLVED",
+		"ERR_AGENT_LEGACY_PENDING_RECONCILIATION_REQUIRED":
 		return true
 	default:
 		return false

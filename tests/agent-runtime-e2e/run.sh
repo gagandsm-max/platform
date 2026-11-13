@@ -6,20 +6,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "${ROOT_DIR}"
 
-source .env 2>/dev/null || true
+# Fail closed before contacting Docker: the old fixed-name harness is unsafe.
+: "${PLATFORM_E2E_ISOLATED_CONFIG:?Use run-isolated.sh after runtime admission}"
+: "${PLATFORM_E2E_PREFIX:?Missing isolated project identity}"
+python3 tests/agent-runtime-e2e/isolation.py verify "$PLATFORM_E2E_ISOLATED_CONFIG" "$PLATFORM_E2E_PREFIX"
 export COMPOSE_PROFILES="${COMPOSE_PROFILES:-dev}"
 
 E2E_DIR="${ROOT_DIR}/tests/agent-runtime-e2e"
-CERT_DIR="${E2E_DIR}/certs"
-EVIDENCE_DIR="${E2E_DIR}/evidence"
+CERT_DIR="${PLATFORM_E2E_CERT_DIR:?}"
+EVIDENCE_DIR="${PLATFORM_E2E_RUN_DIR:?}/evidence"
 ARTIFACT_DIR="${PLATFORM_E2E_ARTIFACT_DIR:-${EVIDENCE_DIR}/artifacts}"
-mkdir -p "${EVIDENCE_DIR}" "${ARTIFACT_DIR}" 2>/dev/null || {
-    log "WARN: could not create ${ARTIFACT_DIR}; falling back to ${EVIDENCE_DIR}/artifacts"
-    ARTIFACT_DIR="${EVIDENCE_DIR}/artifacts"
-    mkdir -p "${ARTIFACT_DIR}"
-}
+mkdir -p "${EVIDENCE_DIR}" "${ARTIFACT_DIR}"
 
-COMPOSE=(docker compose --env-file .env -f compose.yaml -f compose.kafka-guarded.yaml -f "${E2E_DIR}/compose.override.yaml")
+COMPOSE=(docker compose -p "$PLATFORM_E2E_PREFIX" -f "$PLATFORM_E2E_ISOLATED_CONFIG")
 # Validate this exact requested overlay before test resets/certs or Compose mutation.
 bash deploy/docker/kafka/deployment-preflight.sh check "${COMPOSE[@]:2}"
 TENANT="018f0e0a-0000-7000-8000-000000000001"
@@ -29,7 +28,7 @@ HOST_ID="host-e2e-agent-01"
 RUN_ID="$(date +%s)"
 SENSOR_ID="${SENSOR_INFRA_ID:-sensor-infra-01}"
 RECEIVER_PORT="${PLATFORM_SENSOR_AGENT_RECEIVER_HOST_PORT:-28444}"
-CA="${ROOT_DIR}/deploy/docker/certs/ca.crt"
+CA="${PLATFORM_E2E_CA_DIR}/ca.crt"
 AGENT_CRT="${CERT_DIR}/agent-e2e.crt"
 AGENT_KEY="${CERT_DIR}/agent-e2e.key"
 PASS=0
@@ -60,49 +59,43 @@ fail_closed() {
 compose() { "${COMPOSE[@]}"; }
 
 wait_healthy() {
-    local name="$1" tries="${2:-60}"
-    local i
-    for i in $(seq 1 "${tries}"); do
-        if docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "${name}" 2>/dev/null | grep -Eq 'healthy|running'; then
-            if docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}healthy{{end}}' "${name}" | grep -q healthy; then
-                return 0
-            fi
-            if ! docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "${name}" | grep -q .; then
-                return 0
-            fi
-        fi
+    local name="$1" tries="${2:-60}" state i
+    for i in $(seq 1 "$tries"); do
+        state=$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$name" 2>/dev/null || true)
+        [[ "$state" == healthy ]] && return 0
         sleep 2
     done
     return 1
 }
 
 wait_receiver() {
-    local i
+    local i code endpoint
+    # Docker can assign a different ephemeral host port on restart/start.
+    endpoint=$("${COMPOSE[@]}" port sensor-infra 8444) || return 1
+    [[ "$endpoint" == 127.0.0.1:* ]] || return 1
+    RECEIVER_PORT=${endpoint##*:}
+    [[ "$RECEIVER_PORT" =~ ^[0-9]+$ ]] || return 1
+    printf '%s %s\n' "$(date -u +%FT%TZ)" "$endpoint" >> "${EVIDENCE_DIR}/receiver-endpoints.txt"
     for i in $(seq 1 30); do
-        if docker exec platform-sensor-infra sh -c \
-            'curl -sk --connect-timeout 1 -o /dev/null https://127.0.0.1:8444/api/v1/agent/telemetry; test $? -ne 7'; then
-            return 0
-        fi
+        code=$(curl -sS --connect-timeout 1 --max-time 2 --cacert "$CA" --cert "$AGENT_CRT" --key "$AGENT_KEY" \
+            -o /dev/null -w '%{http_code}' "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" 2>/dev/null || true)
+        [[ "$code" == 405 ]] && return 0
         sleep 1
     done
     return 1
 }
 
 run_agent_ack_unit_tests() {
-    docker run --rm \
-        -v "${ROOT_DIR}/agent:/src:ro" \
-        -w /src \
-        golang:1.27.1-alpine3.24 \
-        sh -c 'CGO_ENABLED=0 go test -count=1 ./common/client ./common/delivery ./common/queue ./common/health ./common/config'
+    "${COMPOSE[@]}" run --rm --no-deps unit-contracts
 }
 
 queue_count() {
-    docker exec platform-agent-e2e sh -c 'ls /var/lib/platform/agent/queue/active 2>/dev/null | wc -l' | tr -d ' '
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" sh -ec 'test -d /var/lib/platform/agent/queue/active; find /var/lib/platform/agent/queue/active -maxdepth 1 -type f -name "rec_*.json" -print' | wc -l | tr -d ' '
 }
 
 agent_ready_code() {
-    docker run --rm --network container:platform-agent-e2e curlimages/curl:8.5.0 \
-        -s -o /tmp/ready.body -w '%{http_code}' http://127.0.0.1:8089/ready || true
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" sh -c \
+        'wget -S -O /dev/null http://127.0.0.1:8089/ready 2>&1 | sed -n "s/.*HTTP\/1.[01] \([0-9]*\).*/\1/p"'
 }
 
 post_envelope() {
@@ -120,22 +113,21 @@ post_envelope() {
 }
 
 kafka_end_offsets() {
-    docker exec platform-kafka /opt/kafka/bin/kafka-topics.sh \
+    docker exec ${PLATFORM_E2E_PREFIX}-kafka /opt/kafka/bin/kafka-topics.sh \
         --bootstrap-server localhost:9092 \
         --create --if-not-exists \
         --topic telemetry.numeric.v1 \
         --partitions 3 \
         --replication-factor 1 >/dev/null 2>&1 || true
-    docker exec platform-kafka /opt/kafka/bin/kafka-get-offsets.sh \
+    docker exec ${PLATFORM_E2E_PREFIX}-kafka /opt/kafka/bin/kafka-get-offsets.sh \
         --bootstrap-server localhost:9092 \
         --topic telemetry.numeric.v1 \
         --time -1
 }
 
 consume_since_offsets() {
-    # telemetry.numeric.v1 has multiple partitions. Seek one offset back so a
-    # record written at the captured log-end offset is not skipped, and stream
-    # without a wall-clock kill that drops docker exec stdout.
+    # The captured log-end offset is the next record offset, inclusive. Reading
+    # one earlier would falsely count old telemetry as post-recovery delivery.
     local offset_file="$1"
     local idle_seconds="${2:-6}"
     local idle_ms=$((idle_seconds * 1000))
@@ -143,10 +135,8 @@ consume_since_offsets() {
     while IFS=: read -r topic part off; do
         [[ -n "${part}" && -n "${off}" ]] || continue
         start="${off}"
-        if [[ "${off}" =~ ^[0-9]+$ && "${off}" -gt 0 ]]; then
-            start=$((off - 1))
-        fi
-        docker exec platform-kafka \
+        [[ "$off" =~ ^[0-9]+$ ]] || return 1
+        docker exec ${PLATFORM_E2E_PREFIX}-kafka \
             /opt/kafka/bin/kafka-console-consumer.sh \
             --bootstrap-server localhost:9092 \
             --topic "${topic}" \
@@ -168,38 +158,27 @@ count_kafka_since() {
     printf '%s\n' "${dump}" | grep -c "${needle}" || true
 }
 
-reset_test_volumes() {
-    log "==> resetting test-only Agent durable volume (Sensor Agent spool kept so Core ingress sequences do not rewind)"
-    docker stop platform-agent-e2e >/dev/null 2>&1 || true
-    docker rm -f platform-agent-e2e platform-agent-e2e-init >/dev/null 2>&1 || true
-    docker volume rm -f platform_agent_e2e_state >/dev/null 2>&1 || true
-
-    # The Agent queue reset restarts source sequences at 1. Durable acceptance
-    # receipts from prior E2E runs would then conflict those sequences. Product
-    # receipts survive drain/restart; this wipe is test-only because this harness
-    # resets Agent sequence space without rotating agent_id. Poison/state remain.
-    docker stop platform-sensor-infra >/dev/null 2>&1 || true
-    docker run --rm \
-        -v "${PLATFORM_SENSOR_INFRA_AGENT_SPOOL_VOLUME:-platform_sensor_infra_agent_spool}:/data" \
-        alpine:3.24 \
-        sh -c 'mkdir -p /data/batch-index /data/stream-state && find /data/batch-index /data/stream-state -type f -name "*.json" -delete' \
-        >/dev/null
-}
-
 dump_evidence() {
     {
         echo "=== agent logs ==="
-        docker logs platform-agent-e2e --tail 80 2>/dev/null || true
+        docker logs ${PLATFORM_E2E_PREFIX}-agent-runtime --tail 80 2>/dev/null || true
         echo "=== sensor-infra logs ==="
-        docker logs platform-sensor-infra --tail 120 2>/dev/null || true
+        docker logs ${PLATFORM_E2E_PREFIX}-sensor-infra --tail 120 2>/dev/null || true
         echo "=== queue ==="
-        docker exec platform-agent-e2e sh -c 'ls -la /var/lib/platform/agent/queue/active 2>/dev/null; ls -la /var/lib/platform/agent/queue 2>/dev/null' || true
+        docker exec ${PLATFORM_E2E_PREFIX}-agent-runtime sh -c 'ls -la /var/lib/platform/agent/queue/active 2>/dev/null; ls -la /var/lib/platform/agent/queue 2>/dev/null' || true
         echo "=== sensor agent spool ==="
-        docker exec platform-sensor-infra sh -c 'ls -la /var/lib/platform/sensor/agent-spool 2>/dev/null | head -40; echo --- poison ---; ls -la /var/lib/platform/sensor/agent-spool/agent-poison 2>/dev/null | head' || true
+        docker exec ${PLATFORM_E2E_PREFIX}-sensor-infra sh -c 'ls -la /var/lib/platform/sensor/agent-spool 2>/dev/null | head -40; echo --- poison ---; ls -la /var/lib/platform/sensor/agent-spool/agent-poison 2>/dev/null | head' || true
         echo "=== core agent-ingress ==="
-        docker logs platform-core --tail 80 2>/dev/null | grep -E 'agent-telemetry|RECORD_TOO_LARGE|agent-e2e' || true
+        docker logs ${PLATFORM_E2E_PREFIX}-core --tail 80 2>/dev/null | grep -E 'agent-telemetry|RECORD_TOO_LARGE|agent-e2e' || true
     } > "${EVIDENCE_DIR}/debug.txt" 2>&1 || true
     cp "${EVIDENCE_DIR}/debug.txt" "${ARTIFACT_DIR}/agent-runtime-e2e-debug.txt" 2>/dev/null || true
+}
+
+sample_agent_resources() {
+    local phase="$1"
+    date -u +%FT%TZ > "${EVIDENCE_DIR}/resources-${phase}.utc"
+    docker stats --no-stream --format '{{json .}}' "${PLATFORM_E2E_PREFIX}-agent-runtime" > "${EVIDENCE_DIR}/resources-${phase}.json"
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" sh -c 'cat /proc/1/status /proc/1/io; echo open_fds; ls /proc/1/fd | wc -l; echo queue_bytes; du -sk /var/lib/platform/agent/queue' > "${EVIDENCE_DIR}/resources-${phase}.txt"
 }
 
 # ---------------------------------------------------------------------------
@@ -207,59 +186,74 @@ log "========================================================================"
 log "Agent runtime E2E: Agent → Sensor → Core → Kafka"
 log "========================================================================"
 
-if [[ ! -f deploy/docker/certs/ca.crt ]]; then
-    make certs
+# Invalid ACK cannot be emitted by the production Sensor; exercise Agent package contracts.
+log "==> Agent invalid-ACK / fail-closed transport unit contracts (real Agent packages)"
+if run_agent_ack_unit_tests | tee "${EVIDENCE_DIR}/agent-ack-unit.txt"; then
+    record "invalid-ack-unit-suite" "PASS" "go test ./common/client ./common/delivery ./common/queue ./common/health ./common/config"
+else
+    record "invalid-ack-unit-suite" "FAIL" "see evidence/agent-ack-unit.txt"
 fi
-bash "${E2E_DIR}/generate-certs.sh"
-reset_test_volumes
 
 log "==> starting infrastructure with test-only Agent Receiver overlay"
 bash deploy/docker/kafka/deployment-preflight.sh check "${COMPOSE[@]:2}"
 "${COMPOSE[@]}" up -d postgres clickhouse kafka valkey core
-if ! wait_healthy platform-core 90; then
-    fail_closed "infra-core-healthy" "platform-core did not become healthy"
+if ! wait_healthy ${PLATFORM_E2E_PREFIX}-core 90; then
+    fail_closed "infra-core-healthy" "${PLATFORM_E2E_PREFIX}-core did not become healthy"
 fi
 record "infra-core-healthy" "PASS"
 
 log "==> rebuilding Sensor with Agent Receiver overlay (does not flip compose.yaml default)"
-"${COMPOSE[@]}" build sensor-infra
+true # Images built from the exact checkout by run-isolated.sh
 "${COMPOSE[@]}" up -d --no-build --force-recreate sensor-infra
-if ! wait_healthy platform-sensor-infra 90; then
+if ! wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 90; then
     fail_closed "sensor-infra-healthy" "sensor-infra did not become healthy with Agent Receiver enabled"
 fi
+RECEIVER_PORT=$("${COMPOSE[@]}" port sensor-infra 8444)
+RECEIVER_PORT=${RECEIVER_PORT##*:}
 if ! wait_receiver; then
-    docker logs platform-sensor-infra --tail 80 >&2 || true
+    docker logs ${PLATFORM_E2E_PREFIX}-sensor-infra --tail 80 >&2 || true
     fail_closed "sensor-receiver-listen" "Agent Receiver did not accept TCP on :8444"
 fi
 record "sensor-receiver-enabled" "PASS" "SENSOR_AGENT_RECEIVER_ENABLED=true listen=:8444 host=127.0.0.1:${RECEIVER_PORT}"
 
 python3 "${E2E_DIR}/seed_authority.py" | tee "${EVIDENCE_DIR}/seed.txt"
+python3 "${E2E_DIR}/seed_authority.py" --probe | tee "${EVIDENCE_DIR}/seed-probe.txt"
 record "authority-sql-seed" "PASS"
 
 log "==> capturing Kafka end offsets before Agent start"
 kafka_end_offsets | tee "${EVIDENCE_DIR}/offsets-before-agent.txt"
 
-"${COMPOSE[@]}" build agent-runtime
+if [[ "${PLATFORM_E2E_SEQUENCE_DISPOSITION:-0}" == "1" ]]; then
+    python3 "${E2E_DIR}/sequence_disposition.py" "$PLATFORM_E2E_PREFIX" "$RECEIVER_PORT" "$EVIDENCE_DIR"
+    exit 0
+fi
+if [[ "${PLATFORM_E2E_REAL_SENSOR_GAP:-0}" == "1" ]]; then
+    python3 "${E2E_DIR}/real_sensor_commit_gap.py" "$PLATFORM_E2E_PREFIX" "$RECEIVER_PORT" "$EVIDENCE_DIR"
+    exit 0
+fi
+
+true # Agent image built by run-isolated.sh
 "${COMPOSE[@]}" up -d --force-recreate --no-deps agent-runtime-init
-if ! docker wait platform-agent-e2e-init >/dev/null; then
-    docker logs platform-agent-e2e-init 2>&1 || true
+if ! docker wait ${PLATFORM_E2E_PREFIX}-agent-runtime-init >/dev/null; then
+    docker logs ${PLATFORM_E2E_PREFIX}-agent-runtime-init 2>&1 || true
     fail_closed "agent-runtime-init" "init container failed"
 fi
-init_ec="$(docker inspect --format '{{.State.ExitCode}}' platform-agent-e2e-init)"
+init_ec="$(docker inspect --format '{{.State.ExitCode}}' ${PLATFORM_E2E_PREFIX}-agent-runtime-init)"
 if [[ "${init_ec}" != "0" ]]; then
-    docker logs platform-agent-e2e-init 2>&1 || true
+    docker logs ${PLATFORM_E2E_PREFIX}-agent-runtime-init 2>&1 || true
     fail_closed "agent-runtime-init" "init exit=${init_ec}"
 fi
 "${COMPOSE[@]}" up -d --no-deps --no-build --force-recreate agent-runtime
 sleep 3
-if ! docker ps --format '{{.Names}}' | grep -qx platform-agent-e2e; then
-    docker logs platform-agent-e2e 2>&1 | tail -50 || true
-    fail_closed "agent-process-start" "platform-agent-e2e is not running"
+if ! docker ps --format '{{.Names}}' | grep -qx ${PLATFORM_E2E_PREFIX}-agent-runtime; then
+    docker logs ${PLATFORM_E2E_PREFIX}-agent-runtime 2>&1 | tail -50 || true
+    fail_closed "agent-process-start" "${PLATFORM_E2E_PREFIX}-agent-runtime is not running"
 fi
-if ! docker logs platform-agent-e2e 2>&1 | grep -q 'Platform Linux Agent starting'; then
+if ! docker logs ${PLATFORM_E2E_PREFIX}-agent-runtime 2>&1 | grep -Fq '"event_code":"AGENT_SERVICE_RUNNING"'; then
     fail_closed "agent-process-start" "startup log missing"
 fi
 record "agent-process-start" "PASS" "production platform-agent-linux"
+sample_agent_resources started
 
 # Happy path: real collectors → spool → mTLS → Sensor ACK → Core → Kafka
 log "==> waiting for real Agent host telemetry on telemetry.numeric.v1"
@@ -277,20 +271,39 @@ if [[ "${HAPPY_HITS}" -lt 1 ]]; then
 fi
 record "happy-path-kafka" "PASS" "agentId=agent-e2e-01 new_hits=${HAPPY_HITS} topic=telemetry.numeric.v1 partitions=$(tr '\n' ',' < "${EVIDENCE_DIR}/offsets-before-agent.txt")"
 
+# Retain and compare one actual production collector observation all the way to
+# the canonical ClickHouse view, separately from injected transport fixtures.
+cp "${EVIDENCE_DIR}/kafka-dump.txt" "${EVIDENCE_DIR}/real-agent-kafka.txt"
+python3 "${E2E_DIR}/readback.py" prepare "${EVIDENCE_DIR}/real-agent-kafka.txt" "${EVIDENCE_DIR}/real-agent-expected.json" > "${EVIDENCE_DIR}/real-agent-query.sql"
+REAL_QUERY=$(cat "${EVIDENCE_DIR}/real-agent-query.sql")
+for _ in $(seq 1 20); do
+    docker exec "${PLATFORM_E2E_PREFIX}-clickhouse" sh -c 'exec clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"' sh "$REAL_QUERY" > "${EVIDENCE_DIR}/real-agent-clickhouse.jsonl"
+    [[ -s "${EVIDENCE_DIR}/real-agent-clickhouse.jsonl" ]] && break
+    sleep 1
+done
+python3 "${E2E_DIR}/readback.py" verify "${EVIDENCE_DIR}/real-agent-expected.json" "${EVIDENCE_DIR}/real-agent-clickhouse.jsonl" || fail_closed "real-agent-clickhouse-readback" "Canonical stored fields differ"
+record "real-agent-clickhouse-readback" "PASS" "exact stored scalar fields at ClickHouse millisecond precision; original Kafka timestamp retained for comparison"
+
 # Queue should drain after valid ACK
 sleep 3
 Q_AFTER="$(queue_count)"
 if [[ "${Q_AFTER}" -eq 0 ]]; then
     record "ack-before-delete" "PASS" "agent local active queue empty after Kafka receipt"
 else
-    record "ack-before-delete" "PASS" "active queue depth=${Q_AFTER} after delivery (at-least-once retry window)"
+    record "ack-before-delete" "FAIL" "active queue depth=${Q_AFTER} after delivery (at-least-once retry window)"
 fi
 
 # Pause host collectors so injected batches are not buried under filesystem cardinality
 # or Core Kafka 503 head-of-line stalls.
 log "==> pausing Agent collectors for injected identity/authority batches"
-docker pause platform-agent-e2e >/dev/null
+docker pause ${PLATFORM_E2E_PREFIX}-agent-runtime >/dev/null
 sleep 2
+# Keep synthetic legacy-stream probes away from the running Agent's native-v2
+# custody and sequence space. Both identities have separately seeded credentials.
+AGENT_ID=agent-e2e-probe-01
+HOST_ID=host-e2e-probe-01
+AGENT_CRT="${CERT_DIR}/agent-probe.crt"
+AGENT_KEY="${CERT_DIR}/agent-probe.key"
 
 # Injected unique metric for identity tracing
 METRIC="e2e.cpu.unique.$(date +%s)"
@@ -324,6 +337,33 @@ fi
 record "injected-batch-kafka" "PASS" "metricId=${METRIC} hits=${UNIQUE_HITS}"
 sleep 5
 
+# Query the canonical FINAL view, checking exact content and source sequence.
+# Agent observationId is Kafka-only in the current Core schema; do not claim
+# ClickHouse provenance parity beyond these actually stored columns.
+verify_clickhouse_unique() {
+    local row query
+    query="SELECT tenant_id, entity_id, metric_id, sensor_id, toString(ts) AS ts, value, sequence_id, source_protocol FROM platform.metric_numeric WHERE tenant_id='${TENANT}' AND metric_id='${METRIC}' FORMAT JSONEachRow"
+    for _ in $(seq 1 20); do
+        docker exec "${PLATFORM_E2E_PREFIX}-clickhouse" sh -c 'exec clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"' sh "$query" > "${EVIDENCE_DIR}/clickhouse-unique.jsonl"
+        if [[ -s "${EVIDENCE_DIR}/clickhouse-unique.jsonl" ]]; then break; fi
+        sleep 1
+    done
+    python3 - "${EVIDENCE_DIR}/clickhouse-unique.jsonl" "$TENANT" "$SENSOR_ID" "$METRIC" <<'PY'
+import json, sys
+rows = [json.loads(line) for line in open(sys.argv[1]) if line.strip()]
+assert len(rows) == 1, rows
+r = rows[0]
+assert r['tenant_id'] == sys.argv[2] and r['sensor_id'] == sys.argv[3], r
+assert r['entity_id'] == '018f0e0a-0000-7000-8000-00000000ae02', r
+assert r['metric_id'] == sys.argv[4] and r['value'] == 42, r
+assert r['ts'] == '2026-09-12 19:00:00.000', r
+assert r['sequence_id'].endswith(':900001:0:' + sys.argv[4]), r
+assert r['source_protocol'] == 'AGENT_HOST', r
+PY
+}
+verify_clickhouse_unique || fail_closed "clickhouse-canonical-readback" "Exact metric/tenant/entity/time/sequence comparison failed"
+record "clickhouse-canonical-readback" "PASS" "exact canonical fields; Agent observationId remains Kafka-only"
+
 # TEST A — lost ACK after durable accept + drain: identical retry must ACK without a second logical batch.
 PRE_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
 REPLAY_BODY="${EVIDENCE_DIR}/unique-envelope.json"
@@ -344,8 +384,8 @@ record "lost-ack-after-drain-no-second-logical" "PASS" "metric ${METRIC} kafka h
 # TEST B — same identity after Sensor restart.
 log "==> Sensor restart between drain and duplicate retry"
 PRE_RESTART_REPLAY_HITS="$(count_kafka_since "${METRIC}" "${EVIDENCE_DIR}/offsets-unique.txt")"
-docker restart platform-sensor-infra >/dev/null
-if ! wait_healthy platform-sensor-infra 40; then
+docker restart ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+if ! wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 40; then
     fail_closed "lost-ack-sensor-restart" "sensor-infra did not recover"
 fi
 wait_receiver || fail_closed "lost-ack-sensor-restart" "receiver not ready after restart"
@@ -362,6 +402,8 @@ if [[ "${POST_RESTART_REPLAY_HITS}" -gt "${PRE_RESTART_REPLAY_HITS}" ]]; then
     fail_closed "lost-ack-after-restart-no-second-logical" "Kafka hits increased from ${PRE_RESTART_REPLAY_HITS} to ${POST_RESTART_REPLAY_HITS} after restart replay"
 fi
 record "lost-ack-after-restart-no-second-logical" "PASS" "metric ${METRIC} kafka hits stayed at ${POST_RESTART_REPLAY_HITS} (pre=${PRE_RESTART_REPLAY_HITS})"
+verify_clickhouse_unique || fail_closed "clickhouse-replay-identity" "Replay changed canonical identity/content/count"
+record "clickhouse-replay-identity" "PASS" "one canonical row after identical replay and Sensor restart"
 
 # TEST C — mutated replay of the accepted sequence/range.
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-before-mutated.txt"
@@ -438,46 +480,31 @@ fi
 record "replay-kafka-identity" "PASS" "metric ${METRIC} kafka hits=${REPLAY_COUNT} (at-least-once; no new logical id required)"
 
 log "==> resuming Agent collectors for failure-path scenarios"
-docker unpause platform-agent-e2e >/dev/null || true
+docker unpause ${PLATFORM_E2E_PREFIX}-agent-runtime >/dev/null || true
 
-# mTLS / transport negatives against the live Receiver
-NOCERT="$(curl -sS -k --connect-timeout 5 -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
-if [[ "${NOCERT}" == "000" || "${NOCERT}" == "401" || "${NOCERT}" == "403" ]]; then
-    record "mtls-missing-client-cert" "PASS" "http=${NOCERT}"
-else
-    record "mtls-missing-client-cert" "FAIL" "http=${NOCERT}"
-fi
-
-UNTRUSTED_ACK="$(curl -sS --connect-timeout 5 -k \
-    --cert deploy/docker/certs/untrusted-client.crt \
-    --key deploy/docker/certs/untrusted-client.key \
-    -o /dev/null -w '%{http_code}' \
-    -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
-if [[ "${UNTRUSTED_ACK}" == "000" || "${UNTRUSTED_ACK}" == "401" || "${UNTRUSTED_ACK}" == "403" ]]; then
-    record "mtls-untrusted-client" "PASS" "http=${UNTRUSTED_ACK}"
-else
-    record "mtls-untrusted-client" "FAIL" "http=${UNTRUSTED_ACK}"
-fi
-
-EXPIRED_CODE="$(curl -sS --connect-timeout 5 --cacert "${CA}" \
-    --cert "${CERT_DIR}/agent-e2e-expired.crt" --key "${CERT_DIR}/agent-e2e-expired.key" \
-    -o /dev/null -w '%{http_code}' \
-    -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
-if [[ "${EXPIRED_CODE}" == "000" ]]; then
-    record "mtls-expired-client" "PASS" "handshake failed closed"
-else
-    record "mtls-expired-client" "FAIL" "http=${EXPIRED_CODE}"
-fi
-
-NOTYET_CODE="$(curl -sS --connect-timeout 5 --cacert "${CA}" \
-    --cert "${CERT_DIR}/agent-e2e-notyet.crt" --key "${CERT_DIR}/agent-e2e-notyet.key" \
-    -o /dev/null -w '%{http_code}' \
-    -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
-if [[ "${NOTYET_CODE}" == "000" ]]; then
-    record "mtls-not-yet-valid-client" "PASS" "handshake failed closed"
-else
-    record "mtls-not-yet-valid-client" "FAIL" "http=${NOTYET_CODE}"
-fi
+# Only a verified server TLS rejection counts. Connection failure, missing
+# fixture files or a timeout must not masquerade as certificate rejection.
+tls_rejection_probe() {
+    local name="$1" code rc
+    shift
+    set +e
+    code=$(curl -sS --connect-timeout 5 --max-time 10 --cacert "$CA" "$@" \
+        -o /dev/null -w '%{http_code}' -X POST "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" \
+        2> "${EVIDENCE_DIR}/${name}.stderr")
+    rc=$?
+    set -e
+    printf 'curl_exit=%s http=%s\n' "$rc" "$code" > "${EVIDENCE_DIR}/${name}.result"
+    if [[ ( "$rc" == 35 || "$rc" == 56 ) && "$code" == 000 ]] && grep -Eiq 'alert|certificate' "${EVIDENCE_DIR}/${name}.stderr"; then
+        record "$name" "PASS" "verified server TLS rejection; curl_exit=$rc"
+    else
+        record "$name" "FAIL" "curl_exit=$rc http=$code; inspect retained stderr"
+    fi
+}
+tls_rejection_probe mtls-missing-client-cert
+tls_rejection_probe mtls-untrusted-client --cert "${PLATFORM_E2E_CA_DIR}/untrusted-client.crt" --key "${PLATFORM_E2E_CA_DIR}/untrusted-client.key"
+tls_rejection_probe mtls-expired-client --cert "${CERT_DIR}/agent-e2e-expired.crt" --key "${CERT_DIR}/agent-e2e-expired.key"
+tls_rejection_probe mtls-not-yet-valid-client --cert "${CERT_DIR}/agent-e2e-notyet.crt" --key "${CERT_DIR}/agent-e2e-notyet.key"
+wait_receiver || fail_closed "mtls-receiver-sanity" "Valid client could not reach the verified TLS server after negative probes"
 
 CLEARTEXT="$(curl -sS --connect-timeout 3 -o /dev/null -w '%{http_code}' "http://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" || true)"
 if [[ "${CLEARTEXT}" == "000" || "${CLEARTEXT}" == "400" ]]; then
@@ -486,35 +513,32 @@ else
     record "cleartext-http-rejected" "FAIL" "http=${CLEARTEXT}"
 fi
 
-# Invalid ACK cannot be emitted by the production Sensor; exercise Agent package contracts.
-log "==> Agent invalid-ACK / fail-closed transport unit contracts (real Agent packages)"
-if run_agent_ack_unit_tests | tee "${EVIDENCE_DIR}/agent-ack-unit.txt"; then
-    record "invalid-ack-unit-suite" "PASS" "go test ./common/client ./common/delivery ./common/queue ./common/health ./common/config"
-else
-    record "invalid-ack-unit-suite" "FAIL" "see evidence/agent-ack-unit.txt"
-fi
-
 # Sensor unavailable: stop receiver, prove queue retains, restore, Kafka continues
 log "==> Sensor unavailable / Agent retain / restore"
+sample_agent_resources steady
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-sensor-down.txt"
-docker stop platform-sensor-infra >/dev/null
+docker stop ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
 Q_HELD=0
 READY_DOWN=""
+HEALTH_DOWN_OK=0
 for i in $(seq 1 12); do
     sleep 3
     READY_DOWN="$(agent_ready_code)"
     Q_HELD="$(queue_count)"
-    if [[ "${Q_HELD}" -ge 1 || "${READY_DOWN}" == "503" ]]; then
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/ready > "${EVIDENCE_DIR}/ready-down-${i}.json" || true
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/health > "${EVIDENCE_DIR}/health-down-${i}.json" || true
+    if python3 "${E2E_DIR}/readback.py" health-outage "${EVIDENCE_DIR}/ready-down-${i}.json" "${EVIDENCE_DIR}/health-down-${i}.json" "${READY_DOWN:-0}" "$Q_HELD"; then
+        HEALTH_DOWN_OK=1
         break
     fi
 done
-if [[ "${Q_HELD}" -ge 1 || "${READY_DOWN}" == "503" ]]; then
-    record "sensor-unavailable-retain" "PASS" "queue=${Q_HELD} ready_http=${READY_DOWN}"
+if [[ "$HEALTH_DOWN_OK" == 1 ]]; then
+    record "sensor-unavailable-retain" "PASS" "queue=${Q_HELD}; HTTP200 DEGRADED/ready=true, failed/down transport, safe durable buffering"
 else
     record "sensor-unavailable-retain" "FAIL" "queue=${Q_HELD} ready_http=${READY_DOWN}"
 fi
-docker start platform-sensor-infra >/dev/null
-if ! wait_healthy platform-sensor-infra 40; then
+docker start ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+if ! wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 40; then
     fail_closed "sensor-restore" "sensor-infra did not recover"
 fi
 wait_receiver || true
@@ -535,23 +559,40 @@ fi
 
 # Agent restart with durable volume
 log "==> Agent restart durability"
-docker stop platform-sensor-infra >/dev/null
-sleep 4
-Q_PRE_RESTART="$(queue_count)"
-docker stop platform-agent-e2e >/dev/null
-docker start platform-agent-e2e >/dev/null
+docker stop ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-agent-restart.txt"
+for _ in $(seq 1 15); do
+    Q_PRE_RESTART="$(queue_count)"
+    [[ "$Q_PRE_RESTART" -ge 1 ]] && break
+    sleep 2
+done
+[[ "$Q_PRE_RESTART" -ge 1 ]] || fail_closed "agent-restart-queue-preserved" "No pre-restart durable record"
+docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" sh -c 'sha256sum /var/lib/platform/agent/identity.json /var/lib/platform/agent/queue/active/rec_*.json' > "${EVIDENCE_DIR}/queue-pre-restart.sha256"
+docker stop ${PLATFORM_E2E_PREFIX}-agent-runtime >/dev/null
+AGENT_STOP_EXIT=$(docker inspect -f '{{.State.ExitCode}}' "${PLATFORM_E2E_PREFIX}-agent-runtime")
+docker logs "${PLATFORM_E2E_PREFIX}-agent-runtime" > "${EVIDENCE_DIR}/agent-stop.log" 2>&1
+[[ "$AGENT_STOP_EXIT" == 0 ]] || fail_closed "agent-graceful-stop" "exit=$AGENT_STOP_EXIT"
+printf '%s\n' "$AGENT_STOP_EXIT" > "${EVIDENCE_DIR}/agent-stop.exit"
+docker start ${PLATFORM_E2E_PREFIX}-agent-runtime >/dev/null
 sleep 3
 Q_POST_RESTART="$(queue_count)"
-if [[ "${Q_POST_RESTART}" -ge 1 || "${Q_PRE_RESTART}" -ge 1 ]]; then
-    record "agent-restart-queue-preserved" "PASS" "pre=${Q_PRE_RESTART} post=${Q_POST_RESTART}"
+docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" sh -c 'sha256sum /var/lib/platform/agent/identity.json /var/lib/platform/agent/queue/active/rec_*.json' > "${EVIDENCE_DIR}/queue-post-restart.sha256"
+if python3 - "${EVIDENCE_DIR}/queue-pre-restart.sha256" "${EVIDENCE_DIR}/queue-post-restart.sha256" <<'CHECK_QUEUE'
+import sys
+before, after = [set(open(p).read().splitlines()) for p in sys.argv[1:]]
+assert len(before) >= 2 and before.issubset(after), (before, after)
+CHECK_QUEUE
+then
+    record "agent-restart-queue-preserved" "PASS" "Exact identity and every pre-restart durable record retained; pre=${Q_PRE_RESTART} post=${Q_POST_RESTART}"
 else
-    record "agent-restart-queue-preserved" "FAIL" "pre=${Q_PRE_RESTART} post=${Q_POST_RESTART}"
+    fail_closed "agent-restart-queue-preserved" "Durable record or identity changed/disappeared"
 fi
-docker start platform-sensor-infra >/dev/null
-wait_healthy platform-sensor-infra 40 || true
+docker start ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 40 || true
 wait_receiver || true
 sleep 10
-RESTART_HITS="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-sensor-down.txt")"
+RESTART_HITS="$(count_kafka_since '"agentId":"agent-e2e-01"' "${EVIDENCE_DIR}/offsets-agent-restart.txt")"
+[[ "$RESTART_HITS" -ge 1 ]] || fail_closed "agent-restart-then-kafka" "No replay record observed"
 record "agent-restart-then-kafka" "PASS" "kafka hits since sensor-down offset=${RESTART_HITS}"
 
 # Core unavailable: authority for new POSTs requires Core (fail closed).
@@ -564,16 +605,18 @@ python3 "${E2E_DIR}/build_envelope.py" \
     --sequence 900021 --metric-key "e2e.core.pause.${RUN_ID}" --value 3 \
     --batch-id "batch-e2e-core-pause-${RUN_ID}" \
     > "${EVIDENCE_DIR}/core-pause-envelope.json"
+docker pause "${PLATFORM_E2E_PREFIX}-kafka" >/dev/null
 CORE_PAUSE_ACK="$(post_envelope "${EVIDENCE_DIR}/core-pause-envelope.json")"
 if echo "${CORE_PAUSE_ACK}" | grep -q '"status":"ACCEPTED"'; then
     record "core-down-pre-ack" "PASS" "${CORE_PAUSE_ACK}"
 else
     record "core-down-pre-ack" "FAIL" "${CORE_PAUSE_ACK}"
 fi
-docker stop platform-sensor-infra >/dev/null
-docker pause platform-core >/dev/null
-docker start platform-sensor-infra >/dev/null
-wait_healthy platform-sensor-infra 40 || true
+docker stop ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+docker pause ${PLATFORM_E2E_PREFIX}-core >/dev/null
+docker unpause "${PLATFORM_E2E_PREFIX}-kafka" >/dev/null
+docker start ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 40 || true
 wait_receiver || true
 CORE_DOWN_NEW="$(post_envelope "${EVIDENCE_DIR}/core-pause-envelope.json")"
 if echo "${CORE_DOWN_NEW}" | grep -q 'ERR_AGENT_AUTHORITY_UNAVAILABLE'; then
@@ -581,9 +624,10 @@ if echo "${CORE_DOWN_NEW}" | grep -q 'ERR_AGENT_AUTHORITY_UNAVAILABLE'; then
 else
     record "core-down-new-post-fail-closed" "FAIL" "${CORE_DOWN_NEW}"
 fi
-SPOOL_DURING="$(docker exec platform-sensor-infra sh -c 'find /var/lib/platform/sensor/agent-spool -type f 2>/dev/null | wc -l' | tr -d ' ')"
+SPOOL_DURING="$(docker exec ${PLATFORM_E2E_PREFIX}-sensor-infra sh -c 'find /var/lib/platform/sensor/agent-spool -maxdepth 1 -name "record-*.json" -type f 2>/dev/null | wc -l' | tr -d ' ')"
+[[ "$SPOOL_DURING" -ge 1 ]] || fail_closed "core-down-sensor-spool-retained" "Empty spool"
 record "core-down-sensor-spool-retained" "PASS" "agent-spool files=${SPOOL_DURING}"
-docker unpause platform-core >/dev/null
+docker unpause ${PLATFORM_E2E_PREFIX}-core >/dev/null
 sleep 8
 CORE_HITS=0
 for i in $(seq 1 20); do
@@ -608,17 +652,19 @@ python3 "${E2E_DIR}/build_envelope.py" \
     --sequence 900031 --metric-key "e2e.sensor.restart.${RUN_ID}" --value 5 \
     --batch-id "batch-e2e-sensor-restart-${RUN_ID}" \
     > "${EVIDENCE_DIR}/sensor-restart-envelope.json"
+docker pause "${PLATFORM_E2E_PREFIX}-kafka" >/dev/null
 SR_ACK="$(post_envelope "${EVIDENCE_DIR}/sensor-restart-envelope.json")"
 if echo "${SR_ACK}" | grep -q '"status":"ACCEPTED"'; then
     record "sensor-restart-pre-ack" "PASS" "${SR_ACK}"
 else
     record "sensor-restart-pre-ack" "FAIL" "${SR_ACK}"
 fi
-docker pause platform-core >/dev/null
-docker restart platform-sensor-infra >/dev/null
-wait_healthy platform-sensor-infra 40 || true
+docker pause ${PLATFORM_E2E_PREFIX}-core >/dev/null
+docker restart ${PLATFORM_E2E_PREFIX}-sensor-infra >/dev/null
+wait_healthy ${PLATFORM_E2E_PREFIX}-sensor-infra 40 || true
 wait_receiver || true
-docker unpause platform-core >/dev/null
+docker unpause ${PLATFORM_E2E_PREFIX}-core >/dev/null
+docker unpause "${PLATFORM_E2E_PREFIX}-kafka" >/dev/null
 SR_HITS=0
 for i in $(seq 1 24); do
     SR_HITS="$(count_kafka_since "e2e.sensor.restart.${RUN_ID}" "${EVIDENCE_DIR}/offsets-sensor-restart.txt")"
@@ -634,16 +680,58 @@ else
 fi
 
 # Process lifecycle: invalid config and SIGTERM already used docker stop (SIGTERM)
-INVALID_EC="$(docker run --rm --entrypoint /usr/local/bin/platform-agent-linux platform-agent:e2e >/tmp/agent-invalid.log 2>&1; echo $?)"
+INVALID_EC="$(docker run --rm --name "${PLATFORM_E2E_PREFIX}-invalid-config" --label "com.docker.compose.project=${PLATFORM_E2E_PREFIX}" --network none --read-only --cpus 0.25 --memory 128m --pids-limit 32 --cap-drop ALL --security-opt no-new-privileges:true --entrypoint /usr/local/bin/platform-agent-linux "${PLATFORM_E2E_PREFIX}:agent-runtime" >"${EVIDENCE_DIR}/agent-invalid.log" 2>&1; echo $?)"
 if [[ "${INVALID_EC}" == "1" ]]; then
     record "invalid-config-exit-1" "PASS"
 else
     record "invalid-config-exit-1" "FAIL" "exit=${INVALID_EC}"
 fi
-record "sigterm-via-docker-stop" "PASS" "docker stop sends SIGTERM; agent-runtime restart recovered"
+record "sigterm-via-docker-stop" "PASS" "docker stop exited Agent with 0; exact durable record hashes survived restart; this is not host reboot"
 
-READY_UP="$(agent_ready_code)"
-record "health-ready-probe" "PASS" "ready_http=${READY_UP} (loopback via netns sidecar)"
+HEALTH_UP_OK=0
+for i in $(seq 1 10); do
+    READY_UP="$(agent_ready_code)"
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/ready > "${EVIDENCE_DIR}/ready-up-${i}.json" || true
+    docker exec "${PLATFORM_E2E_PREFIX}-agent-runtime" wget -q -O - http://127.0.0.1:8089/health > "${EVIDENCE_DIR}/health-up-${i}.json" || true
+    if python3 "${E2E_DIR}/readback.py" health-recovered "${EVIDENCE_DIR}/ready-up-${i}.json" "${EVIDENCE_DIR}/health-up-${i}.json" "${READY_UP:-0}" 0; then
+        HEALTH_UP_OK=1
+        break
+    fi
+    sleep 2
+done
+[[ "$HEALTH_UP_OK" == 1 ]] || fail_closed "health-ready-probe" "HTTP=$READY_UP; inspect retained readiness/support bodies"
+record "health-ready-probe" "PASS" "HTTP200 UP/ready=true with recovered Sensor transport (loopback probe inside Agent container)"
+sample_agent_resources recovered
+
+# Explicit A/B private identities, each authenticated at Sensor before the same
+# forged record is challenged at Core. Sensor custody is distinct from Core accept.
+kafka_end_offsets > "${EVIDENCE_DIR}/offsets-forged-host.txt"
+python3 "${E2E_DIR}/identity_probe.py" "$PLATFORM_E2E_PREFIX" \
+    "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" "$RUN_ID" "$EVIDENCE_DIR" \
+    || fail_closed "agent-canonical-entity-binding" "See retained Sensor ACK and Core typed rejection evidence"
+consume_since_offsets "${EVIDENCE_DIR}/offsets-forged-host.txt" 8 > "${EVIDENCE_DIR}/forged-host-kafka.txt"
+docker exec "${PLATFORM_E2E_PREFIX}-clickhouse" sh -c \
+    'exec clickhouse-client --user "$CLICKHOUSE_USER" --password "$CLICKHOUSE_PASSWORD" --query "$1"' sh \
+    "SELECT tenant_id, entity_id, metric_id FROM platform.metric_numeric WHERE startsWith(metric_id,'e2e.forged.') FORMAT JSONEachRow" \
+    > "${EVIDENCE_DIR}/forged-host-clickhouse.jsonl"
+if python3 - "$EVIDENCE_DIR" <<'PYPROBE'
+import json, sys
+from pathlib import Path
+p = Path(sys.argv[1])
+evidence = json.loads((p / 'identity-fixtures.json').read_text())
+metrics = {r['metric'] for r in evidence['results']}
+for file, key in (('forged-host-kafka.txt', 'metricId'), ('forged-host-clickhouse.jsonl', 'metric_id')):
+    for line in (p / file).read_text().splitlines():
+        try: row = json.loads(line.split('|', 1)[-1])
+        except ValueError: continue
+        assert row.get(key) not in metrics, row
+assert len(evidence['results']) == 2
+PYPROBE
+then
+    record "agent-canonical-entity-binding" "PASS" "A claims HostB and B claims HostA: durable Core terminal ERR_AGENT_IDENTITY_CONFLICT, no Kafka/ClickHouse metric for either entity; Sensor custody ACK preserved"
+else
+    fail_closed "agent-canonical-entity-binding" "Forged metric reached downstream storage"
+fi
 
 dump_evidence
 

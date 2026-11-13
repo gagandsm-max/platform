@@ -54,6 +54,27 @@
           "agentBatchId": {"$ref": "common-definitions.schema.json#/$defs/agentDeliveryBatchId"},
           "correlationId": {"$ref": "common-definitions.schema.json#/$defs/correlationId"},
           "acceptedAt": {"$ref": "common-definitions.schema.json#/$defs/utcTimestamp"},
+          "acceptanceEvidence": {
+            "type": "object",
+            "additionalProperties": false,
+            "description": "SensorAcceptanceEvidenceV1. The Core enforces acceptedAtUtc=acceptedAt and durableSpoolSequence=sensorIngressSequence. Absent evidence is historical pre-evidence data and cannot qualify revoked authority.",
+            "required": ["evidenceVersion", "acceptedAtUtc", "clockQuality", "clockSource", "sensorServiceInstanceId", "durableSpoolSequence"],
+            "properties": {
+              "evidenceVersion": {"const": 1},
+              "acceptedAtUtc": {"$ref": "common-definitions.schema.json#/$defs/utcTimestamp"},
+              "clockQuality": {"enum": ["QUALIFIED", "UNQUALIFIED"]},
+              "clockMaxErrorMs": {"type": "integer", "minimum": 0, "maximum": 5000},
+              "clockSyncAgeMs": {"type": "integer", "minimum": 0, "maximum": 300000},
+              "clockSource": {"type": "string", "minLength": 1},
+              "sensorServiceInstanceId": {"type": "string", "minLength": 1},
+              "durableSpoolSequence": {"$ref": "common-definitions.schema.json#/$defs/sequenceInteger"}
+            },
+            "allOf": [{
+              "if": {"properties": {"clockQuality": {"const": "QUALIFIED"}}, "required": ["clockQuality"]},
+              "then": {"required": ["clockMaxErrorMs", "clockSyncAgeMs"]},
+              "else": {"not": {"anyOf": [{"required": ["clockMaxErrorMs"]}, {"required": ["clockSyncAgeMs"]}]}}
+            }]
+          },
           "records": {
             "type": "array",
             "minItems": 1,

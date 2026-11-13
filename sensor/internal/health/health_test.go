@@ -567,6 +567,28 @@ func TestAgentDeliveryBlockedDegradesWhileAgentSpoolRemainsUp(t *testing.T) {
 	}
 }
 
+func TestIdentityConflictQuarantineIsPipelineDegradationOnly(t *testing.T) {
+	hs := newTestHealth(t, trustedPack())
+	hs.agentSpool = &fakeStorageStatusProvider{pct: 10}
+	hs.SetAgentDelivery(&fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{
+		State: agentdrain.DeliveryStateDegraded, ReasonCode: "ERR_AGENT_IDENTITY_CONFLICT", Quarantined: true,
+	}})
+	rr, body := request(t, hs, "/health")
+	if rr.Code != http.StatusOK || body["component_state"] != "DEGRADED" ||
+		body["agent_identity_conflict_quarantined"] != true ||
+		body["agent_delivery_reason_code"] != "ERR_AGENT_IDENTITY_CONFLICT" {
+		t.Fatalf("identity quarantine support evidence missing: %d %v", rr.Code, body)
+	}
+	deps, _ := body["dependency_status"].(map[string]any)
+	if deps["agent_spool"] != "UP" || deps["agent_delivery"] != "DEGRADED" {
+		t.Fatalf("quarantine must not assert monitored target or spool down: %v", deps)
+	}
+	rr, body = request(t, hs, "/readyz")
+	if rr.Code != http.StatusOK || body["ready"] != true || body["reason_code"] != reasonAgentIdentityQuarantined {
+		t.Fatalf("quarantine readiness must remain truthful: %d %v", rr.Code, body)
+	}
+}
+
 func TestAgentDeliveryClearsOnlyWhenProviderReportsUp(t *testing.T) {
 	hs := newTestHealth(t, trustedPack())
 	provider := &fakeAgentDeliveryStatusProvider{status: agentdrain.DeliveryStatus{

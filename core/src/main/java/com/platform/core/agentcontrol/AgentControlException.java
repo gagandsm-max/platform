@@ -21,6 +21,8 @@ public class AgentControlException extends DomainException {
     public static final String ERR_AGENT_SENSOR_INELIGIBLE = "ERR_AGENT_SENSOR_INELIGIBLE";
     public static final String ERR_AGENT_TENANT_MISMATCH = "ERR_AGENT_TENANT_MISMATCH";
     public static final String ERR_AGENT_SITE_INCOMPATIBLE = "ERR_AGENT_SITE_INCOMPATIBLE";
+    /** Unique entity/Agent/certificate binding collision; governed reconciliation required. */
+    public static final String ERR_AGENT_BINDING_IDENTITY_CONFLICT = "ERR_AGENT_BINDING_IDENTITY_CONFLICT";
     public static final String ERR_SENSOR_NOT_FOUND = "ERR_SENSOR_NOT_FOUND";
     /** Alias of {@link com.platform.core.control.ControlGenerationLimits#ERR_CONTROL_GENERATION_EXHAUSTED}. */
     public static final String ERR_CONTROL_GENERATION_EXHAUSTED =
