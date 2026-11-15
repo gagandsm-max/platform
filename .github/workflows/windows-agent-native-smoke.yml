@@ -1,0 +1,69 @@
+# Isolated free GitHub-hosted Windows evidence lane for the AmrudAi Agent.
+# Candidate branch only; no self-hosted runner, secrets, artifacts or release.
+name: Windows Agent native smoke (candidate)
+
+on:
+  push:
+    branches:
+      - ci/windows-agent-native-smoke-20261115
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-agent-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-native-smoke:
+    name: Windows 2025 native Go smoke
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go 1.27.1
+        uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Verify module integrity
+        working-directory: agent
+        shell: pwsh
+        run: go mod verify
+
+      - name: Run Windows cmd and collector unit tests natively
+        working-directory: agent
+        shell: pwsh
+        run: |
+          go test -count=1 -v ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go test -count=1 -v ./common/collector
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Vet Windows code
+        working-directory: agent
+        shell: pwsh
+        run: |
+          go vet ./windows/cmd ./common/collector
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Build Windows Agent executable and hash it
+        working-directory: agent
+        shell: pwsh
+        run: |
+          $exe = Join-Path $env:RUNNER_TEMP 'AmrudAiAgent.exe'
+          go build -o $exe ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Get-FileHash -Path $exe -Algorithm SHA256 | Format-List
+
+      - name: State evidence limitation
+        shell: pwsh
+        run: |
+          Write-Output 'Baseline Windows runner smoke only.'
+          Write-Output 'Native SCM service lifecycle, MSI, signing, reboot, EDR and collector privileged paths remain UNVERIFIED.'
+          Write-Output 'Local BUILD-013/014 diffs are not included until pushed to a GitHub review branch.'
