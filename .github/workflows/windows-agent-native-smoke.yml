@@ -46,6 +46,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Vet Windows code
+        if: ${{ !cancelled() }}
         working-directory: agent
         shell: pwsh
         run: |
@@ -53,6 +54,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Build Windows Agent executable and hash it
+        if: ${{ !cancelled() }}
         working-directory: agent
         shell: pwsh
         run: |
