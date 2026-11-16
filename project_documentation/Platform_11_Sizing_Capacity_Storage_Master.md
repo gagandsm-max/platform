@@ -264,7 +264,7 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 `conservative_used / 0.80` is the **exact emergency-equality boundary**, not safe capacity below 80%. Strictly below 80% requires provisioned capacity greater than that boundary, rounded upward as required by the physical allocation unit. This does not replace the more conservative initial 70% planning recommendation.
 
-For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (10³); production results disclose bytes/unit conventions and allocation rounding.
+For baseline demand **1000 GB**, the minimum uplift gives **1200 GB**. At 70%, continuous required capacity is **1714.285714… GB** (approximately **1714.29 GB**, or **1715 GB** when provisioning whole GB). At 80%, **1500 GB** is exactly emergency equality. An **800 GB** allocation has an unrounded 70%-planning shortfall of **914.285714… GB**; it is not made sufficient by calling 20% extra capacity a free-space margin. All values in this example use the same decimal GB unit (**10⁹ bytes**); production results disclose bytes/unit conventions and allocation rounding.
 
 ### 9.3 Assurance, simulation and protected retention
 
@@ -276,7 +276,19 @@ The normal warning/pre-emergency/emergency model remains 70% / 75% / at-or-above
 
 ### 9.3.1 Integer-byte authority and unit display
 
-Backend/API storage quantities are authoritative as **non-negative integer bytes** (64-bit range with overflow detection; reject or fail closed on arithmetic overflow rather than wrapping). JSON encodings that cannot safely represent the integer in IEEE-754 Number form MUST use a decimal-string integer field (or an equivalent exact integer representation already approved for Counter64-class exactness) and MUST NOT coerce through JavaScript/`double` Number. UI and reports may display decimal **GB/TB** (10³/10⁶) and/or binary **GiB/TiB** (2¹⁰/2²⁰) but MUST label the unit system explicitly and convert only from the integer-byte authority. Mixed unlabeled GB/GiB arithmetic is prohibited.
+Backend/API storage quantities are authoritative as **non-negative integer bytes** (64-bit range with overflow detection; reject or fail closed on arithmetic overflow rather than wrapping). JSON encodings that cannot safely represent the integer in IEEE-754 Number form MUST use a decimal-string integer field (or an equivalent exact integer representation already approved for Counter64-class exactness) and MUST NOT coerce through JavaScript/`double` Number. UI and reports may display decimal **GB/TB** (**10⁹ / 10¹²** bytes) and/or binary **GiB/TiB** (**2³⁰ / 2⁴⁰** bytes) but MUST label the unit system explicitly and convert only from the integer-byte authority. Mixed unlabeled GB/GiB arithmetic is prohibited.
+
+**Exact conversion regression examples (integer bytes → labeled display):**
+
+| Integer bytes | Decimal display | Binary display | Notes |
+|---|---|---|---|
+| `1_000_000_000` | **1 GB** exactly | ≈ **0.9313225746154785 GiB** | 1 GB = 10⁹ bytes; never 10³ |
+| `1_073_741_824` | **1.073741824 GB** | **1 GiB** exactly | 1 GiB = 2³⁰ bytes; never 2¹⁰ |
+| `1_000_000_000_000` | **1 TB** exactly | ≈ **0.9094947017729282 TiB** | 1 TB = 10¹² bytes; never 10⁶ |
+| `1_099_511_627_776` | **1.099511627776 TB** | **1 TiB** exactly | 1 TiB = 2⁴⁰ bytes; never 2²⁰ |
+| `1_500_000_000_000` | **1.5 TB** | ≈ **1.3642420526593924 TiB** | same integer authority; unit system labelled |
+
+Provisioning/rounding examples MUST round only after converting from integer bytes under the declared unit system; do not treat kilobyte/mebibyte factors as gigabyte/tebibyte factors.
 
 ### 9.4 Existing-owner notification and acceptance gates
 
