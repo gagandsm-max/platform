@@ -1,0 +1,23 @@
+# Disposable test runner only; no product runtime or privileged CI authority.
+services:
+  preflight-tests:
+    build:
+      context: ../..
+      dockerfile: tests/engineering_orchestrator/preflight.Dockerfile
+    network_mode: none
+    stdin_open: false
+    # Close even an explicitly attached pipe before PR-controlled Python starts.
+    # $$ escapes Compose interpolation; the shell only forwards positional argv.
+    entrypoint: [/bin/sh, -c, 'exec "$$@" </dev/null', --]
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    mem_limit: 1g
+    cpus: 2
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=268435456,mode=1777
+    volumes:
+      - ../..:/workspace:ro
+    command: [python3, tests/engineering_orchestrator/run_tests.py]
