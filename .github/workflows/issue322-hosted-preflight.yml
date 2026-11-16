@@ -83,6 +83,23 @@ jobs:
           set -euo pipefail
           cp .env.example .env
           timeout --signal=TERM --kill-after=30s 20m ./tests/run-kafka-storage-contract-test.sh
+      - name: Diagnose task-owned Kafka fixture rejection
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in /tmp/issue223-storage.*; do
+            if [[ -d "$dir" ]]; then
+              echo "Evidence directory: $dir"
+              find "$dir" -maxdepth 1 -type f -printf '%f %s bytes\\n' | sort
+              for file in "$dir"/legacy-reject.log "$dir"/missing-reject.log "$dir"/auth-reject.log; do
+                if [[ -f "$file" ]]; then
+                  echo "Task fixture diagnostic: ${file##*/}"
+                  tail -n 35 "$file"
+                fi
+              done
+            fi
+          done
       - name: Record post-run disk and container inventory
         if: always()
         shell: bash
