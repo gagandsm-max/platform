@@ -1,0 +1,54 @@
+# CI-only, source-read-only experiment for Issue #322. No runtime stack provisioned.
+name: Issue 322 free hosted runner preflight
+
+on:
+  push:
+    branches:
+      - ci/issue322-hosted-preflight-20261116
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-capacity:
+    name: Ubuntu 24.04 capacity and Docker configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Record exact code and runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "commit=$GITHUB_SHA"
+          echo "runner=$RUNNER_OS/$RUNNER_ARCH"
+          uname -a
+          nproc
+          free -m
+          df -h
+          df -i
+          du -sh .
+      - name: Docker availability and initial consumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+          docker info --format 'Docker root: {{.DockerRootDir}}; Storage driver: {{.Driver}}'
+          docker system df
+      - name: Render representative Compose profiles without launching containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          for profile in dev test ha scale security dr; do
+            docker compose --profile "$profile" -f compose.yaml config -q
+            docker compose --profile "$profile" -f compose.yaml -f compose.kafka-guarded.yaml config -q
+          done
+          echo "Referenced images:"
+          docker compose --profile dev -f compose.yaml config --images | sort -u
+          echo "After source-only preflight:"
+          df -h
+          docker system df
