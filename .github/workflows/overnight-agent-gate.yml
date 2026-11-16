@@ -1,19 +1,16 @@
-# P0 overnight Agent evidence gate, 15/16 Nov 2026 IST.
+# Agent cloud evidence gate, 16-21 Nov 2026 IST (BUILD-013/014 verification).
 # Intentionally read-only. This workflow can test committed code, never write it.
 # The scheduled event is active ONLY after a governed merge to the default branch.
-name: Overnight Agent evidence gate (candidate)
+name: Agent cloud evidence gate (candidate)
 
 on:
   push:
     branches:
       - ci/overnight-agent-gate-20261115
   schedule:
-    - cron: '4,34 20-23 15 11 *'
+    - cron: '4,34 * * * *'
       timezone: Asia/Kolkata
-    - cron: '4,34 0-7 16 11 *'
-      timezone: Asia/Kolkata
-    - cron: '4 8 16 11 *'
-      timezone: Asia/Kolkata
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -30,7 +27,7 @@ jobs:
     timeout-minutes: 5
     outputs:
       execute: ${{ steps.guard.outputs.execute }}
-      main_sha: ${{ steps.guard.outputs.main_sha }}
+      test_sha: ${{ steps.guard.outputs.test_sha }}
     steps:
       - name: Evaluate read-only gate
         id: guard
@@ -40,26 +37,31 @@ jobs:
         run: |
           set -euo pipefail
           repo="gagandsm-max/platform"
-          target="$(gh api "repos/$repo/branches/main" --jq '.commit.sha')"
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            target="$(gh api "repos/$repo/branches/main" --jq '.commit.sha')"
+          else
+            target="$GITHUB_SHA"
+          fi
           test -n "$target"
-          echo "main_sha=$target" >> "$GITHUB_OUTPUT"
-          echo "Pinned main: $target" >> "$GITHUB_STEP_SUMMARY"
+          echo "test_sha=$target" >> "$GITHUB_OUTPUT"
+          echo "Pinned test commit: $target ($GITHUB_EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "execute=true" >> "$GITHUB_OUTPUT"
+            echo "ON_DEMAND: execute bounded hosted Linux + Windows matrix at exact event SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           echo "execute=false" >> "$GITHUB_OUTPUT"
-
-          if [ "$GITHUB_EVENT_NAME" != "schedule" ]; then
-            echo "PILOT_ONLY: push-event validates the monitor; does not execute test matrix." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
           now="$(date -u +%s)"
-          window_start="$(date -u -d '2026-11-15T15:04:00Z' +%s)"
-          window_end="$(date -u -d '2026-11-16T03:04:00Z' +%s)"
+          window_start="$(date -u -d '2026-11-16T00:00:00Z' +%s)"
+          window_end="$(date -u -d '2026-11-21T18:30:00Z' +%s)"
           if (( now < window_start || now >= window_end )); then
-            echo "EXPIRED: no test matrix; 12-hour window enforced." >> "$GITHUB_STEP_SUMMARY"
+            echo "OUTSIDE_WINDOW: no scheduled tests beyond 21 Nov 2026." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
 
-          runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&per_page=30")"
+          runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&event=schedule&per_page=100")"
           previous="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target"             '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed")] | length' <<< "$runs")"
           if (( previous > 0 )); then
             echo "UNCHANGED: main SHA already evaluated; no repeated test cost." >> "$GITHUB_STEP_SUMMARY"
@@ -67,7 +69,7 @@ jobs:
           fi
 
           echo "execute=true" >> "$GITHUB_OUTPUT"
-          echo "NEW_SHA: schedule one bounded Linux + Windows native test matrix." >> "$GITHUB_STEP_SUMMARY"
+          echo "NEW_SHA: execute one bounded Linux + Windows native test matrix." >> "$GITHUB_STEP_SUMMARY"
 
   linux-native:
     name: Linux native tests, vet and build
@@ -78,7 +80,7 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ needs.preflight.outputs.main_sha }}
+          ref: ${{ needs.preflight.outputs.test_sha }}
           persist-credentials: false
       - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
