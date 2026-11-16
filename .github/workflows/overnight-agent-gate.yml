@@ -8,7 +8,7 @@ on:
     branches:
       - ci/overnight-agent-gate-20261115
   schedule:
-    - cron: '4,34 * * * *'
+    - cron: '4,34 * 16-21 11 *'
       timezone: Asia/Kolkata
   workflow_dispatch:
 
@@ -62,10 +62,16 @@ jobs:
           fi
 
           runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&event=schedule&head_sha=$target&per_page=100")"
-          previous="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target"             '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed")] | length' <<< "$runs")"
-          if (( previous > 0 )); then
+          previous_success="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target" '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed" and .conclusion == "success")] | length' <<< "$runs")"
+          previous_failure="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target" '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed" and .conclusion == "failure")] | length' <<< "$runs")"
+          if (( previous_success > 0 )); then
             echo "UNCHANGED: main SHA already evaluated; no repeated test cost." >> "$GITHUB_STEP_SUMMARY"
             exit 0
+          fi
+
+          if (( previous_failure >= 3 )); then
+            echo "HOLD: three failed scheduled gates for this exact SHA; new reviewed commit required." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
           fi
 
           echo "execute=true" >> "$GITHUB_OUTPUT"
