@@ -1,0 +1,163 @@
+# Agent cloud evidence gate, 16-21 Nov 2026 IST (BUILD-013/014 verification).
+# Intentionally read-only. This workflow can test committed code, never write it.
+# The scheduled event is active ONLY after a governed merge to the default branch.
+name: Agent cloud evidence gate (candidate)
+
+on:
+  push:
+    branches:
+      - ci/overnight-agent-gate-20261115
+  schedule:
+    - cron: '4,34 * 16-21 11 *'
+      timezone: Asia/Kolkata
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: overnight-agent-gate
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Time window, exact source and duplicate guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      execute: ${{ steps.guard.outputs.execute }}
+      test_sha: ${{ steps.guard.outputs.test_sha }}
+    steps:
+      - name: Evaluate read-only gate
+        id: guard
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          repo="gagandsm-max/platform"
+          if [ "$GITHUB_EVENT_NAME" = "schedule" ]; then
+            target="$(gh api "repos/$repo/branches/main" --jq '.commit.sha')"
+          else
+            target="$GITHUB_SHA"
+          fi
+          test -n "$target"
+          echo "test_sha=$target" >> "$GITHUB_OUTPUT"
+          echo "Pinned test commit: $target ($GITHUB_EVENT_NAME)" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$GITHUB_EVENT_NAME" = "push" ] || [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            echo "execute=true" >> "$GITHUB_OUTPUT"
+            echo "ON_DEMAND: execute bounded hosted Linux + Windows matrix at exact event SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "execute=false" >> "$GITHUB_OUTPUT"
+          now="$(date -u +%s)"
+          window_start="$(date -u -d '2026-11-16T00:00:00Z' +%s)"
+          window_end="$(date -u -d '2026-11-21T18:30:00Z' +%s)"
+          if (( now < window_start || now >= window_end )); then
+            echo "OUTSIDE_WINDOW: no scheduled tests beyond 21 Nov 2026." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&event=schedule&head_sha=$target&per_page=100")"
+          previous_success="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target" '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed" and .conclusion == "success")] | length' <<< "$runs")"
+          previous_failure="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target" '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed" and .conclusion == "failure")] | length' <<< "$runs")"
+          if (( previous_success > 0 )); then
+            echo "UNCHANGED: main SHA already evaluated; no repeated test cost." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          if (( previous_failure >= 3 )); then
+            echo "HOLD: three failed scheduled gates for this exact SHA; new reviewed commit required." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+
+          echo "execute=true" >> "$GITHUB_OUTPUT"
+          echo "NEW_SHA: execute one bounded Linux + Windows native test matrix." >> "$GITHUB_STEP_SUMMARY"
+
+  linux-native:
+    name: Linux native tests, vet and build
+    needs: preflight
+    if: needs.preflight.outputs.execute == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.preflight.outputs.test_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Go module integrity
+        working-directory: agent
+        run: go mod verify
+      - name: Linux Agent and common unit tests
+        working-directory: agent
+        run: go test -count=1 ./linux/... ./common/...
+      - name: Linux vet
+        working-directory: agent
+        if: ${{ !cancelled() }}
+        run: go vet ./linux/... ./common/...
+      - name: Linux Agent build
+        working-directory: agent
+        if: ${{ !cancelled() }}
+        run: go build -o "$RUNNER_TEMP/amrudai-agent-linux" ./linux/cmd
+
+  windows-native:
+    name: Windows native tests, vet and build
+    needs: preflight
+    if: needs.preflight.outputs.execute == 'true'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.preflight.outputs.test_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Go module integrity
+        working-directory: agent
+        run: go mod verify
+      - name: Windows cmd and collector unit tests
+        working-directory: agent
+        shell: pwsh
+        run: |
+          go test -count=1 ./windows/cmd ./common/collector
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - name: Windows vet
+        working-directory: agent
+        if: ${{ !cancelled() }}
+        run: go vet ./windows/cmd ./common/collector
+      - name: Windows executable build
+        working-directory: agent
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          go build -o "$env:RUNNER_TEMP/AmrudAiAgent.exe" ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+  deeper-windows-gate:
+    name: Next stage only after BOTH smoke suites pass
+    needs: [preflight, linux-native, windows-native]
+    if: needs.linux-native.result == 'success' && needs.windows-native.result == 'success'
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ needs.preflight.outputs.test_sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Windows race detector (deeper evidence, not certification)
+        working-directory: agent
+        run: go test -race -count=1 ./windows/cmd ./common/collector
