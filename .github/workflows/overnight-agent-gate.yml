@@ -61,7 +61,7 @@ jobs:
             exit 0
           fi
 
-          runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&event=schedule&per_page=100")"
+          runs="$(gh api "repos/$repo/actions/workflows/overnight-agent-gate.yml/runs?branch=main&event=schedule&head_sha=$target&per_page=100")"
           previous="$(jq -r --argjson current "$GITHUB_RUN_ID" --arg sha "$target"             '[.workflow_runs[] | select(.id != $current and .head_sha == $sha and .status == "completed")] | length' <<< "$runs")"
           if (( previous > 0 )); then
             echo "UNCHANGED: main SHA already evaluated; no repeated test cost." >> "$GITHUB_STEP_SUMMARY"
