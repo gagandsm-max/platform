@@ -52,3 +52,41 @@ jobs:
           echo "After source-only preflight:"
           df -h
           docker system df
+
+  hosted-kafka-contract:
+    name: Ubuntu 24.04 isolated Kafka storage contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Measure disk before test and pull declared fixture images
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h
+          docker system df
+          docker pull node:20-alpine
+          docker pull apache/kafka:3.8.0
+          echo "Post-image-pull Docker disk:"
+          docker system df
+          free_kib="$(df -Pk /var/lib/docker | awk 'NR==2 {print $4}')"
+          if (( free_kib < 8 * 1024 * 1024 )); then
+            echo "STOP=HOSTED_DISK_BELOW_8_GIB_AFTER_IMAGE_PULL"
+            exit 75
+          fi
+      - name: Verify disposable guarded Kafka storage lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          timeout --signal=TERM --kill-after=30s 20m ./tests/run-kafka-storage-contract-test.sh
+      - name: Record post-run disk and container inventory
+        if: always()
+        shell: bash
+        run: |
+          df -h
+          docker system df
+          docker ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
