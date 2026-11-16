@@ -364,7 +364,7 @@ func TestDPKGCallerCancellationAndDeadline(t *testing.T) {
 
 	deadline, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
-	time.Sleep(time.Millisecond)
+	<-deadline.Done()
 	_, err = collectorWithDPKGFile(t, "dpkg_status_complete").Capture(deadline, fullDPKGRequest("snap-dpkg-deadline"))
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
