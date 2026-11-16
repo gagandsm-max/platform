@@ -140,7 +140,8 @@ func TestSoftwareInventoryGoModUnchangedShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	body := string(mod)
-	if !strings.HasPrefix(body, "module platform/agent\n") {
+	// Accept LF or CRLF so Windows checkouts of go.mod do not fail the header check.
+	if !strings.HasPrefix(body, "module platform/agent\n") && !strings.HasPrefix(body, "module platform/agent\r\n") {
 		t.Fatalf("unexpected module: %q", body)
 	}
 	// Slice 7 admits OSS-124 only via governed local replace. Inventory code
