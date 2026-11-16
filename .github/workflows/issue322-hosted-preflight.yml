@@ -120,3 +120,27 @@ jobs:
           df -h
           docker system df
           docker ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
+
+  hosted-ui-build:
+    name: Ubuntu 24.04 actual UI tests and production image build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Run unchanged master CI UI commands on isolated hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/ui:/src:ro" \
+            node:20-alpine \
+            sh -lc 'cp -a /src /app && cd /app && npm ci && npm run test:unit && npm run build'
+          docker build --no-cache -t platform-ui:ci ui/
+          docker image inspect platform-ui:ci --format 'Built image ID: {{.Id}}'
+      - name: Observe UI build runner disk consumption
+        if: always()
+        run: |
+          df -h
+          docker system df
