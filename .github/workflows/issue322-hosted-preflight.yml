@@ -68,12 +68,8 @@ jobs:
           set -euo pipefail
           plugin_dir="$RUNNER_TEMP/issue322-docker-cli/cli-plugins"
           mkdir -p "$plugin_dir"
-          curl --fail --location --retry 2 --silent --show-error \\
-            https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 \\
-            --output "$plugin_dir/docker-compose"
-          printf '%s  %s\\n' \\
-            c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b \\
-            "$plugin_dir/docker-compose" | sha256sum --check --status
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
           chmod 0755 "$plugin_dir/docker-compose"
           export DOCKER_CONFIG="$RUNNER_TEMP/issue322-docker-cli"
           test "$(docker compose version --short)" = '5.5.0'
