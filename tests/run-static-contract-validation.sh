@@ -103,6 +103,12 @@ python3 -m unittest discover -s "${ROOT_DIR}/project_documentation/tools" -p 'te
 echo "--> Mother Reference structural validator (repository)"
 python3 "${ROOT_DIR}/project_documentation/tools/validate_mother_references.py"
 
+echo "--> Reference-brand hygiene validator fixtures"
+python3 -m unittest discover -s "${ROOT_DIR}/tests" -p 'test_validate_reference_brand_leakage.py' -v
+
+echo "--> First-party shipped-source reference-brand hygiene"
+python3 "${ROOT_DIR}/tests/validate_reference_brand_leakage.py" --repo "${ROOT_DIR}"
+
 echo "========================================================================"
 echo "STATIC CONTRACT VALIDATION PASSED"
 echo "========================================================================"
