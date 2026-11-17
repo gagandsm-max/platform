@@ -1,0 +1,102 @@
+# Ephemeral exact-source verification of Issue #320 / PR #323.
+# The only changed file over PR head is this workflow. No service install or release claim.
+name: ISSUE320 native Windows DPKG deadline (one-shot)
+
+on:
+  push:
+    branches:
+      - verify/issue320-windows-native-1fb6799-20261117
+    paths:
+      - '.github/workflows/issue320-windows-native-once.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue320-windows-native-1fb6799-20261117
+  cancel-in-progress: false
+
+jobs:
+  verify-windows:
+    name: Native Windows AMD64 collector regression
+    if: ${{ github.run_attempt == '1' }}
+    runs-on: windows-2025
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout pinned source and verification workflow
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Prove exact PR head and single-workflow delta
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'gagandsm-max/platform') { throw 'STOP=WRONG_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/verify/issue320-windows-native-1fb6799-20261117') { throw 'STOP=WRONG_BRANCH' }
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'STOP=HEAD_MISMATCH' }
+          $parent = (& git rev-parse 'HEAD^').Trim()
+          if ($LASTEXITCODE -ne 0 -or $parent -cne '1fb67996e4935c33ccded4f939d9848260f64b9a') { throw 'STOP=PR323_HEAD_DRIFT' }
+          $changed = @(& git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/issue320-windows-native-once.yml') { throw 'STOP=UNREVIEWED_SOURCE_DELTA' }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=DIRTY_SOURCE' }
+          Write-Output "ISSUE320_SOURCE_PR_HEAD=$parent"
+          Write-Output "ISSUE320_VALIDATION_COMMIT=$head"
+          Write-Output "WINDOWS_NATIVE_RUNNER=$env:RUNNER_OS"
+
+      - name: Set up exact Go 1.27.1 (no action cache)
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Verify native OS, architecture and module integrity
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = & go version
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'go1\.27\.1 windows/amd64') { throw 'STOP=NOT_NATIVE_GO1271_WINDOWS_AMD64' }
+          & go mod download
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=MODULE_DOWNLOAD_FAILED' }
+          & go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=MODULE_VERIFY_FAILED' }
+          Write-Output $version
+
+      - name: Repeat exact deadline/cancellation regression 100 times
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=100 -timeout=4m -run '^TestDPKGCallerCancellationAndDeadline$' -v ./common/collector
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=DEADLINE_REGRESSION' }
+
+      - name: DPKG family and full native Windows collector suite
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=2 -timeout=4m -run '^TestDPKG' ./common/collector
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=DPKG_FAMILY_FAILED' }
+          & go test -count=1 -timeout=5m ./common/collector
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=COLLECTOR_SUITE_FAILED' }
+
+      - name: Windows command package, vet, build, immutable source
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=1 -timeout=4m ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_CMD_TESTS_FAILED' }
+          & go vet ./common/collector ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_VET_FAILED' }
+          & go build ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_CMD_BUILD_FAILED' }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=TEST_MUTATED_SOURCE' }
+          Write-Output 'ISSUE320_WINDOWS_NATIVE_DEADLINE_GATE_PASS'
+          Write-Output 'BUILD014_NATIVE_COLLECTOR_IMPLEMENTATION=NOT_TESTED'
+          Write-Output 'BUILD013_SCM_INSTALL_RUNTIME=NOT_TESTED'
