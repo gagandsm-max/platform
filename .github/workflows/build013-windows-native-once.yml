@@ -1,0 +1,102 @@
+# Ephemeral, source-locked BUILD013 test gate.
+# Push *once* to verify/build013-windows-native-975365b9-20261117.
+# This is a native Windows unit gate, NOT real SCM service certification.
+name: BUILD013 Windows native SCM source gate (one-shot)
+
+on:
+  push:
+    branches:
+      - verify/build013-windows-native-975365b9-20261117
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build013-windows-native-975365b9
+  cancel-in-progress: false
+
+jobs:
+  windows-native-source:
+    name: Windows AMD64 SCM unit verification
+    # Server-side guard: no runner lease for re-runs or later branch updates.
+    if: ${{ github.event.created == true && github.run_attempt == '1' }}
+    runs-on: windows-2025
+    timeout-minutes: 12
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Checkout exact validation commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 2
+
+      - name: Fail closed on source, branch or scope drift
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:GITHUB_REPOSITORY -cne 'gagandsm-max/platform') { throw 'STOP=UNEXPECTED_REPOSITORY' }
+          if ($env:GITHUB_REF -cne 'refs/heads/verify/build013-windows-native-975365b9-20261117') { throw 'STOP=UNEXPECTED_BRANCH' }
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'STOP=CHECKOUT_SHA_MISMATCH' }
+          $parent = (& git rev-parse 'HEAD^').Trim()
+          if ($LASTEXITCODE -ne 0 -or $parent -cne '975365b9725a09cc95ed6145c0be20bfb86804fd') { throw 'STOP=SOURCE_PARENT_CHANGED' }
+          $changed = @(& git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/build013-windows-native-once.yml') { throw 'STOP=UNREVIEWED_WORKFLOW_COMMIT' }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=DIRTY_CHECKOUT' }
+          Write-Output "BUILD013_PINNED_SOURCE=$parent"
+          Write-Output "BUILD013_VALIDATION_COMMIT=$head"
+          Write-Output "WINDOWS_RUNNER=$env:RUNNER_OS"
+
+      - name: Install pinned Go 1.27.1 without cache
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Verify native Windows toolchain and module provenance
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (& go version)
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'go1\.27\.1 windows/amd64') { throw 'STOP=WRONG_GO_VERSION_OR_OS' }
+          if ((& go env GOOS).Trim() -cne 'windows') { throw 'STOP=NOT_NATIVE_WINDOWS' }
+          if ((& go env GOARCH).Trim() -cne 'amd64') { throw 'STOP=NOT_AMD64' }
+          & go mod download 'golang.org/x/sys@v0.43.0'
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=GO_DEPENDENCY_DOWNLOAD' }
+          & go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=GO_MOD_VERIFY' }
+          Write-Output $version
+
+      - name: Windows-only SCM handler failures and success (20 repetitions)
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=20 -timeout=4m -run '^TestWindowsSCMHandlerDoesNotForwardTerminalStopped$' -v ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_ONLY_SCM_HANDLER_TEST_FAILED' }
+
+      - name: Full native Windows command-package regression
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=1 -timeout=5m -v ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_CMD_REGRESSION_FAILED' }
+
+      - name: Windows static analysis and source immutability
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location agent
+          try {
+            & go vet ./windows/cmd
+            if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_VET_FAILED' }
+          } finally {
+            Pop-Location
+          }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=SOURCE_CHANGED_DURING_TESTS' }
+          Write-Output 'BUILD013_WINDOWS_NATIVE_CMD_UNIT_GATE_PASS'
+          Write-Output 'WINDOWS_REAL_SCM_SERVICE_GATE=NOT_TESTED'
+          Write-Output 'WINDOWS_MSI_CERTIFICATION=NOT_TESTED'
