@@ -1,0 +1,116 @@
+# Ephemeral, source-locked Windows native UNIT acceptance on a verification branch.
+# This does not certify a real installed Windows service, MSI, EDR policy or reboot.
+name: BUILD014+I325 Windows native unit source gate (one-shot)
+
+on:
+  push:
+    branches:
+      - verify/build014-i325-native-53e87e72-20261118
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build014-i325-native-53e87e72-20261118
+  cancel-in-progress: false
+
+jobs:
+  windows-native-unit:
+    name: Windows AMD64 collector, scheduler, Agent unit verification
+    if: ${{ github.event.created == true && github.run_attempt == '1' }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GOTOOLCHAIN: local
+      GOFLAGS: -mod=readonly
+    steps:
+      - name: Reject out-of-window or late runner admission
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById('India Standard Time')
+          $ist = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $tz)
+          Write-Output "RUN_START_IST=$($ist.ToString('yyyy-MM-ddTHH:mm:ss'))"
+          if ($ist.Hour -gt 7 -or ($ist.Hour -eq 7 -and $ist.Minute -ge 20)) {
+            throw 'STOP=OUTSIDE_SAFE_IST_TEST_WINDOW'
+          }
+          if ($env:GITHUB_REPOSITORY -cne 'gagandsm-max/platform') { throw 'STOP=REPOSITORY_MISMATCH' }
+          if ($env:GITHUB_REF -cne 'refs/heads/verify/build014-i325-native-53e87e72-20261118') { throw 'STOP=BRANCH_MISMATCH' }
+
+      - name: Checkout exact one-shot validation commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 3
+
+      - name: Verify pinned source parent and workflow-only delta
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'STOP=CHECKOUT_SHA_CHANGED' }
+          $parent = (& git rev-parse 'HEAD^').Trim()
+          if ($LASTEXITCODE -ne 0 -or $parent -cne '53e87e7257777547d4e96d85db4be2d53554dcc8') { throw 'STOP=INTEGRATED_SOURCE_PARENT_CHANGED' }
+          $base = (& git rev-parse 'HEAD~3').Trim()
+          if ($LASTEXITCODE -ne 0 -or $base -cne '8adae453ddb79a1b924dd6ec32f579a0b8de0856') { throw 'STOP=INTEGRATED_SOURCE_BASE_CHANGED' }
+          $changed = @(& git diff --name-only HEAD^ HEAD)
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 1 -or $changed[0] -cne '.github/workflows/build014-i325-windows-native-once.yml') {
+            throw 'STOP=UNREVIEWED_VALIDATION_COMMIT'
+          }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=DIRTY_CHECKOUT' }
+          Write-Output "PINNED_INTEGRATED_SOURCE=$parent"
+          Write-Output "VALIDATION_SHA=$head"
+          Write-Output "WINDOWS_NATIVE_RUNNER=$env:RUNNER_OS"
+
+      - name: Install existing pinned Go 1.27.1 without cache
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Native Windows compiler, dependencies and module integrity
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $v = & go version
+          if ($LASTEXITCODE -ne 0 -or $v -notmatch 'go1\.27\.1 windows/amd64') { throw 'STOP=WRONG_NATIVE_WINDOWS_TOOLCHAIN' }
+          & go mod download 'golang.org/x/sys@v0.43.0'
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=MODULE_DOWNLOAD_FAILED' }
+          & go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=GO_MODULE_VERIFY_FAILED' }
+          Write-Output $v
+
+      - name: Native Windows full Agent collector, scheduler, command tests
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=1 -timeout=8m ./common/collector ./common/scheduler ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_NATIVE_FULL_TEST_FAILED' }
+          Write-Output 'WINDOWS_NATIVE_FULL_UNIT_PASS'
+
+      - name: Native Windows failure/concurrency regression repeats
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go test -count=10 -timeout=5m -run '^(TestMIBIfRow2LayoutMatchesWindowsABI|TestWindowsSourceTimeoutIsBoundedAndDoesNotBlockOtherSources|TestWindowsGlobalOrphanBudgetBoundsHungProviders|TestWindowsProviderPanicIsContainedAndReleasesAdmission|TestMissingWindowsVolumeProcedureIsTypedAndDoesNotLeakAdmission|TestWindowsImmediateRepeatedCollectionDoesNotReportStaleBusy|TestWindowsCollectorReturnsPartialSnapshotWithProviderError)$' ./common/collector
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_NATIVE_REPEAT_TEST_FAILED' }
+          Write-Output 'WINDOWS_NATIVE_NEGATIVE_REPEAT_PASS'
+
+      - name: Native Windows vet, binary build, source integrity
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & go vet ./common/collector ./common/scheduler ./windows/cmd
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=WINDOWS_NATIVE_VET_FAILED' }
+          $exe = Join-Path $env:RUNNER_TEMP 'PlatformAgent-build014-i325.exe'
+          & go build -o $exe ./windows/cmd
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path -LiteralPath $exe)) { throw 'STOP=WINDOWS_NATIVE_BUILD_FAILED' }
+          Write-Output "BUILT_WINDOWS_EXE_SHA256=$((Get-FileHash -Algorithm SHA256 -LiteralPath $exe).Hash)"
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=SOURCE_MUTATED' }
+          Write-Output 'BUILD014_I325_WINDOWS_NATIVE_UNIT_GATE_PASS'
+          Write-Output 'WINDOWS_REAL_SERVICE_INSTALL_AND_REBOOT=NOT_TESTED'
+          Write-Output 'WINDOWS_MSI_SIGNATURE_AND_UPGRADE=NOT_TESTED'
+          Write-Output 'WINDOWS_COLLECTOR_SCHEDULER_LIVE_COMPOSITION=NOT_FULLY_TESTED'
