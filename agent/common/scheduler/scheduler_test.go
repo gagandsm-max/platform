@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -41,19 +43,20 @@ func (m *mockEnqueuer) count() int {
 }
 
 type mockCollector struct {
-	name         string
-	samples      []telemetry.Sample
-	err          error
-	delay        time.Duration
-	ignoreCancel bool
-	panicOnce    atomic.Bool
-	doPanic      bool
-	started      chan struct{}
-	release      chan struct{}
-	calls        atomic.Int32
-	maxSeen      *atomic.Int32
-	inFlight     *atomic.Int32
-	enterHook    func()
+	name           string
+	samples        []telemetry.Sample
+	err            error
+	samplesOnError bool
+	delay          time.Duration
+	ignoreCancel   bool
+	panicOnce      atomic.Bool
+	doPanic        bool
+	started        chan struct{}
+	release        chan struct{}
+	calls          atomic.Int32
+	maxSeen        *atomic.Int32
+	inFlight       *atomic.Int32
+	enterHook      func()
 }
 
 func (m *mockCollector) Name() string { return m.name }
@@ -88,6 +91,9 @@ func (m *mockCollector) Collect(ctx context.Context) ([]telemetry.Sample, error)
 			time.Sleep(m.delay)
 		}
 		if m.err != nil {
+			if m.samplesOnError {
+				return m.samples, m.err
+			}
 			return nil, m.err
 		}
 		return m.samples, nil
@@ -96,6 +102,9 @@ func (m *mockCollector) Collect(ctx context.Context) ([]telemetry.Sample, error)
 		select {
 		case <-m.release:
 		case <-ctx.Done():
+			if m.samplesOnError {
+				return m.samples, ctx.Err()
+			}
 			return nil, ctx.Err()
 		}
 	}
@@ -103,10 +112,16 @@ func (m *mockCollector) Collect(ctx context.Context) ([]telemetry.Sample, error)
 		select {
 		case <-time.After(m.delay):
 		case <-ctx.Done():
+			if m.samplesOnError {
+				return m.samples, ctx.Err()
+			}
 			return nil, ctx.Err()
 		}
 	}
 	if m.err != nil {
+		if m.samplesOnError {
+			return m.samples, m.err
+		}
 		return nil, m.err
 	}
 	select {
@@ -828,6 +843,203 @@ func TestSchedulerNormalizationEnqueuePreserved(t *testing.T) {
 	}
 	if len(batch.Observations) != 1 || batch.Observations[0].MetricKey != "system.cpu.utilization" {
 		t.Fatalf("observations=%+v", batch.Observations)
+	}
+}
+
+func TestSchedulerCollectorResultPreservesSamplesAndErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		samples    []telemetry.Sample
+		err        error
+		wantObs    int
+		wantErrors int
+	}{
+		{
+			name:    "mixed valid samples and error",
+			samples: []telemetry.Sample{{MetricKey: "valid.metric", Value: 4.5, Unit: "u"}},
+			err:     errors.New("partial collection"), wantObs: 1, wantErrors: 1,
+		},
+		{name: "error only", err: errors.New("failed"), wantErrors: 1},
+		{
+			name:    "success only",
+			samples: []telemetry.Sample{{MetricKey: "valid.metric", Value: 4.5, Unit: "u"}},
+			wantObs: 1,
+		},
+		{
+			name: "malformed and valid samples with error",
+			samples: []telemetry.Sample{
+				{MetricKey: "", Value: 99, Unit: "u"},
+				{MetricKey: "nan.metric", Value: math.NaN(), Unit: "u"},
+				{MetricKey: "inf.metric", Value: math.Inf(1), Unit: "u"},
+				{MetricKey: "label.metric", Value: 99, Unit: "u", Labels: map[string]string{"oversized": strings.Repeat("x", 129)}},
+				{MetricKey: "valid.metric", Value: 4.5, Unit: "u", Labels: map[string]string{"cpu": "user"}},
+			},
+			err: errors.New("partial collection"), wantObs: 1, wantErrors: 1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			col := &mockCollector{name: "cpu", samples: tt.samples, err: tt.err, samplesOnError: true}
+			reg := mustRegistry(t, collector.Registration{
+				Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second,
+			})
+			enq := &mockEnqueuer{}
+			s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s.RunOnce(context.Background())
+			if enq.count() != 1 {
+				t.Fatalf("enqueue count=%d want 1", enq.count())
+			}
+			var batch telemetry.CollectionBatch
+			enq.mu.Lock()
+			err = json.Unmarshal(enq.records[0], &batch)
+			enq.mu.Unlock()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(batch.Observations) != tt.wantObs || len(batch.Errors) != tt.wantErrors {
+				t.Fatalf("observations=%+v errors=%+v", batch.Observations, batch.Errors)
+			}
+			if tt.wantObs > 0 && (batch.Observations[0].MetricKey != "valid.metric" || batch.Observations[0].Value != 4.5) {
+				t.Fatalf("valid observation not preserved: %+v", batch.Observations[0])
+			}
+			if tt.name == "malformed and valid samples with error" {
+				observation := batch.Observations[0]
+				if observation.Source != "AGENT_HOST" || observation.Collector != "cpu" {
+					t.Fatalf("normalized source/collector=%q/%q want AGENT_HOST/cpu", observation.Source, observation.Collector)
+				}
+				if len(observation.Labels) != 1 || observation.Labels["cpu"] != "user" {
+					t.Fatalf("valid labels not preserved: %+v", observation.Labels)
+				}
+			}
+			if tt.wantErrors == 1 && batch.Errors[0].Code != "COLLECTION_FAILED" {
+				t.Fatalf("error code=%q want COLLECTION_FAILED", batch.Errors[0].Code)
+			}
+			_, runErrors := s.Stats()
+			status := s.Status().Collectors[0]
+			if tt.err != nil && (runErrors != 1 || status.ErrorCount != 1) {
+				t.Fatalf("failure accounting runErrors=%d status=%+v", runErrors, status)
+			}
+			if tt.err == nil && (runErrors != 0 || status.ErrorCount != 0) {
+				t.Fatalf("success recorded failure runErrors=%d status=%+v", runErrors, status)
+			}
+		})
+	}
+}
+
+func TestSchedulerMixedResultRemainsWithinPendingItemBound(t *testing.T) {
+	samples := make([]telemetry.Sample, maxPendingItemsPerCollector+1)
+	expectedValues := make(map[string]float64, len(samples))
+	for i := range samples {
+		metricKey := "metric." + strconv.Itoa(i)
+		samples[i] = telemetry.Sample{MetricKey: metricKey, Value: float64(i), Unit: "u"}
+		expectedValues[metricKey] = float64(i)
+	}
+	col := &mockCollector{name: "cpu", samples: samples, err: errors.New("partial collection"), samplesOnError: true}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second})
+	enq := &mockEnqueuer{}
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.RunOnce(context.Background())
+	var observations []telemetry.Observation
+	var collectorErrors []telemetry.CollectorError
+	enq.mu.Lock()
+	records := append([][]byte(nil), enq.records...)
+	enq.mu.Unlock()
+	if len(records) == 0 {
+		t.Fatal("mixed result produced no durable CollectionBatch records")
+	}
+	for i, payload := range records {
+		var fragment telemetry.CollectionBatch
+		if err := json.Unmarshal(payload, &fragment); err != nil {
+			t.Fatalf("decode fragment %d: %v", i, err)
+		}
+		if got := len(fragment.Observations) + len(fragment.Errors); got > maxPendingItemsPerCollector {
+			t.Fatalf("fragment %d item count=%d exceeds bound=%d", i, got, maxPendingItemsPerCollector)
+		}
+		observations = append(observations, fragment.Observations...)
+		collectorErrors = append(collectorErrors, fragment.Errors...)
+	}
+	if got := len(observations) + len(collectorErrors); got > maxPendingItemsPerCollector {
+		t.Fatalf("accepted aggregate item count=%d exceeds per-collector bound=%d", got, maxPendingItemsPerCollector)
+	}
+	if len(observations) == 0 {
+		t.Fatal("capacity edge dropped all valid observations")
+	}
+	seenObservations := make(map[string]struct{}, len(observations))
+	for _, observation := range observations {
+		if _, ok := seenObservations[observation.MetricKey]; ok {
+			t.Fatalf("duplicate accepted observation %q", observation.MetricKey)
+		}
+		seenObservations[observation.MetricKey] = struct{}{}
+		if value, ok := expectedValues[observation.MetricKey]; !ok || observation.Value != value {
+			t.Fatalf("unexpected observation in accepted aggregate: %+v", observation)
+		}
+	}
+	if len(seenObservations) == 0 {
+		t.Fatal("no valid observation survived overflow handling")
+	}
+	errorCounts := map[string]int{}
+	for _, collectorError := range collectorErrors {
+		if collectorError.Collector != "cpu" {
+			t.Fatalf("unexpected collector error: %+v", collectorError)
+		}
+		errorCounts[collectorError.Code]++
+	}
+	if errorCounts["COLLECTION_FAILED"] != 1 || errorCounts["PENDING_OVERFLOW"] != 1 || len(collectorErrors) != 2 {
+		t.Fatalf("expected exactly one COLLECTION_FAILED and one PENDING_OVERFLOW, got %+v", collectorErrors)
+	}
+	status := s.Status()
+	_, runErrors := s.Stats()
+	if status.PendingOverflows != 1 {
+		t.Fatalf("PendingOverflows=%d want 1", status.PendingOverflows)
+	}
+	if len(status.Collectors) != 1 || status.Collectors[0].ErrorCount != 1 || status.Collectors[0].LastError != "partial collection" {
+		t.Fatalf("collection failure accounting incorrect: %+v", status.Collectors)
+	}
+	wantRunErrors := 1 + status.PendingOverflows + int(status.Admission.DroppedObservations) + int(status.Admission.DroppedErrors)
+	if runErrors != wantRunErrors || status.RunErrors != wantRunErrors {
+		t.Fatalf("failure accounting runErrors=%d status=%d want collection + overflow + dropped items=%d (admission=%+v)", runErrors, status.RunErrors, wantRunErrors, status.Admission)
+	}
+}
+
+func TestSchedulerShutdownCancellationDiscardsReturnedSamples(t *testing.T) {
+	started := make(chan struct{}, 1)
+	col := &mockCollector{
+		name: "cpu", samples: []telemetry.Sample{{MetricKey: "valid.metric", Value: 4.5, Unit: "u"}},
+		samplesOnError: true, started: started, release: make(chan struct{}),
+	}
+	reg := mustRegistry(t, collector.Registration{Collector: col, Enabled: true, Interval: time.Hour, Timeout: time.Second})
+	enq := &mockEnqueuer{}
+	s, err := NewScheduler(testIdent(), reg, enq, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { defer close(done); s.RunOnce(ctx) }()
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		cancel()
+		t.Fatal("collector did not start")
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RunOnce did not finish after cancellation")
+	}
+	if enq.count() != 0 {
+		t.Fatalf("shutdown cancellation must not enqueue returned samples, got %d records", enq.count())
+	}
+	_, runErrors := s.Stats()
+	if runErrors != 0 {
+		t.Fatalf("shutdown cancellation recorded failure: %d", runErrors)
 	}
 }
 

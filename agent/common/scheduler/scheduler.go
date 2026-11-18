@@ -534,6 +534,7 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 	}
 
 	durationMs := s.now().Sub(startTime).Milliseconds()
+	var collectorErrors []telemetry.CollectorError
 	if res.err != nil {
 		if isContextTermination(res.err) &&
 			res.ctxDoneAtReturn &&
@@ -543,15 +544,10 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		}
 		summary := safeErrorSummary(res.err)
 		s.finishCollectorFailure(rt, startTime, summary)
-		s.deposit(pendingContribution{
-			name:        rt.entry.Name,
-			collectedAt: startTime,
-			durationMs:  durationMs,
-			errors: []telemetry.CollectorError{{
-				Collector: rt.entry.Name,
-				Code:      "COLLECTION_FAILED",
-				Summary:   summary,
-			}},
+		collectorErrors = append(collectorErrors, telemetry.CollectorError{
+			Collector: rt.entry.Name,
+			Code:      "COLLECTION_FAILED",
+			Summary:   summary,
 		})
 		s.logger.Warn("Collector execution failed",
 			"event_code", "AGENT_COLLECTOR_FAILED",
@@ -561,7 +557,6 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 				"reason_class": "collection_failed",
 			},
 		)
-		return
 	}
 
 	var observations []telemetry.Observation
@@ -581,17 +576,19 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		observations = append(observations, obs)
 	}
 
-	rt.mu.Lock()
-	rt.runCount++
-	rt.lastRun = startTime
-	rt.lastError = ""
-	rt.mu.Unlock()
+	if res.err == nil {
+		rt.mu.Lock()
+		rt.runCount++
+		rt.lastRun = startTime
+		rt.lastError = ""
+		rt.mu.Unlock()
 
-	s.mu.Lock()
-	s.lastRun = startTime
-	s.mu.Unlock()
+		s.mu.Lock()
+		s.lastRun = startTime
+		s.mu.Unlock()
+	}
 
-	if len(observations) == 0 {
+	if len(observations) == 0 && len(collectorErrors) == 0 {
 		return
 	}
 	s.deposit(pendingContribution{
@@ -599,6 +596,7 @@ func (s *Scheduler) executeCollector(ctx context.Context, rt *collectorRuntime) 
 		collectedAt:  startTime,
 		durationMs:   durationMs,
 		observations: observations,
+		errors:       collectorErrors,
 	})
 }
 
