@@ -64,18 +64,20 @@ class MigrationIntegrationTest {
                                      'sensor_agent_ingress_terminal_disposition',
                                      'entity_identifier_binding_history',
                                      'entity_agent_binding_history',
+                                     'monitoring_profile', 'monitoring_profile_version',
+                                     'monitoring_profile_assignment',
                                      'sensor_agent_ingress_pending_canonical_binding',
                                      'identity_provider_instance','platform_subject','identity_mapping',
                                      'subject_tenant_scope','permission_grant','permission_grant_resource')
                 """,
                 Integer.class
         );
-        assertEquals(43, tables);
+        assertEquals(46, tables);
 
         List<Map<String, Object>> history = jdbc.queryForList(
                 "SELECT version, checksum FROM platform.schema_history ORDER BY version"
         );
-        assertEquals(22, history.size());
+        assertEquals(23, history.size());
         assertEquals("V001", history.get(0).get("version"));
         assertEquals("V002", history.get(1).get("version"));
         assertEquals("V003", history.get(2).get("version"));
@@ -98,11 +100,12 @@ class MigrationIntegrationTest {
         assertEquals("V020", history.get(19).get("version"));
         assertEquals("V021", history.get(20).get("version"));
         assertEquals("V022", history.get(21).get("version"));
+        assertEquals("V023", history.get(22).get("version"));
         String checksum = String.valueOf(history.get(0).get("checksum"));
         assertTrue(checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(22, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(23, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
 
         jdbc.update("UPDATE platform.schema_history SET checksum='deadbeef' WHERE version='V001'");
         MigrationException ex = assertThrows(MigrationException.class, pg::migrate);
@@ -212,7 +215,7 @@ class MigrationIntegrationTest {
 
         // 10. Assert restart is idempotent and does not alter data
         pg.migrate();
-        assertEquals(22, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
+        assertEquals(23, jdbc.queryForObject("SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(2, jdbc.queryForObject("SELECT COUNT(*) FROM platform.tenant", Integer.class));
 
         // 11. V001→V018 combined upgrade must materialize Sensor/Agent Control/Capability Pack,
@@ -1284,7 +1287,7 @@ class MigrationIntegrationTest {
         // Full catalogue migrate advances the V015 checkpoint through IAM V016, audit-intent V017
         // and incarnation V018.
         pg.migrate();
-        assertEquals(22, jdbc.queryForObject(
+        assertEquals(23, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V016'", Integer.class));
@@ -1501,7 +1504,7 @@ class MigrationIntegrationTest {
 
         pg.migrate();
 
-        assertEquals(22, jdbc.queryForObject(
+        assertEquals(23, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class));
         assertEquals(1, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history WHERE version='V018'", Integer.class));
@@ -1532,9 +1535,9 @@ class MigrationIntegrationTest {
         assertTrue(v018Checksum.matches("[a-f0-9]{64}"));
 
         pg.migrate();
-        assertEquals(22, jdbc.queryForObject(
+        assertEquals(23, jdbc.queryForObject(
                 "SELECT COUNT(*) FROM platform.schema_history", Integer.class),
-                "Successful repeat must remain idempotent at twenty-one history rows");
+                "Successful repeat must remain idempotent at twenty-three history rows");
     }
 
     private static void assertLegacyWatermarkConserved(Map<String, Object> before, Map<String, Object> after) {

@@ -20,3 +20,4 @@ V019__entity_agent_binding.sql|Platform20 current canonical Agent entity certifi
 V020__agent_ingress_terminal_settlement.sql|Core-authoritative Agent-ingress terminal settlement and separate contiguous continuity watermark
 V021__agent_ingress_pending_release_guard.sql|Legacy pending preservation, exact authority checkpoint, publisher claim fence, and unpublished release identity
 V022__entity_agent_binding_history.sql|Immutable Agent-to-entity binding intervals for historical ingress authority; no legacy backfill
+V023__monitoring_profile_foundation.sql|BUILD-070 tenant-scoped monitoring profile versions and explicit entity assignment foundation
