@@ -4,6 +4,8 @@ import com.platform.core.domain.monitoring.MonitoringProfileEntityReadService;
 import com.platform.core.domain.monitoring.MonitoringProfileEntityReadService.EntityAssignmentView;
 import com.platform.core.domain.monitoring.MonitoringProfileSelection.AssignmentMode;
 import com.platform.core.security.http.PlatformSecurityContext;
+import org.springframework.http.CacheControl;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -51,8 +53,16 @@ public final class MonitoringProfileAssignmentController {
         return reader.findEntityAssignment(
                         PlatformSecurityContext.requirePrincipal(), tenantId, entityId)
                 .<ResponseEntity<AssignmentResponse>>map(
-                        v -> ResponseEntity.ok(toResponse(v)))
-                .orElseGet(() -> ResponseEntity.noContent().build());
+                        v -> {
+                            if (v.rowVersion() <= 0) {
+                                throw new IllegalStateException("Invalid monitoring profile assignment row version");
+                            }
+                            return ResponseEntity.ok()
+                                    .header(HttpHeaders.ETAG, "\"" + v.rowVersion() + "\"")
+                                    .cacheControl(CacheControl.noStore())
+                                    .body(toResponse(v));
+                        })
+                .orElseGet(() -> ResponseEntity.noContent().cacheControl(CacheControl.noStore()).build());
     }
 
     private static AssignmentResponse toResponse(EntityAssignmentView view) {
