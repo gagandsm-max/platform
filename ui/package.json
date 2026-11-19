@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
-    "test:unit": "rm -rf .test-dist && tsc src/platform/navigation.ts src/platform/workspace-registry.ts src/platform/primary-navigation.ts src/platform/workspace-host-state.ts src/platform/screen-state.ts src/platform/shell-contract.ts src/platform/health-overview/index.ts src/platform/health-overview/types.ts src/platform/health-overview/presentation-state.ts src/platform/health-overview/network-health-vm.ts src/platform/health-overview/infrastructure-health-vm.ts --rootDir src --outDir .test-dist --target ES2020 --module NodeNext --moduleResolution NodeNext --skipLibCheck && node --test tests/*.test.mjs; status=$?; rm -rf .test-dist; exit $status",
+    "test:unit": "rm -rf .test-dist && tsc src/platform/navigation.ts src/platform/workspace-registry.ts src/platform/primary-navigation.ts src/platform/workspace-host-state.ts src/platform/screen-state.ts src/platform/shell-contract.ts src/platform/health-overview/index.ts src/platform/health-overview/types.ts src/platform/health-overview/presentation-state.ts src/platform/health-overview/network-health-vm.ts src/platform/health-overview/infrastructure-health-vm.ts src/platform/monitoring/assignment-presentation.ts --rootDir src --outDir .test-dist --target ES2020 --module NodeNext --moduleResolution NodeNext --skipLibCheck && node --test tests/*.test.mjs; status=$?; rm -rf .test-dist; exit $status",
     "preview": "vite preview"
   },
   "dependencies": {
