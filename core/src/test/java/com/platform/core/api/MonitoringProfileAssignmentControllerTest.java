@@ -71,6 +71,10 @@ class MonitoringProfileAssignmentControllerTest {
 
         mvc.perform(get(PATH))
                 .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("ETag", "\"15\""))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"))
                 .andExpect(jsonPath("$.entityId").value(ENTITY_A.toString()))
                 .andExpect(jsonPath("$.profileId").value(PROFILE.toString()))
                 .andExpect(jsonPath("$.profileVersionNo").value(7))
@@ -83,13 +87,47 @@ class MonitoringProfileAssignmentControllerTest {
     }
 
     @Test
+    void etagPreservesLongMaxValueAsExactDecimalString() throws Exception {
+        PrincipalContext principal = namedEntityReader(TENANT_A, ENTITY_A);
+        authenticate(principal);
+        when(reader.findEntityAssignment(principal, TENANT_A, ENTITY_A))
+                .thenReturn(Optional.of(new EntityAssignmentView(
+                        ENTITY_A, PROFILE, 7, AssignmentMode.EXPLICIT_PROFILE,
+                        Long.MAX_VALUE, Instant.parse("2026-11-18T00:00:00Z"))));
+
+        mvc.perform(get(PATH))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("ETag", "\"9223372036854775807\""))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"));
+    }
+
+    @Test
+    void invalidRowVersionFailsClosed() {
+        PrincipalContext principal = namedEntityReader(TENANT_A, ENTITY_A);
+        authenticate(principal);
+        when(reader.findEntityAssignment(principal, TENANT_A, ENTITY_A))
+                .thenReturn(Optional.of(new EntityAssignmentView(
+                        ENTITY_A, PROFILE, 7, AssignmentMode.EXPLICIT_PROFILE,
+                        0L, Instant.parse("2026-11-18T00:00:00Z"))));
+
+        assertThrows(IllegalStateException.class, () -> controller.get(TENANT_A, ENTITY_A));
+    }
+
+    @Test
     void authenticatedEntityWithNoAssignmentReturnsNoContent() throws Exception {
         PrincipalContext principal = namedEntityReader(TENANT_A, ENTITY_A);
         authenticate(principal);
         when(reader.findEntityAssignment(principal, TENANT_A, ENTITY_A))
                 .thenReturn(Optional.empty());
 
-        mvc.perform(get(PATH)).andExpect(status().isNoContent());
+        mvc.perform(get(PATH))
+                .andExpect(status().isNoContent())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .doesNotExist("ETag"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header()
+                        .string("Cache-Control", "no-store"));
         verify(reader).findEntityAssignment(principal, TENANT_A, ENTITY_A);
     }
 
