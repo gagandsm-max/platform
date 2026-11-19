@@ -1,0 +1,101 @@
+# Ephemeral Windows directory-flush API feasibility probe, NOT a queue durability certification.
+# Creation of verify/build014-dirflush-spike-20261120 is the one-shot trigger.
+name: BUILD014 Windows directory flush API spike (one-shot)
+
+on:
+  push:
+    branches:
+      - verify/build014-dirflush-spike-20261120
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build014-dirflush-spike-20261120
+  cancel-in-progress: false
+
+jobs:
+  windows-filesystem-probe:
+    name: Windows AMD64 directory handle and write-through feasibility
+    if: ${{ github.event.created == true && github.run_attempt == '1' }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GOTOOLCHAIN: local
+    steps:
+      - name: Fail closed outside permitted IST execution window
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tz = [System.TimeZoneInfo]::FindSystemTimeZoneById('India Standard Time')
+          $ist = [System.TimeZoneInfo]::ConvertTimeFromUtc([DateTime]::UtcNow, $tz)
+          Write-Output "RUN_START_IST=$($ist.ToString('yyyy-MM-ddTHH:mm:ss'))"
+          if ($ist.ToString('yyyy-MM-dd') -cne '2026-11-20' -or $ist.Hour -gt 7 -or ($ist.Hour -eq 7 -and $ist.Minute -ge 20)) {
+            throw 'STOP=OUTSIDE_APPROVED_IST_WINDOW'
+          }
+          if ($env:GITHUB_REPOSITORY -cne 'gagandsm-max/platform') { throw 'STOP=REPOSITORY_MISMATCH' }
+          if ($env:GITHUB_REF -cne 'refs/heads/verify/build014-dirflush-spike-20261120') { throw 'STOP=BRANCH_MISMATCH' }
+
+      - name: Checkout source-locked probe commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+
+      - name: Verify exact immutable source parent and sole two-file delta
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $head = (& git rev-parse HEAD).Trim()
+          if ($LASTEXITCODE -ne 0 -or $head -cne $env:GITHUB_SHA) { throw 'STOP=CHECKOUT_SHA_MISMATCH' }
+          $parent = (& git rev-parse 'HEAD^').Trim()
+          if ($LASTEXITCODE -ne 0 -or $parent -cne '8adae453ddb79a1b924dd6ec32f579a0b8de0856') { throw 'STOP=BASE_PARENT_MISMATCH' }
+          $sourceBlob = (& git rev-parse 'HEAD:tests/spikes/windows_dirsync_probe.go').Trim()
+          if ($LASTEXITCODE -ne 0 -or $sourceBlob -cne 'fe34669fd1e68844924a96f091afe03cc0290e5c') { throw 'STOP=PROBE_SOURCE_CHANGED' }
+          $changed = @(& git diff --name-only HEAD^ HEAD)
+          $expected = @('.github/workflows/build014-dirflush-spike-once.yml', 'tests/spikes/windows_dirsync_probe.go')
+          if ($LASTEXITCODE -ne 0 -or $changed.Count -ne 2 -or $changed[0] -cne $expected[0] -or $changed[1] -cne $expected[1]) {
+            throw 'STOP=UNREVIEWED_PROBE_COMMIT'
+          }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=WORKTREE_DIRTY' }
+          Write-Output "PROBE_COMMIT=$head"
+          Write-Output "PROBE_SOURCE_GIT_BLOB=$sourceBlob"
+
+      - name: Install pinned Go without dependency cache
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00 # v6.0.0
+        with:
+          go-version: '1.27.1'
+          cache: false
+
+      - name: Execute stand-alone native Windows capability probe
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = (& go version)
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'go1\.27\.1 windows/amd64') { throw 'STOP=NONNATIVE_GO_TOOLCHAIN' }
+          Write-Output $version
+          $resultLines = @(& go run ./tests/spikes/windows_dirsync_probe.go 2>&1)
+          $goExit = $LASTEXITCODE
+          foreach ($line in $resultLines) { Write-Output $line }
+          if ($goExit -ne 0) { throw "STOP=WINDOWS_PROBE_EXECUTION_FAILED_$goExit" }
+          $combined = $resultLines -join "`n"
+          $required = @(
+            'AMRUDAI_WINDOWS_QUEUE_DURABILITY_CAPABILITY_SPIKE_V1',
+            'PROBE=go_directory_sync',
+            'PROBE=win32_dir_access_zero_open',
+            'PROBE=win32_dir_write_attributes_open',
+            'PROBE=win32_dir_generic_write_open',
+            'PROBE=regular_file_sync',
+            'PROBE=move_file_ex_writethrough',
+            'VERDICT=DIAGNOSTIC_ONLY_NOT_DURABILITY_CERTIFIED'
+          )
+          foreach ($requiredText in $required) {
+            if (-not $combined.Contains($requiredText)) { throw "STOP=MISSING_PROBE_EVIDENCE:$requiredText" }
+          }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=PROBE_CHANGED_SOURCE' }
+          Write-Output 'WINDOWS_NATIVE_API_PROBE_EVIDENCE_CAPTURED'
+          Write-Output 'POWER_LOSS_DURABILITY=NOT_TESTED'
+          Write-Output 'INSTALLED_WINDOWS_AGENT_SERVICE=NOT_TESTED'
+          Write-Output 'WINDOWS_QUEUE_PRODUCTION_CORRECTION=NOT_AUTHORIZED'
