@@ -612,10 +612,12 @@ jobs:
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
           # Non-deleting host gate only; never call a production cleanup/volume-rm action.
           bash deploy/docker/kafka/deployment-preflight.sh down
+          # A failed daemon query cannot establish that a run volume is absent.
+          volume_names=$(docker volume ls --quiet) || exit 1
           # Kafka volume: positive disposable provenance = this Actions run identity +
           # exact ownership labels + no remaining attachments. Matching STORAGE alone
           # is not deletion authorization.
-          if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
+          if grep -Fxq -- "${KAFKA_VOLUME}" <<< "$volume_names"; then
             [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
             kafka_labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "${KAFKA_VOLUME}")
             [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
@@ -628,7 +630,7 @@ jobs:
               platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
               platform_sensor_infra_spool:sensor_infra_spool; do
             resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
-            if docker volume inspect "$volume" >/dev/null 2>&1; then
+            if grep -Fxq -- "$volume" <<< "$volume_names"; then
               labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume")
               [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
               users=$(docker ps -aq --filter "volume=$volume") || exit 1
