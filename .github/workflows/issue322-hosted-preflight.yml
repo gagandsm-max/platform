@@ -1,0 +1,649 @@
+# CI-only Issue #322 experiment; runs isolated disposable integration fixtures.
+# No secrets, artifact uploads, cache uploads, paid runners, or production resources.
+name: Issue 322 free hosted runner preflight
+
+on:
+  push:
+    branches:
+      - ci/issue322-hosted-recovery-20261121
+
+permissions:
+  contents: read
+
+concurrency:
+  group: issue322-hosted-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  hosted-capacity:
+    name: Ubuntu 24.04 capacity and Docker configuration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Record exact code and runner capacity
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "commit=$GITHUB_SHA"
+          echo "runner=$RUNNER_OS/$RUNNER_ARCH"
+          uname -a
+          nproc
+          free -m
+          df -h
+          df -i
+          du -sh .
+      - name: Docker availability and initial consumption
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker version
+          docker compose version
+          docker info --format 'Docker root: {{.DockerRootDir}}; Storage driver: {{.Driver}}'
+          docker system df
+      - name: Render representative Compose profiles without launching containers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          for profile in dev test ha scale security dr; do
+            docker compose --profile "$profile" -f compose.yaml config -q
+            docker compose --profile "$profile" -f compose.yaml -f compose.kafka-guarded.yaml config -q
+          done
+          echo "Referenced images:"
+          docker compose --profile dev -f compose.yaml config --images | sort -u
+          echo "After source-only preflight:"
+          df -h
+          docker system df
+
+  hosted-kafka-contract:
+    name: Ubuntu 24.04 isolated Kafka storage contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin official Docker Compose to the Kafka deployment contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/issue322-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/issue322-docker-cli"
+          test "$(docker compose version --short)" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+          echo "Pinned version: $(docker compose version --short)"
+      - name: Measure disk before test and pull declared fixture images
+        shell: bash
+        run: |
+          set -euo pipefail
+          df -h
+          docker system df
+          docker pull node:20-alpine
+          docker pull apache/kafka:3.8.0
+          echo "Post-image-pull Docker disk:"
+          docker system df
+          free_kib="$(df -Pk /var/lib/docker | awk 'NR==2 {print $4}')"
+          if (( free_kib < 8 * 1024 * 1024 )); then
+            echo "STOP=HOSTED_DISK_BELOW_8_GIB_AFTER_IMAGE_PULL"
+            exit 75
+          fi
+      - name: Verify disposable guarded Kafka storage lifecycle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          timeout --signal=TERM --kill-after=30s 20m ./tests/run-kafka-storage-contract-test.sh
+      - name: Diagnose task-owned Kafka fixture rejection
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          for dir in /tmp/issue223-storage.*; do
+            if [[ -d "$dir" ]]; then
+              echo "Evidence directory: $dir"
+              find "$dir" -maxdepth 1 -type f -printf '%f %s bytes\\n' | sort
+              for file in "$dir"/legacy-reject.log "$dir"/missing-reject.log "$dir"/auth-reject.log; do
+                if [[ -f "$file" ]]; then
+                  echo "Task fixture diagnostic: ${file##*/}"
+                  tail -n 35 "$file"
+                fi
+              done
+            fi
+          done
+      - name: Record post-run disk and container inventory
+        if: always()
+        shell: bash
+        run: |
+          df -h
+          docker system df
+          docker ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
+
+  hosted-ui-build:
+    name: Ubuntu 24.04 actual UI tests and production image build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Run unchanged master CI UI commands on isolated hosted runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            -v "$PWD/ui:/src:ro" \
+            node:20-alpine \
+            sh -lc 'cp -a /src /app && cd /app && npm ci && npm run test:unit && npm run build'
+          docker build --no-cache -t platform-ui:ci ui/
+          docker image inspect platform-ui:ci --format 'Built image ID: {{.Id}}'
+      - name: Observe UI build runner disk consumption
+        if: always()
+        run: |
+          df -h
+          docker system df
+
+  hosted-static-contracts:
+    name: Hosted Ubuntu 24.04 Static contracts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin official Compose version for identical source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/issue322-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/issue322-docker-cli"
+          test "$(docker compose version --short)" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
+      - name: Verify changed-file whitespace
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+            git diff --check "${BASE_SHA}...HEAD"
+          else
+            git diff --check
+          fi
+
+      - name: Prepare deterministic environment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
+          make certs
+          docker compose config -q
+
+      - name: Run static contract validators
+        run: make test-static-contracts
+
+      - name: Validate agent pack synchronization
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ -f project_agents/tools/validate_agents.py ]; then
+            if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
+              if git diff --name-only "${BASE_SHA}...HEAD" | grep -qE '^(project_agents/|\.cursor/agents/|\.agents/agents/|\.agents/skills/|\.codex/agents/|skills/)'; then
+                python3 project_agents/tools/validate_agents.py
+              fi
+            else
+              python3 project_agents/tools/validate_agents.py
+            fi
+          fi
+
+
+  hosted-unit:
+    name: Hosted Ubuntu 24.04 Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin official Compose version for identical source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/issue322-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/issue322-docker-cli"
+          test "$(docker compose version --short)" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
+      - name: Prepare environment
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
+          mkdir -p "${HOME}/.m2"
+
+      - name: Run containerized unit tests
+        run: make test-unit
+
+      - name: Run Engineering Orchestrator Phase 1 tests
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: python3 tests/engineering_orchestrator/run_tests.py
+
+  hosted-integration-security:
+    name: Hosted Ubuntu 24.04 full integration, PostgreSQL, contract, security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      PLATFORM_CI: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Pin official Compose version for identical source contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/issue322-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/issue322-docker-cli"
+          test "$(docker compose version --short)" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
+      - name: Preflight host container and port collision safety
+        run: |
+          set -euo pipefail
+          echo "==> [Preflight 1/2] Checking normal development container collisions..."
+          DEV_CONTAINERS=(
+            "platform-postgres"
+            "platform-clickhouse"
+            "platform-clickhouse-migrate"
+            "platform-kafka"
+            "platform-valkey"
+            "platform-core"
+            "platform-core-standby"
+            "platform-sensor-net"
+            "platform-sensor-infra"
+            "platform-analytics"
+            "platform-ui"
+          )
+          EXISTING_CONTAINERS=$(docker ps -a --format '{{.Names}}')
+          COLLISIONS=()
+          for name in "${DEV_CONTAINERS[@]}"; do
+            if printf '%s\n' "${EXISTING_CONTAINERS}" | grep -Fxq "${name}"; then
+              COLLISIONS+=("${name}")
+            fi
+          done
+          if [ ${#COLLISIONS[@]} -gt 0 ]; then
+            echo "[ERROR] Pre-existing Platform development containers detected: ${COLLISIONS[*]}"
+            echo "Platform development containers are present. Preserve developer data and run 'make dev-down' before self-hosted CI."
+            exit 1
+          fi
+          echo "[OK] No normal development container collisions detected."
+
+          echo "==> [Preflight 2/2] Checking CI host port availability..."
+          CI_PORTS=(21443 21000 21432 21123 21900 21379)
+          OCCUPIED_PORTS=()
+          SS_LISTENERS=$(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true)
+          for port in "${CI_PORTS[@]}"; do
+            if printf '%s\n' "${SS_LISTENERS}" | grep -Eq "[:.]${port}[[:space:]]"; then
+              OCCUPIED_PORTS+=("${port}")
+            fi
+          done
+          if [ ${#OCCUPIED_PORTS[@]} -gt 0 ]; then
+            echo "[ERROR] Designated CI host port(s) already bound: ${OCCUPIED_PORTS[*]}"
+            exit 1
+          fi
+          echo "[OK] All 6 CI host ports (21000-21900 range) are free."
+
+      - name: Prepare deterministic environment and configure isolated CI runtime
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+
+          # Assign coherent CI-only ports (20000-29999, non-overlapping with dev/HA defaults)
+          sed -i "s/^PLATFORM_CORE_HOST_PORT=.*/PLATFORM_CORE_HOST_PORT=21443/" .env
+          sed -i "s/^PLATFORM_UI_HOST_PORT=.*/PLATFORM_UI_HOST_PORT=21000/" .env
+          sed -i "s/^PLATFORM_POSTGRES_HOST_PORT=.*/PLATFORM_POSTGRES_HOST_PORT=21432/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=.*/PLATFORM_CLICKHOUSE_HTTP_HOST_PORT=21123/" .env
+          sed -i "s/^PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=.*/PLATFORM_CLICKHOUSE_NATIVE_HOST_PORT=21900/" .env
+          sed -i "s/^PLATFORM_VALKEY_HOST_PORT=.*/PLATFORM_VALKEY_HOST_PORT=21379/" .env
+          sed -i "s/^PLATFORM_ENV=.*/PLATFORM_ENV=ci/" .env
+
+          # Assign unique run/attempt-scoped persistent volume targets
+          cat <<EOF >> .env
+          PLATFORM_PG_DATA_VOLUME=ci_${RUN_IDENTITY}_pg_data
+          PLATFORM_CH_DATA_VOLUME=ci_${RUN_IDENTITY}_ch_data
+          PLATFORM_KAFKA_DATA_VOLUME=ci_${RUN_IDENTITY}_kafka_data
+          PLATFORM_VALKEY_DATA_VOLUME=ci_${RUN_IDENTITY}_valkey_data
+          PLATFORM_SENSOR_NET_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_net_spool
+          PLATFORM_SENSOR_INFRA_SPOOL_VOLUME=ci_${RUN_IDENTITY}_sensor_infra_spool
+          EOF
+          sed -i 's/^[[:space:]]*//' .env
+
+          make certs
+
+      - name: Verify safe rendered compose configuration
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json, subprocess, sys
+
+          raw = subprocess.check_output(
+              ["docker", "compose", "config", "--format", "json"],
+              text=True,
+          )
+          cfg = json.loads(raw)
+
+          expected_volumes = {
+              "platform_pg_data",
+              "platform_ch_data",
+              "platform_kafka_data",
+              "platform_valkey_data",
+              "platform_sensor_net_spool",
+              "platform_sensor_infra_spool",
+          }
+          forbidden_names = set(expected_volumes)
+
+          volumes = cfg.get("volumes", {})
+          missing = expected_volumes - set(volumes.keys())
+          if missing:
+              print(f"[ERROR] Rendered Compose missing volume definitions: {sorted(missing)}")
+              sys.exit(1)
+
+          for v_key in expected_volumes:
+              target = volumes[v_key].get("name", "")
+              if not target.startswith("ci_"):
+                  print(f"[ERROR] Volume target {v_key}='{target}' is not CI-prefixed")
+                  sys.exit(1)
+              if target in forbidden_names:
+                  print(f"[ERROR] Volume target {v_key} matches persistent dev volume '{target}'")
+                  sys.exit(1)
+
+          expected_ports = {"21443", "21000", "21432", "21123", "21900", "21379"}
+          dev_ports = {"28443", "23000", "25432", "28123", "29000", "26379", "25442"}
+          published_ports = set()
+          for svc in cfg.get("services", {}).values():
+              for p in svc.get("ports", []):
+                  if isinstance(p, dict) and "published" in p:
+                      published_ports.add(str(p["published"]))
+                  elif isinstance(p, str) and ":" in p:
+                      parts = p.split(":")
+                      if len(parts) >= 2:
+                          published_ports.add(parts[-2])
+
+          if published_ports != expected_ports:
+              print(f"[ERROR] Rendered published ports {sorted(published_ports)} != expected {sorted(expected_ports)}")
+              sys.exit(1)
+
+          overlap = published_ports & dev_ports
+          if overlap:
+              print(f"[ERROR] Rendered published ports overlap dev/HA ports: {sorted(overlap)}")
+              sys.exit(1)
+
+          print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
+          PY
+
+      - name: Preload declared Kafka contract fixture images
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          nproc
+          free -m
+          df -h
+          docker system df
+          docker pull node:20-alpine
+          docker pull apache/kafka:3.8.0
+          docker image inspect --format '{{.Id}} {{json .RepoDigests}}' node:20-alpine apache/kafka:3.8.0
+
+      - name: Prove isolated guarded Kafka storage contract
+        run: ./tests/run-kafka-storage-contract-test.sh
+
+      - name: Observe resources after Kafka storage contract
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Explicitly provision fresh run-scoped Kafka storage
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+          EXPECTED_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
+          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${EXPECTED_VOLUME}" .env
+          # Never adopt an existing volume, including a partial earlier attempt.
+          if docker volume inspect "${EXPECTED_VOLUME}" >/dev/null 2>&1; then
+            echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
+            exit 1
+          fi
+          CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
+            --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
+            -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
+          [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
+          STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
+          printf '\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n' \
+            "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
+          printf 'COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n' \
+            "${RUN_IDENTITY}" >> .env
+          PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
+            bash deploy/docker/kafka/deployment-preflight.sh provision
+          bash deploy/docker/kafka/deployment-preflight.sh check
+
+      - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
+        run: make test-clickhouse-replay-migration
+
+      - name: Observe resources after ClickHouse migration
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Run 20-test integration suite
+        run: make test-integration
+
+      - name: Observe resources after integration suite
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Run mandatory PostgreSQL suite
+        run: ./tests/run-core-day02-tests.sh
+
+      - name: Observe resources after PostgreSQL suite
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Run API and data contract suite
+        run: make test-contract
+
+      - name: Observe resources after API contracts
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Run security smoke suite
+        run: make test-security-smoke
+
+      - name: Observe resources after security smoke
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+
+      - name: Capture diagnostics on failure
+        if: failure()
+        run: |
+          docker compose ps || true
+          docker compose logs --no-color --tail=250 || true
+
+      - name: Clean CI stack
+        if: always()
+        env:
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # CI-only disposable fixture cleanup. Production preflight has no volume-rm path.
+          [[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo "[ERROR] Kafka volume cleanup requires GitHub Actions."; exit 1; }
+          [[ "${RUN_ID}" =~ ^[0-9]+$ && "${RUN_ATTEMPT}" =~ ^[0-9]+$ ]] || exit 1
+          RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
+          PROJECT="ci_${RUN_IDENTITY}"
+          KAFKA_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
+          KAFKA_STORAGE="ci_${RUN_IDENTITY}_kafka_identity"
+          # Missing provisioning marker can be a clean no-op only after a
+          # successful inventory proves no exact run-owned resources exist.
+          if ! grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env 2>/dev/null; then
+            found=0
+            for kind in container network volume; do
+              if [[ "$kind" == container ]]; then
+                ids=$(docker container ls --all --quiet) || exit 1
+                fmt='{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "platform.kafka.project"}}'
+              else
+                ids=$(docker "$kind" ls --quiet) || exit 1
+                fmt='{{.Name}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}'
+              fi
+              for id in $ids; do
+                identity=$(docker "$kind" inspect --format "$fmt" "$id") || exit 1
+                IFS='|' read -r name compose_owner fixture_owner kafka_owner <<< "$identity"
+                name=${name#/}
+                if [[ "$name" == "$PROJECT" || "$name" == "${PROJECT}_"* || "$name" == "${PROJECT}-"* ||
+                      "$compose_owner" == "$PROJECT" || "$fixture_owner" == "$PROJECT" || "$kafka_owner" == "$PROJECT" ]]; then
+                  printf '[ERROR] Unprovisioned run resource retained: %s %s\n' "$kind" "$identity" >&2
+                  found=1
+                fi
+              done
+            done
+            [[ "$found" == 0 ]] || exit 1
+            echo '[OK] Provisioning marker absent; complete inventory proves no run-owned resources.'
+            exit 0
+          fi
+          grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env || exit 1
+          grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
+          # Non-deleting host gate only; never call a production cleanup/volume-rm action.
+          bash deploy/docker/kafka/deployment-preflight.sh down
+          # Kafka volume: positive disposable provenance = this Actions run identity +
+          # exact ownership labels + no remaining attachments. Matching STORAGE alone
+          # is not deletion authorization.
+          if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
+            [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
+            kafka_labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "${KAFKA_VOLUME}")
+            [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
+            users=$(docker ps -aq --filter "volume=${KAFKA_VOLUME}") || exit 1
+            [[ -z "$users" ]] || exit 1
+            docker volume rm "${KAFKA_VOLUME}"
+          fi
+          # Non-Kafka CI volumes: exact Compose project/volume provenance + no attachments.
+          for pair in platform_pg_data:pg_data platform_ch_data:ch_data \
+              platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
+              platform_sensor_infra_spool:sensor_infra_spool; do
+            resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
+            if docker volume inspect "$volume" >/dev/null 2>&1; then
+              labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume")
+              [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
+              users=$(docker ps -aq --filter "volume=$volume") || exit 1
+              [[ -z "$users" ]] || exit 1
+              docker volume rm "$volume"
+            fi
+          done
+
+      - name: Observe final resource inventory
+        if: always()
+        run: |
+          set -euo pipefail
+          df -h
+          free -m
+          docker system df
+          docker ps --all --format '{{.Names}}'
+          docker network ls
+          docker volume ls
