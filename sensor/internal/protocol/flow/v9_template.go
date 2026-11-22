@@ -76,45 +76,61 @@ func scanV9Templates(datagram []byte, sets []V9FlowSet, templates []V9Template, 
 		end := offset + int(set.Length)
 		body := datagram[offset+v9SetHeaderLength : end]
 		for {
-			// RFC 3954 section 2 requires at least one record in either set.
-			header, scopeCount, fieldCount, err := v9TemplateLayout(kind, body)
+			id, scopeCount, specs, tail, err := nextV9Template(kind, body, end)
 			if err != nil {
 				return 0, 0, err
 			}
-			count := scopeCount + fieldCount
-			size := header + 4*count
-			if count == 0 || size > len(body) {
-				return 0, 0, ErrMalformedV9Template
-			}
+			count := len(specs) / 4
 			if templates != nil {
 				record := &templates[records]
-				record.ID = binary.BigEndian.Uint16(body[:2])
+				record.ID = id
 				record.Kind = kind
 				// Bound capacity so appending to a slice cannot overwrite a
 				// sibling field group or another template's descriptors.
 				dst := fields[descriptors : descriptors+count : descriptors+count]
-				for i := range dst {
-					spec := body[header+4*i:]
-					dst[i] = V9TemplateField{Type: binary.BigEndian.Uint16(spec), Length: binary.BigEndian.Uint16(spec[2:])}
-				}
+				copyV9Fields(dst, specs)
 				if scopeCount > 0 {
 					record.ScopeFields = dst[:scopeCount:scopeCount]
 				}
-				if fieldCount > 0 {
+				if count > scopeCount {
 					record.Fields = dst[scopeCount:]
 				}
 			}
 			records++
 			descriptors += count
-			body = body[size:]
-			// Section 6.1 permits optional trailing padding to align the
-			// next FlowSet to a 4-byte packet boundary. Zeros are advised.
-			if len(body) == 0 || (kind == V9OptionsTemplate && len(body) < 4 && end%4 == 0) {
+			body = tail
+			if len(body) == 0 {
 				break
 			}
 		}
 	}
 	return records, descriptors, nil
+}
+
+// nextV9Template consumes a single record, including optional final Options
+// padding that aligns the subsequent FlowSet. The returned slices borrow body.
+func nextV9Template(kind V9TemplateKind, body []byte, end int) (id uint16, scopes int, specs, tail []byte, err error) {
+	header, scopes, fields, err := v9TemplateLayout(kind, body)
+	if err != nil {
+		return 0, 0, nil, nil, err
+	}
+	count := scopes + fields
+	size := header + 4*count
+	if count == 0 || size > len(body) {
+		return 0, 0, nil, nil, ErrMalformedV9Template
+	}
+	tail = body[size:]
+	if kind == V9OptionsTemplate && len(tail) < 4 && end%4 == 0 {
+		tail = nil
+	}
+	return binary.BigEndian.Uint16(body), scopes, body[header:size], tail, nil
+}
+
+func copyV9Fields(dst []V9TemplateField, specs []byte) {
+	for i := range dst {
+		dst[i] = V9TemplateField{Type: binary.BigEndian.Uint16(specs), Length: binary.BigEndian.Uint16(specs[2:])}
+		specs = specs[4:]
+	}
 }
 
 // v9TemplateLayout returns the header size and descriptor counts. Widen all
