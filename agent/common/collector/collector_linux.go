@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -34,9 +35,9 @@ func NewDefaultCollectors(maxFilesystems int) []HostCollector {
 // -----------------------------------------------------------------------------
 
 type CPUCollector struct {
-	mu        sync.Mutex
-	prevTotal uint64
-	prevIdle  uint64
+	procRoot string // Empty uses the host procfs.
+	mu       sync.Mutex
+	previous cpuTimes
 }
 
 func NewCPUCollector() *CPUCollector {
@@ -44,6 +45,55 @@ func NewCPUCollector() *CPUCollector {
 }
 
 func (c *CPUCollector) Name() string { return "cpu" }
+
+// /proc/stat includes guest and guest_nice in user and nice. Account only
+// user, nice, system, idle, iowait, irq, softirq, and steal when present.
+type cpuTimes struct {
+	ticks [8]uint64
+	count int
+}
+
+func parseCPUTimes(fields []string) cpuTimes {
+	var times cpuTimes
+	times.count = min(len(fields), len(times.ticks))
+	if times.count < 4 { // The oldest supported layout ends with idle.
+		return cpuTimes{}
+	}
+	for i := 0; i < times.count; i++ {
+		v, err := strconv.ParseUint(fields[i], 10, 64)
+		if err != nil {
+			return cpuTimes{}
+		}
+		times.ticks[i] = v
+	}
+	return times
+}
+
+func cpuIntervalUtilization(previous, current cpuTimes) (float64, bool) {
+	if current.count == 0 || current.count != previous.count {
+		return 0, false
+	}
+	var total, idle uint64
+	for i := 0; i < current.count; i++ {
+		// In particular Linux iowait can decrease. Summing counters first
+		// can hide a regression behind an increase in a different field.
+		if current.ticks[i] < previous.ticks[i] {
+			return 0, false
+		}
+		delta := current.ticks[i] - previous.ticks[i]
+		if delta > ^uint64(0)-total {
+			return 0, false
+		}
+		total += delta
+		if i == 3 || i == 4 {
+			idle += delta
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return 100 * (float64(total-idle) / float64(total)), true
+}
 
 func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) {
 	select {
@@ -55,94 +105,62 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 	var samples []telemetry.Sample
 
 	// 1. Read /proc/stat
-	statFile, err := os.Open("/proc/stat")
+	procRoot := c.procRoot
+	if procRoot == "" {
+		procRoot = "/proc"
+	}
+	var current cpuTimes
+	cpuCount := 0
+	statFile, err := os.Open(filepath.Join(procRoot, "stat"))
 	if err == nil {
 		defer statFile.Close()
 		scanner := bufio.NewScanner(io.LimitReader(statFile, 64*1024))
-		cpuCount := 0
-		var curTotal, curIdle uint64
+		seenAggregate := false
 
 		for scanner.Scan() {
 			line := scanner.Text()
 			fields := strings.Fields(line)
-			if len(fields) < 2 {
+			if len(fields) == 0 {
 				continue
 			}
 
 			if fields[0] == "cpu" {
-				// cpu user nice system idle iowait irq softirq steal [guest guest_nice]
-				// guest/guest_nice are already included in user/nice; do not double-count.
-				var vals []uint64
-				limit := len(fields) - 1
-				if limit > 8 {
-					limit = 8
+				if seenAggregate {
+					current = cpuTimes{}
+				} else {
+					current = parseCPUTimes(fields[1:])
 				}
-				for i := 1; i <= limit; i++ {
-					v, err := strconv.ParseUint(fields[i], 10, 64)
-					if err != nil {
-						vals = nil
-						curTotal = 0
-						break
-					}
-					vals = append(vals, v)
-					curTotal += v
-				}
-				if len(vals) >= 4 {
-					curIdle = vals[3] // idle
-					if len(vals) >= 5 {
-						curIdle += vals[4] // iowait (idle for utilization purposes)
-					}
-				}
-			} else if strings.HasPrefix(fields[0], "cpu") && len(fields[0]) > 3 {
+				seenAggregate = true
+			} else if len(fields) >= 2 && strings.HasPrefix(fields[0], "cpu") && len(fields[0]) > 3 {
 				if _, err := strconv.Atoi(fields[0][3:]); err == nil {
 					cpuCount++
 				}
 			}
 		}
+	}
 
-		if curTotal > 0 {
-			c.mu.Lock()
-			prevTotal := c.prevTotal
-			prevIdle := c.prevIdle
-			c.prevTotal = curTotal
-			c.prevIdle = curIdle
-			c.mu.Unlock()
+	c.mu.Lock()
+	previous := c.previous
+	c.previous = current
+	c.mu.Unlock()
+	if util, ok := cpuIntervalUtilization(previous, current); ok {
+		samples = append(samples, telemetry.Sample{
+			MetricKey: "system.cpu.utilization",
+			Value:     util,
+			Unit:      "%",
+		})
+	}
 
-			// First sample only seeds counters; since-boot ratio is not interval utilization.
-			if prevTotal > 0 && curTotal >= prevTotal {
-				deltaTotal := curTotal - prevTotal
-				var deltaIdle uint64
-				if curIdle >= prevIdle {
-					deltaIdle = curIdle - prevIdle
-				}
-				if deltaTotal > 0 {
-					util := 100.0 * (1.0 - (float64(deltaIdle) / float64(deltaTotal)))
-					if util < 0 {
-						util = 0
-					}
-					if util > 100 {
-						util = 100
-					}
-					samples = append(samples, telemetry.Sample{
-						MetricKey: "system.cpu.utilization",
-						Value:     util,
-						Unit:      "%",
-					})
-				}
-			}
-		}
-
-		if cpuCount > 0 {
-			samples = append(samples, telemetry.Sample{
-				MetricKey: "system.cpu.count",
-				Value:     float64(cpuCount),
-				Unit:      "count",
-			})
-		}
+	if cpuCount > 0 {
+		samples = append(samples, telemetry.Sample{
+			MetricKey: "system.cpu.count",
+			Value:     float64(cpuCount),
+			Unit:      "count",
+		})
 	}
 
 	// 2. Read /proc/loadavg
-	loadBytes, err := os.ReadFile("/proc/loadavg")
+	loadBytes, err := os.ReadFile(filepath.Join(procRoot, "loadavg"))
 	if err == nil {
 		fields := strings.Fields(string(loadBytes))
 		if len(fields) >= 3 {
@@ -171,7 +189,7 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 	}
 
 	// 3. Read /proc/uptime
-	upBytes, err := os.ReadFile("/proc/uptime")
+	upBytes, err := os.ReadFile(filepath.Join(procRoot, "uptime"))
 	if err == nil {
 		fields := strings.Fields(string(upBytes))
 		if len(fields) >= 1 {
