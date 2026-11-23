@@ -4,6 +4,7 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -550,7 +551,7 @@ func (c *OSFactsCollector) Collect(ctx context.Context) ([]telemetry.Sample, err
 	}
 	defer f.Close()
 
-	facts, ok := parseOSFacts(io.LimitReader(f, procReadLimit))
+	facts, ok := parseOSFacts(f)
 	if !ok {
 		return nil, fmt.Errorf("PROCSTAT_PARSE_FAILED: required osfacts fields missing")
 	}
@@ -566,19 +567,42 @@ type osFacts struct {
 	hasBlocked   bool
 }
 
+// Allow the CPU section and interrupt counters to precede the three scalar
+// rows. The byte budget bounds work; the reader retains only one 4 KiB chunk.
+const osFactsReadLimit = 4 << 20
+
 func parseOSFacts(r io.Reader) (osFacts, bool) {
-	scanner := bufio.NewScanner(r)
+	br := bufio.NewReader(io.LimitReader(r, osFactsReadLimit))
 	var facts osFacts
-	for scanner.Scan() {
-		fields := strings.Fields(scanner.Text())
-		if len(fields) < 2 {
+	var skipRemainder bool
+	for {
+		line, err := br.ReadSlice('\n')
+		if err == bufio.ErrBufferFull {
+			skipRemainder = true
 			continue
 		}
-		val, err := strconv.ParseUint(fields[1], 10, 64)
+		if err != nil {
+			// Kernel rows end in newline. A partial number at the byte
+			// budget, at EOF or at a read failure is not a scalar value.
+			return osFacts{}, false
+		}
+		if skipRemainder {
+			skipRemainder = false
+			continue
+		}
+		line = bytes.TrimSpace(line)
+		if len(line) == 0 || (line[0] != 'b' && line[0] != 'p') {
+			continue
+		}
+		fields := bytes.Fields(line)
+		if len(fields) != 2 {
+			continue
+		}
+		val, err := strconv.ParseUint(string(fields[1]), 10, 64)
 		if err != nil {
 			continue
 		}
-		switch fields[0] {
+		switch string(fields[0]) {
 		case "btime":
 			facts.btime = val
 			facts.hasBtime = true
@@ -589,8 +613,10 @@ func parseOSFacts(r io.Reader) (osFacts, bool) {
 			facts.procsBlocked = val
 			facts.hasBlocked = true
 		}
+		if facts.hasBtime && facts.hasRunning && facts.hasBlocked {
+			return facts, true
+		}
 	}
-	return facts, facts.hasBtime && facts.hasRunning && facts.hasBlocked
 }
 
 func osfactsSamples(facts osFacts) []telemetry.Sample {
