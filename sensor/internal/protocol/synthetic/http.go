@@ -86,8 +86,7 @@ func cloneInt64Ptr(in *int64) *int64 {
 	return &v
 }
 
-func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, error) {
-	var result HTTPResult
+func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResult, err error) {
 	if c == nil {
 		return result, newError(CodeInvalidRequest, "synthetic collector is nil", nil, false)
 	}
@@ -117,7 +116,7 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, err
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}, DialContext: (&net.Dialer{}).DialContext, ForceAttemptHTTP2: true, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
-	rec := &timingRecorder{overallStart: time.Now()}
+	rec := &timingRecorder{}
 	trace := &httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { rec.setDNSStart(time.Now()) }, DNSDone: func(httptrace.DNSDoneInfo) { rec.setDNSDone(time.Now()) },
 		ConnectStart: func(_, _ string) { rec.setConnectStart(time.Now()) }, ConnectDone: func(_, _ string, e error) { rec.setConnectDone(time.Now(), e) },
@@ -153,12 +152,14 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, err
 		}
 		return nil
 	}}
-	begin := time.Now()
+	rec.overallStart = time.Now()
+	// Reading and validating the response body are part of the observed probe.
+	defer func() {
+		result.Timings = rec.snapshot(time.Since(rec.overallStart))
+		result.CompletedAt = c.now().UTC()
+	}()
 	resp, doErr := client.Do(req)
-	total := time.Since(begin)
-	result.Timings = rec.snapshot(total)
 	result.Redirects = redirects
-	result.CompletedAt = c.now().UTC()
 	if doErr != nil {
 		err = classifyHTTP(parent, ctx, doErr)
 		result.ErrorCode = CodeOf(err)
