@@ -94,10 +94,20 @@ func (c *Collector) DNS(parent context.Context, r DNSRequest) (DNSResult, error)
 }
 
 func (c *Collector) validateDNS(r DNSRequest) error {
-	if err := validateHost(r.Hostname, c.limits.MaxTargetBytes); err != nil {
+	hostname := strings.TrimSpace(r.Hostname)
+	if len(hostname) > c.limits.MaxTargetBytes {
+		return newError(CodeResourceLimit, "target exceeds configured length bound", nil, false)
+	}
+	// Validate only the labels. Keep the optional root dot on the lookup so
+	// the resolver cannot append a local search suffix to an absolute name.
+	labels := strings.TrimSuffix(hostname, ".")
+	if strings.TrimSpace(labels) != labels {
+		return newError(CodeInvalidRequest, "hostname is malformed", nil, false)
+	}
+	if err := validateHost(labels, c.limits.MaxTargetBytes); err != nil {
 		return err
 	}
-	if net.ParseIP(strings.TrimSpace(r.Hostname)) != nil {
+	if net.ParseIP(labels) != nil {
 		return newError(CodeInvalidRequest, "DNS hostname must not be an IP literal", nil, false)
 	}
 	if r.RecordType != DNSRecordA && r.RecordType != DNSRecordAAAA {
