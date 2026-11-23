@@ -4,9 +4,14 @@ package collector
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -123,5 +128,88 @@ func TestCPUCollectCounterDiscontinuities(t *testing.T) {
 				t.Errorf("utilization=%v present=%v, expectation=%v", got, present, step.wantUtil)
 			}
 		})
+	}
+}
+
+func TestCPUCollectCountsCompleteLargeTopologies(t *testing.T) {
+	const budget = 2 << 20
+	const aggregate = "cpu 110 0 0 110\n"
+	const counters = " 142953005 179814 77215431 1646430653 4453721 19874 1174722 8276 0 0"
+	rows := func(cpus int, exactSize int) string {
+		var b strings.Builder
+		b.WriteString(aggregate)
+		for i := 0; i < cpus; i++ {
+			fmt.Fprintf(&b, "cpu%d%s", i, counters)
+			if exactSize > 0 {
+				// Evenly pad valid rows to place the final newline exactly at the boundary.
+				end := len(aggregate) + (i+1)*(exactSize-len(aggregate))/cpus
+				b.WriteString(strings.Repeat(" ", end-b.Len()-1))
+			}
+			b.WriteByte('\n')
+		}
+		return b.String()
+	}
+	large := rows(1536, 0)
+	exact := rows(8192, budget)
+	for _, tc := range []struct {
+		name string
+		stat string
+		want int // Zero means the full count cannot be established.
+	}{
+		{"large topology and long interrupt tail", large + "intr 0" + strings.Repeat(" 0", 100000) + "\n", 1536},
+		{"EOF at byte budget", exact, 8192},
+		{"budget at complete row but more CPUs", exact + "cpu8192" + counters + "\n", 0},
+		{"budget in CPU row", exact[:len(exact)-1] + " 0\n", 0},
+		{"incomplete final CPU row", large + "cpu1536 1", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := NewCPUCollector()
+			c.procRoot = t.TempDir()
+			write := func(name, contents string) {
+				t.Helper()
+				if err := os.WriteFile(filepath.Join(c.procRoot, name), []byte(contents), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			write("stat", "cpu 100 0 0 100\ncpu0 0 0 0 0\n")
+			write("loadavg", "1 2 3 1/10 1\n")
+			write("uptime", "850 4500\n")
+			if _, err := c.Collect(context.Background()); err != nil {
+				t.Fatal(err)
+			}
+			write("stat", tc.stat)
+			samples, err := c.Collect(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+			got := make(map[string]float64)
+			for _, sample := range samples {
+				got[sample.MetricKey] = sample.Value
+			}
+			if count, present := got["system.cpu.count"]; present != (tc.want > 0) || count != float64(tc.want) {
+				t.Errorf("CPU count = %v (present %v), want %d", count, present, tc.want)
+			}
+			for key, want := range map[string]float64{"system.cpu.utilization": 50, "system.load.1m": 1, "system.uptime": 850} {
+				if got[key] != want {
+					t.Errorf("%s = %v, want %v", key, got[key], want)
+				}
+			}
+		})
+	}
+}
+
+func TestReadCPUStatStopsAtInterruptsAndWithholdsCountOnIOError(t *testing.T) {
+	const rows = "cpu 2 4 6 8\ncpu0 1 2 3 4\ncpu5 1 2 3 4\n"
+	tail := strings.NewReader("intr 10" + strings.Repeat(" 0", 100000) + "\n")
+	aggregate, count := readCPUStat(io.MultiReader(strings.NewReader(rows), tail))
+	if aggregate.count != 4 || count != 2 {
+		t.Fatalf("sparse CPU indices: aggregate fields %d, count %d", aggregate.count, count)
+	}
+	if tail.Len() < 190000 {
+		t.Fatalf("consumed unnecessary interrupt counters, %d bytes remain", tail.Len())
+	}
+	aggregate, count = readCPUStat(io.MultiReader(strings.NewReader(rows), iotest.ErrReader(errors.New("read failed"))))
+	if aggregate.count != 4 || count != 0 {
+		t.Fatalf("interrupted CPU block: aggregate fields %d, count %d", aggregate.count, count)
 	}
 }

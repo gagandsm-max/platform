@@ -4,6 +4,7 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -95,6 +96,56 @@ func cpuIntervalUtilization(previous, current cpuTimes) (float64, bool) {
 	return 100 * (float64(total-idle) / float64(total)), true
 }
 
+// Enough for 8,192 CPU rows with ten full-width uint64 counters and labels.
+// Stream the CPU section with a small buffer. A larger topology is allowed
+// when its rows fit; an incomplete count must never masquerade as an exact one.
+const cpuStatReadLimit = 2 << 20
+
+func readCPUStat(r io.Reader) (current cpuTimes, count int) {
+	// One lookahead byte distinguishes true EOF exactly at the budget.
+	br := bufio.NewReader(io.LimitReader(r, cpuStatReadLimit+1))
+	remaining := cpuStatReadLimit
+	seenAggregate := false
+	for {
+		line, err := br.ReadSlice('\n')
+		if len(line) == 0 && err == io.EOF {
+			return current, count
+		}
+		if len(line) > remaining {
+			line = line[:remaining]
+			err = io.ErrUnexpectedEOF
+		}
+		remaining -= len(line)
+		// Linux emits the interrupt row immediately after the online CPU rows.
+		// Its counters can fill an entire buffer; the label alone ends our read.
+		if bytes.HasPrefix(line, []byte("intr ")) || bytes.HasPrefix(line, []byte("intr\t")) {
+			return current, count
+		}
+		if err != nil {
+			return current, 0
+		}
+		line = bytes.TrimSpace(line)
+		keyEnd := bytes.IndexAny(line, " \t")
+		if keyEnd < 0 {
+			keyEnd = len(line)
+		}
+		key := line[:keyEnd]
+		switch {
+		case bytes.Equal(key, []byte("cpu")):
+			if seenAggregate {
+				current = cpuTimes{}
+			} else {
+				current = parseCPUTimes(strings.Fields(string(line[keyEnd:])))
+			}
+			seenAggregate = true
+		case len(key) > 3 && bytes.HasPrefix(key, []byte("cpu")) && keyEnd < len(line):
+			if _, err := strconv.Atoi(string(key[3:])); err == nil {
+				count++
+			}
+		}
+	}
+}
+
 func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) {
 	select {
 	case <-ctx.Done():
@@ -114,29 +165,7 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 	statFile, err := os.Open(filepath.Join(procRoot, "stat"))
 	if err == nil {
 		defer statFile.Close()
-		scanner := bufio.NewScanner(io.LimitReader(statFile, 64*1024))
-		seenAggregate := false
-
-		for scanner.Scan() {
-			line := scanner.Text()
-			fields := strings.Fields(line)
-			if len(fields) == 0 {
-				continue
-			}
-
-			if fields[0] == "cpu" {
-				if seenAggregate {
-					current = cpuTimes{}
-				} else {
-					current = parseCPUTimes(fields[1:])
-				}
-				seenAggregate = true
-			} else if len(fields) >= 2 && strings.HasPrefix(fields[0], "cpu") && len(fields[0]) > 3 {
-				if _, err := strconv.Atoi(fields[0][3:]); err == nil {
-					cpuCount++
-				}
-			}
-		}
+		current, cpuCount = readCPUStat(statFile)
 	}
 
 	c.mu.Lock()
