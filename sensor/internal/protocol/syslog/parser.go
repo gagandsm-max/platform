@@ -135,16 +135,16 @@ func (p *Parser) parseRFC5424(base Event, body string) (Event, error) {
 		base.TimestampQuality = TimestampAuthoritativeRFC3339
 	}
 	var err error
-	if base.Hostname, err = p.nilOrBounded(fields[2], p.config.MaxHostnameBytes, "hostname"); err != nil {
+	if base.Hostname, err = rfc5424HeaderValue(fields[2], p.config.MaxHostnameBytes, 255, "hostname"); err != nil {
 		return Event{}, err
 	}
-	if base.AppName, err = p.nilOrBounded(fields[3], p.config.MaxAppNameBytes, "app name"); err != nil {
+	if base.AppName, err = rfc5424HeaderValue(fields[3], p.config.MaxAppNameBytes, 48, "app name"); err != nil {
 		return Event{}, err
 	}
-	if base.ProcessID, err = p.nilOrBounded(fields[4], p.config.MaxProcessIDBytes, "process ID"); err != nil {
+	if base.ProcessID, err = rfc5424HeaderValue(fields[4], p.config.MaxProcessIDBytes, 128, "process ID"); err != nil {
 		return Event{}, err
 	}
-	if base.MessageID, err = p.nilOrBounded(fields[5], p.config.MaxMessageIDBytes, "message ID"); err != nil {
+	if base.MessageID, err = rfc5424HeaderValue(fields[5], p.config.MaxMessageIDBytes, 32, "message ID"); err != nil {
 		return Event{}, err
 	}
 
@@ -231,12 +231,23 @@ func (p *Parser) partial(base Event, body string) (Event, error) {
 	return base, nil
 }
 
-func (p *Parser) nilOrBounded(value string, max int, field string) (string, error) {
+// RFC 5424 section 6 restricts these header fields to PRINTUSASCII (33..126)
+// and assigns a separate octet limit to each. MSG and SD-PARAM values have
+// different grammars. Keep the receiver's configured budget error distinct.
+func rfc5424HeaderValue(value string, configMax, wireMax int, field string) (string, error) {
 	if value == "-" {
 		return "", nil
 	}
-	if len(value) > max {
+	if len(value) > configMax {
 		return "", fail(CodeResourceLimit, "RFC5424 "+field+" exceeds configured maximum", nil)
+	}
+	if len(value) > wireMax {
+		return "", fail(CodeMalformedRFC5424, "RFC5424 "+field+" exceeds protocol maximum", nil)
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 33 || value[i] > 126 {
+			return "", fail(CodeMalformedRFC5424, "RFC5424 "+field+" contains a non-PRINTUSASCII byte", nil)
+		}
 	}
 	return value, nil
 }
