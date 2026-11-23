@@ -2,11 +2,13 @@ package synthetic
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"slices"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -118,5 +120,53 @@ func TestDNSAbsoluteNameValidation(t *testing.T) {
 		if CodeOf(err) != tc.want || (err == nil) != (tc.want == "") || calls != wantCalls {
 			t.Errorf("name %q, bound %d: code=%s calls=%d, want %s", tc.name, tc.bound, CodeOf(err), calls, tc.want)
 		}
+	}
+}
+
+func TestDNSInterruptedLookupResult(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		code      ErrorCode
+		transient bool
+	}{
+		{"parent cancelled", CodeCancelled, false},
+		{"operation timed out", CodeTimeout, true},
+		{"parent deadline exceeded", CodeDeadlineExceeded, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				parentTimeout := time.Minute
+				if tc.code == CodeDeadlineExceeded {
+					parentTimeout = time.Millisecond
+				}
+				parent, cancel := context.WithTimeout(context.Background(), parentTimeout)
+				defer cancel()
+				c := newTestCollector(t)
+				var called bool
+				c.dnsLookup = func(ctx context.Context, _ DNSRequest) ([]net.IP, error) {
+					called = true
+					if tc.code == CodeCancelled {
+						cancel()
+					}
+					<-ctx.Done()
+					return nil, ctx.Err()
+				}
+				result, err := c.DNS(parent, DNSRequest{Hostname: "probe.example.test.", RecordType: DNSRecordA, Timeout: time.Second, MaxAnswers: 1})
+				if !called || CodeOf(err) != tc.code || IsTransient(err) != tc.transient || result.ErrorCode != tc.code || result.Status != DNSStatusFailed {
+					t.Fatalf("interrupted lookup: called=%t status=%q code=%q err=%v", called, result.Status, result.ErrorCode, err)
+				}
+				wire, err := json.Marshal(result)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var observed struct {
+					Status    DNSStatus `json:"status"`
+					ErrorCode ErrorCode `json:"errorCode"`
+				}
+				if err := json.Unmarshal(wire, &observed); err != nil || observed.Status != DNSStatusFailed || observed.ErrorCode != tc.code {
+					t.Fatalf("serialized lookup result %s: %v", wire, err)
+				}
+			})
+		})
 	}
 }

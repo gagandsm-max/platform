@@ -40,6 +40,7 @@ func (c *Collector) DNS(parent context.Context, r DNSRequest) (DNSResult, error)
 	result.DurationMicros = elapsed.Microseconds()
 	result.CompletedAt = c.now().UTC()
 	if lookupErr != nil {
+		result.Status = DNSStatusFailed
 		if ce := contextError(parent, ctx); ce != nil {
 			err = ce
 		} else {
@@ -52,7 +53,6 @@ func (c *Collector) DNS(parent context.Context, r DNSRequest) (DNSResult, error)
 				if CodeOf(err) != CodeDNSFailure {
 					err = newError(CodeDNSFailure, "DNS lookup failed", lookupErr, IsTransient(err))
 				}
-				result.Status = DNSStatusFailed
 			}
 		}
 		result.ErrorCode = CodeOf(err)
