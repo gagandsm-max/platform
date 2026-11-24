@@ -413,10 +413,27 @@ jobs:
 
           echo "Hosted cumulative peak capacity is UNKNOWN. Required free reserve: ${reserve_kib} KiB and 16384 inodes."
           snapshot || { echo "::error::Hosted disk preflight failed for $*"; exit 75; }
+          # Isolate only this command's subprocess group: a failing sampler must
+          # stop a blocked test rather than wait for the 50-minute job timeout.
+          command -v setsid >/dev/null || { echo "::error::setsid unavailable"; exit 75; }
+          setsid "$@" &
+          workload_pid=$!
+          sampler=""
+          stop_workload() {
+            kill -TERM -- "-${workload_pid}" 2>/dev/null || true
+          }
+          cancel_workload() {
+            stop_workload
+            [[ -z "$sampler" ]] || kill "$sampler" 2>/dev/null || true
+            echo "::error::Hosted test command cancelled"
+            exit 130
+          }
+          trap cancel_workload INT TERM
           (
             while sleep 15; do
               if ! sample; then
                 echo "::error::Hosted free-space/inode reserve crossed or measurement failed during $*"
+                stop_workload
                 exit 1
               fi
             done
@@ -424,13 +441,14 @@ jobs:
           sampler=$!
 
           status=0
-          "$@" || status=$?
-          # Check after the command even when it failed. Preserve the harness status.
+          wait "$workload_pid" || status=$?
+          # Check after the command even when it failed. Preserve test failure.
           observed=0
           snapshot || observed=$?
           kill "$sampler" 2>/dev/null || true
           sampler_status=0
           wait "$sampler" || sampler_status=$?
+          trap - INT TERM
           if (( observed != 0 || sampler_status != 143 )); then
             echo "::error::Hosted disk check failed for $*"
             (( status != 0 )) || status=75
