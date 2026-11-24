@@ -106,7 +106,11 @@ def evaluate_contract(wf: str, makefile: str, run_all: str) -> dict[str, list[st
     if "pull_request_target" in hdr_active:
         res["security"].append("Privileged trigger 'pull_request_target' is prohibited.")
     on_blk = m.group(1) if (m := re.search(r"(?ms)^on:\s*(?:#.*)?\n((?:  .*\n|\n)*)", header)) else ""
-    res["security"].extend(f"Missing {t!r} trigger." for t in ("pull_request", "workflow_dispatch") if not re.search(rf"(?m)^  {t}:\s*(?:#.*)?$", on_blk))
+    # Reject unauthorized events, including extra keys/duplicates: an allowlist beats
+    # mere presence checks for pull_request and push.
+    events = re.findall(r"(?m)^  ([A-Za-z_][A-Za-z0-9_]*):\s*(?:#.*)?$", on_blk)
+    if sorted(events) != ["pull_request", "push"]:
+        res["security"].append(f"Workflow events must be exactly pull_request and push; got {events!r}.")
     pblk = m.group(1) if (m := re.search(r"(?ms)^  push:\s*(?:#.*)?\n((?:    .*\n|\n)*)", on_blk)) else ""
     main_only = bool(re.search(r"(?m)^    branches:\s*\[\s*['\"]?main['\"]?\s*\]\s*(?:#.*)?$", pblk) or (
         re.search(r"(?m)^    branches:\s*(?:#.*)?$", pblk) and re.findall(r"(?m)^    (?:  )?-\s+['\"]?([^'\"#\n]+?)['\"]?\s*(?:#.*)?$", pblk) == ["main"]
@@ -206,7 +210,7 @@ def _job(jid: str, name: str, steps: str) -> str:
 
 
 COMPLIANT_FIXTURE = (
-    "name: Platform CI\non:\n  pull_request:\n  push:\n    branches: [main]\n  workflow_dispatch:\npermissions:\n  contents: read\njobs:\n"
+    "name: Platform CI\non:\n  pull_request:\n  push:\n    branches: [main]\npermissions:\n  contents: read\njobs:\n"
     + _job("static-contracts", "Static contracts",
            "      - &install-compose\n        name: Install Compose 5.5.0\n        run: |\n"
            "          curl -fsSL https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 -o /tmp/dc\n"
@@ -253,6 +257,26 @@ class TestCIHostedRunnerContractMutations(unittest.TestCase):
     def test_mutation_removing_node_prepull_fails(self) -> None:
         mut = COMPLIANT_FIXTURE.replace("run: docker pull node:20-alpine", 'run: echo "docker pull node:20-alpine"')
         self.assertTrue(any("node:20-alpine" in e for e in evaluate_contract(mut, self.makefile, self.run_all)["integration"]))
+
+    def test_mutation_extra_workflow_events_rejected(self) -> None:
+        for extra in ("workflow_dispatch", "schedule", "repository_dispatch", "pull_request_target"):
+            with self.subTest(event=extra):
+                mut = COMPLIANT_FIXTURE.replace("  pull_request:\n", f"  pull_request:\n  {extra}:\n", 1)
+                errs = evaluate_contract(mut, self.makefile, self.run_all)["security"]
+                self.assertTrue(any("Workflow events must be exactly" in e for e in errs), errs)
+
+    def test_mutation_missing_or_duplicate_event_rejected(self) -> None:
+        for name in ("pull_request", "push"):
+            with self.subTest(missing=name):
+                if name == "push":
+                    mut = COMPLIANT_FIXTURE.replace("  push:\n    branches: [main]\n", "", 1)
+                else:
+                    mut = COMPLIANT_FIXTURE.replace("  pull_request:\n", "", 1)
+                errs = evaluate_contract(mut, self.makefile, self.run_all)["security"]
+                self.assertTrue(any("Workflow events must be exactly" in e for e in errs), errs)
+        dup = COMPLIANT_FIXTURE.replace("  pull_request:\n", "  pull_request:\n  pull_request:\n", 1)
+        errs = evaluate_contract(dup, self.makefile, self.run_all)["security"]
+        self.assertTrue(any("Workflow events must be exactly" in e for e in errs), errs)
 
     def test_mutation_privileged_trigger_and_write_permission_fail(self) -> None:
         mut = (
