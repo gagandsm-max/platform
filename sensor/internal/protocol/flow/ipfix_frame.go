@@ -33,8 +33,9 @@ type IPFIXEnvelope struct {
 // IPFIXSet records the ID and the complete wire extent of an opaque Set.
 // Offset points to the 4-byte Set header; Length includes any padding.
 // Set IDs 2/3 signal Template/Options Template; >=256 signal Data Sets.
-// Reserved IDs are retained only as opaque framing evidence, never granted
-// template or data-record semantics by this parser.
+// Set IDs 0 and 1 are unused legacy values; 4..255 are reserved for future
+// use. Both classes remain opaque framing evidence, never granted template
+// or data-record semantics by this parser.
 type IPFIXSet struct {
 	ID     uint16
 	Offset uint16
@@ -45,6 +46,9 @@ type IPFIXSet struct {
 // It accepts a header-only message: RFC 7011 permits zero or more Sets.
 // Template withdrawal, template state, row decoding, trusted exporter binding,
 // UDP admission and tenant authority are deliberately out of scope.
+// Callers must not modify datagram concurrently during this call. A caller
+// retaining Set byte ranges for later decoding must first own/copy its receive
+// buffer; offsets in the returned result do not preserve the wire bytes.
 // On any malformed envelope it returns nil with an error (no partial result).
 func ParseIPFIXEnvelope(datagram []byte) (*IPFIXEnvelope, error) {
 	if len(datagram) < ipfixMessageHeaderLength || len(datagram) > ipfixMaxMessageLength {
