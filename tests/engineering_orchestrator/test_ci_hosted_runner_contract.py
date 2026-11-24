@@ -105,10 +105,21 @@ def evaluate_contract(wf: str, makefile: str, run_all: str) -> dict[str, list[st
     hdr_active = "\n".join(_active_lines(header, skip_echo=False))
     if "pull_request_target" in hdr_active:
         res["security"].append("Privileged trigger 'pull_request_target' is prohibited.")
-    on_blk = m.group(1) if (m := re.search(r"(?ms)^on:\s*(?:#.*)?\n((?:  .*\n|\n)*)", header)) else ""
+    on_blk = m.group(1) if (m := re.search(r"(?m)^on:[ \t]*(?:#[^\n]*)?\n((?:  [^\n]*\n|\n)*)", header)) else ""
     # Reject unauthorized events, including extra keys/duplicates: an allowlist beats
     # mere presence checks for pull_request and push.
-    events = re.findall(r"(?m)^  ([A-Za-z_][A-Za-z0-9_]*):\s*(?:#.*)?$", on_blk)
+    # Fail closed on all direct event declarations. Valid YAML inline mapping,
+    # quoted-key or alias forms must not bypass the exact permitted event set.
+    event_declarations = [line for line in on_blk.splitlines()
+                          if line.startswith("  ") and not line.startswith("    ")
+                          and line.strip() and not line.lstrip().startswith("#")]
+    events = []
+    for declaration in event_declarations:
+        key = re.match(r"  ([A-Za-z_][A-Za-z0-9_]*)[ \t]*:", declaration)
+        if key:
+            events.append(key.group(1))
+        if not re.fullmatch(r"  (pull_request|push):[ \t]*(?:#.*)?", declaration):
+            res["security"].append(f"Unauthorized or unrecognized workflow event: {declaration!r}.")
     if sorted(events) != ["pull_request", "push"]:
         res["security"].append(f"Workflow events must be exactly pull_request and push; got {events!r}.")
     pblk = m.group(1) if (m := re.search(r"(?ms)^  push:\s*(?:#.*)?\n((?:    .*\n|\n)*)", on_blk)) else ""
@@ -265,6 +276,15 @@ class TestCIHostedRunnerContractMutations(unittest.TestCase):
                 errs = evaluate_contract(mut, self.makefile, self.run_all)["security"]
                 self.assertTrue(any("Workflow events must be exactly" in e for e in errs), errs)
 
+    def test_mutation_inline_or_quoted_event_rejected(self) -> None:
+        for extra in ('  workflow_dispatch: {}\n', '  schedule: [{cron: "0 0 * * *"}]\n',
+                      '  repository_dispatch: {types: [test]}\n',
+                      '  "workflow_dispatch":\n'):
+            with self.subTest(extra=extra):
+                mutated = COMPLIANT_FIXTURE.replace('  pull_request:\n', '  pull_request:\n' + extra, 1)
+                errs = evaluate_contract(mutated, self.makefile, self.run_all)['security']
+                self.assertTrue(any('Unauthorized or unrecognized workflow event' in e for e in errs), errs)
+
     def test_mutation_missing_or_duplicate_event_rejected(self) -> None:
         for name in ("pull_request", "push"):
             with self.subTest(missing=name):
@@ -286,6 +306,38 @@ class TestCIHostedRunnerContractMutations(unittest.TestCase):
         )
         errs = evaluate_contract(mut, self.makefile, self.run_all)["security"]
         self.assertTrue(any("pull_request_target" in e for e in errs) and any("write" in e for e in errs) and any("persist-credentials" in e for e in errs), errs)
+
+
+class TestCIChangedFileWhitespaceGate(unittest.TestCase):
+    def test_committed_whitespace_and_unavailable_base_fail_closed(self) -> None:
+        import os
+        import subprocess
+        import tempfile
+
+        workflow = WORKFLOW_PATH.read_text('utf-8')
+        _, _, steps, errors = _parse_workflow(workflow)
+        self.assertFalse(errors, errors)
+        step = next(v for v in steps['static-contracts'] if 'Verify changed-file whitespace' in v)
+        script = '\n'.join(_step_run_lines(step)) + '\n'
+        def call(*cmd: str, cwd: Path) -> subprocess.CompletedProcess[str]:
+            return subprocess.run(cmd, cwd=cwd, text=True, capture_output=True, check=False)
+        with tempfile.TemporaryDirectory() as tmp:
+            wd = Path(tmp)
+            self.assertEqual(call('git', 'init', '-q', cwd=wd).returncode, 0)
+            self.assertEqual(call('git', 'config', 'user.name', 'Test', cwd=wd).returncode, 0)
+            self.assertEqual(call('git', 'config', 'user.email', 'test@example.invalid', cwd=wd).returncode, 0)
+            (wd / 'normal.txt').write_text('good\n', encoding='utf8')
+            self.assertEqual(call('git', 'add', '.', cwd=wd).returncode, 0)
+            self.assertEqual(call('git', 'commit', '-qm', 'clean parent', cwd=wd).returncode, 0)
+            parent = call('git', 'rev-parse', 'HEAD', cwd=wd).stdout.strip()
+            (wd / 'normal.txt').write_text('trailing space \n', encoding='utf8')
+            self.assertEqual(call('git', 'commit', '-qam', 'committed defect', cwd=wd).returncode, 0)
+            for base in (parent, '0' * 40, 'f' * 40, ''):
+                with self.subTest(base=base):
+                    env = dict(os.environ, BASE_SHA=base)
+                    p = subprocess.run(['bash', '-e', '-c', script], cwd=wd,
+                                       env=env, text=True, capture_output=True)
+                    self.assertNotEqual(p.returncode, 0, (base, p.stdout, p.stderr))
 
 
 if __name__ == "__main__":
