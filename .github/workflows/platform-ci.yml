@@ -65,10 +65,22 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git diff --check "${BASE_SHA}...HEAD"
+          # A clean working tree is not evidence that committed changes have no
+          # whitespace defects. Never replace an unknown comparison with an
+          # uncommitted-working-tree-only check.
+          if [[ ! "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Missing or malformed committed comparison SHA"
+            exit 1
+          fi
+          if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            empty_tree=$(git hash-object -t tree /dev/null)
+            git diff --check "$empty_tree" HEAD
           else
-            git diff --check
+            git cat-file -e "${BASE_SHA}^{commit}" || {
+              echo "::error::Required committed comparison SHA is unavailable: $BASE_SHA"
+              exit 1
+            }
+            git diff --check "${BASE_SHA}...HEAD"
           fi
 
       - name: Prepare deterministic environment
