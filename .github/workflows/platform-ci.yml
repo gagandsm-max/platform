@@ -5,7 +5,6 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -20,7 +19,7 @@ env:
 jobs:
   static-contracts:
     name: Static contracts
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Remove leftover root-owned Maven target
@@ -31,7 +30,7 @@ jobs:
           # git clean can run. Bind only core/; no prune, no worktree wipe.
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -45,15 +44,43 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - &install-compose
+        name: Install and verify job-local Docker Compose 5.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/platform-ci-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/platform-ci-docker-cli"
+          compose_version=$(docker compose version --short)
+          echo "Job-local Docker Compose version: $compose_version"
+          test "$compose_version" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
       - name: Verify changed-file whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git diff --check "${BASE_SHA}...HEAD"
+          # A clean working tree is not evidence that committed changes have no
+          # whitespace defects. Never replace an unknown comparison with an
+          # uncommitted-working-tree-only check.
+          if [[ ! "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Missing or malformed committed comparison SHA"
+            exit 1
+          fi
+          if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            empty_tree=$(git hash-object -t tree /dev/null)
+            git diff --check "$empty_tree" HEAD
           else
-            git diff --check
+            git cat-file -e "${BASE_SHA}^{commit}" || {
+              echo "::error::Required committed comparison SHA is unavailable: $BASE_SHA"
+              exit 1
+            }
+            git diff --check "${BASE_SHA}...HEAD"
           fi
 
       - name: Prepare deterministic environment
@@ -106,7 +133,7 @@ jobs:
 
   unit:
     name: Unit tests
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Remove leftover root-owned Maven target
@@ -114,7 +141,7 @@ jobs:
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -127,6 +154,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - *install-compose
 
       - name: Prepare environment
         env:
@@ -167,7 +196,7 @@ jobs:
 
   ui-build:
     name: UI test and production build
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Remove leftover root-owned Maven target
@@ -175,7 +204,7 @@ jobs:
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -201,7 +230,7 @@ jobs:
 
   integration-security:
     name: Integration, PostgreSQL, contract, security
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
       - name: Remove leftover root-owned Maven target
@@ -209,7 +238,7 @@ jobs:
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -222,6 +251,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - *install-compose
 
       - name: Preflight host container and port collision safety
         run: |
@@ -249,7 +280,7 @@ jobs:
           done
           if [ ${#COLLISIONS[@]} -gt 0 ]; then
             echo "[ERROR] Pre-existing Platform development containers detected: ${COLLISIONS[*]}"
-            echo "Platform development containers are present. Preserve developer data and run 'make dev-down' before self-hosted CI."
+            echo "Refusing to start CI with existing Platform development containers."
             exit 1
           fi
           echo "[OK] No normal development container collisions detected."
@@ -257,7 +288,7 @@ jobs:
           echo "==> [Preflight 2/2] Checking CI host port availability..."
           CI_PORTS=(21443 21000 21432 21123 21900 21379)
           OCCUPIED_PORTS=()
-          SS_LISTENERS=$(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true)
+          SS_LISTENERS=$(ss -tuln)
           for port in "${CI_PORTS[@]}"; do
             if printf '%s\n' "${SS_LISTENERS}" | grep -Eq "[:.]${port}[[:space:]]"; then
               OCCUPIED_PORTS+=("${port}")
@@ -304,7 +335,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, subprocess, sys
+          import json, os, subprocess, sys
 
           raw = subprocess.check_output(
               ["docker", "compose", "config", "--format", "json"],
@@ -312,30 +343,17 @@ jobs:
           )
           cfg = json.loads(raw)
 
+          run_identity = f"{os.environ['GITHUB_RUN_ID']}_{os.environ['GITHUB_RUN_ATTEMPT']}"
           expected_volumes = {
-              "platform_pg_data",
-              "platform_ch_data",
-              "platform_kafka_data",
-              "platform_valkey_data",
-              "platform_sensor_net_spool",
-              "platform_sensor_infra_spool",
+              f"platform_{suffix}": f"ci_{run_identity}_{suffix}"
+              for suffix in ("pg_data", "ch_data", "kafka_data", "valkey_data",
+                             "sensor_net_spool", "sensor_infra_spool")
           }
-          forbidden_names = set(expected_volumes)
 
           volumes = cfg.get("volumes", {})
-          missing = expected_volumes - set(volumes.keys())
-          if missing:
-              print(f"[ERROR] Rendered Compose missing volume definitions: {sorted(missing)}")
-              sys.exit(1)
-
-          for v_key in expected_volumes:
-              target = volumes[v_key].get("name", "")
-              if not target.startswith("ci_"):
-                  print(f"[ERROR] Volume target {v_key}='{target}' is not CI-prefixed")
-                  sys.exit(1)
-              if target in forbidden_names:
-                  print(f"[ERROR] Volume target {v_key} matches persistent dev volume '{target}'")
-                  sys.exit(1)
+          actual_volumes = {key: value.get("name") for key, value in volumes.items()}
+          if actual_volumes != expected_volumes:
+              sys.exit("[ERROR] Rendered Compose volumes differ from the six exact run/attempt targets.")
 
           expected_ports = {"21443", "21000", "21432", "21123", "21900", "21379"}
           dev_ports = {"28443", "23000", "25432", "28123", "29000", "26379", "25442"}
@@ -361,8 +379,91 @@ jobs:
           print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
           PY
 
+      - name: Set up hosted disk checks and preload Kafka fixture images
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/platform-ci-disk" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          reserve_kib=$((2 * 1024 * 1024))
+          if [[ ${1:-} == --initial ]]; then
+            reserve_kib=$((8 * 1024 * 1024))
+            shift
+          fi
+          docker_root=$(docker info --format '{{.DockerRootDir}}')
+          [[ "$docker_root" == /* ]]
+          paths=("$docker_root" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" /tmp)
+          if [[ -d /var/lib/containerd ]]; then
+            paths+=(/var/lib/containerd)
+          fi
+
+          sample() {
+            local blocks inodes
+            date -u
+            blocks=$(sudo -n df -Pk -- "${paths[@]}") || return 1
+            inodes=$(sudo -n df -Pi -- "${paths[@]}") || return 1
+            printf '%s\n' "$blocks" "$inodes"
+            awk -v minimum="$reserve_kib" 'NR > 1 && $4 < minimum { bad=1 } END { exit (NR < 2 || bad) }' <<< "$blocks" &&
+              awk 'NR > 1 && $4 < 16384 { bad=1 } END { exit (NR < 2 || bad) }' <<< "$inodes"
+          }
+
+          snapshot() {
+            timeout 20s docker system df && sample
+          }
+
+          echo "Hosted cumulative peak capacity is UNKNOWN. Required free reserve: ${reserve_kib} KiB and 16384 inodes."
+          snapshot || { echo "::error::Hosted disk preflight failed for $*"; exit 75; }
+          # Isolate only this command's subprocess group: a failing sampler must
+          # stop a blocked test rather than wait for the 50-minute job timeout.
+          command -v setsid >/dev/null || { echo "::error::setsid unavailable"; exit 75; }
+          setsid "$@" &
+          workload_pid=$!
+          sampler=""
+          stop_workload() {
+            kill -TERM -- "-${workload_pid}" 2>/dev/null || true
+          }
+          cancel_workload() {
+            stop_workload
+            [[ -z "$sampler" ]] || kill "$sampler" 2>/dev/null || true
+            echo "::error::Hosted test command cancelled"
+            exit 130
+          }
+          trap cancel_workload INT TERM
+          (
+            while sleep 15; do
+              if ! sample; then
+                echo "::error::Hosted free-space/inode reserve crossed or measurement failed during $*"
+                stop_workload
+                exit 1
+              fi
+            done
+          ) &
+          sampler=$!
+
+          status=0
+          wait "$workload_pid" || status=$?
+          # Check after the command even when it failed. Preserve test failure.
+          observed=0
+          snapshot || observed=$?
+          kill "$sampler" 2>/dev/null || true
+          sampler_status=0
+          wait "$sampler" || sampler_status=$?
+          trap - INT TERM
+          if (( observed != 0 || sampler_status != 143 )); then
+            echo "::error::Hosted disk check failed for $*"
+            (( status != 0 )) || status=75
+          fi
+          exit "$status"
+          BASH
+          chmod 0755 "$RUNNER_TEMP/platform-ci-disk"
+          "$RUNNER_TEMP/platform-ci-disk" --initial bash -e -c '
+            docker pull node:20-alpine
+            docker pull apache/kafka:3.8.0
+            docker image inspect --format "{{.Id}} {{json .RepoDigests}}" node:20-alpine apache/kafka:3.8.0
+          '
+
       - name: Prove isolated guarded Kafka storage contract
-        run: ./tests/run-kafka-storage-contract-test.sh
+        run: '"$RUNNER_TEMP/platform-ci-disk" ./tests/run-kafka-storage-contract-test.sh'
 
       - name: Explicitly provision fresh run-scoped Kafka storage
         env:
@@ -392,23 +493,24 @@ jobs:
           bash deploy/docker/kafka/deployment-preflight.sh check
 
       - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
-        run: make test-clickhouse-replay-migration
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-clickhouse-replay-migration'
 
       - name: Run 20-test integration suite
-        run: make test-integration
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-integration'
 
       - name: Run mandatory PostgreSQL suite
-        run: ./tests/run-core-day02-tests.sh
+        run: '"$RUNNER_TEMP/platform-ci-disk" ./tests/run-core-day02-tests.sh'
 
       - name: Run API and data contract suite
-        run: make test-contract
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-contract'
 
       - name: Run security smoke suite
-        run: make test-security-smoke
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-security-smoke'
 
       - name: Capture diagnostics on failure
         if: failure()
         run: |
+          [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 0
           docker compose ps || true
           docker compose logs --no-color --tail=250 || true
 
@@ -426,7 +528,23 @@ jobs:
           PROJECT="ci_${RUN_IDENTITY}"
           KAFKA_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
           KAFKA_STORAGE="ci_${RUN_IDENTITY}_kafka_identity"
-          grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env || exit 1
+          # Read-only proof of canonical stack teardown.
+          verify_teardown() {
+            containers=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")
+            networks=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT")
+            volumes=$(docker volume ls --format '{{.Name}}')
+            if [[ -n "$containers" || -n "$networks" ]] ||
+               grep -Eq "^${PROJECT}_(kafka_data|pg_data|ch_data|valkey_data|sensor_net_spool|sensor_infra_spool)$" <<< "$volumes"; then
+              echo "::error::Run-owned Compose resources remain for $PROJECT"
+              exit 1
+            fi
+          }
+          if ! grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env 2>/dev/null; then
+            echo "Canonical provisioning marker absent; checking for retained run resources."
+            verify_teardown
+            exit 0
+          fi
+          [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 1
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
           # Non-deleting host gate only; never call a production cleanup/volume-rm action.
           bash deploy/docker/kafka/deployment-preflight.sh down
@@ -454,3 +572,14 @@ jobs:
               docker volume rm "$volume"
             fi
           done
+          verify_teardown
+
+      - name: Record hosted disk and Docker inventory after cleanup
+        if: always()
+        run: |
+          df -h
+          df -i
+          timeout 20s docker system df
+          docker ps -a --format '{{.Names}}'
+          docker network ls
+          docker volume ls
