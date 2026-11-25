@@ -45,10 +45,17 @@ import static com.platform.core.sensorcontrol.pollgrant.SensorPollGrantEligibili
  *       {@code FOR SHARE}</li>
  *   <li>{@code platform.sensor_poll_grant} row {@code FOR SHARE}</li>
  * </ol>
- * Core evaluation time is sampled only after those locks are held so a window
- * that expires while waiting is rejected. Incarnation SHARE is intentionally
- * omitted here: V015 grants carry no {@code incarnation_id}, so locking an
- * unrelated ACTIVE incarnation would fake grant↔incarnation authority.
+ * Non-{@code ACTIVE} credential status is rejected after principal + credential
+ * identity match and <em>before</em> any grant lookup, so grant existence is not
+ * disclosed by decision branching. When status is {@code ACTIVE}, Core evaluation
+ * time is sampled after {@code findForShare} returns (present or absent) and
+ * credential inclusive time bounds are revalidated before the empty-branch
+ * decision, so a credential that expires while waiting for the grant lock is
+ * denied uniformly without a grant-existence oracle. This is logical denial
+ * nondisclosure only — not a claim of constant-time or complete timing-side-channel
+ * elimination. Incarnation SHARE is intentionally omitted here: V015 grants carry
+ * no {@code incarnation_id}, so locking an unrelated ACTIVE incarnation would fake
+ * grant↔incarnation authority.
  */
 public final class SensorPollGrantAccess {
 
@@ -114,19 +121,25 @@ public final class SensorPollGrantAccess {
         if (!credentialMatchesAuthority(credential, authority, principal)) {
             return SensorPollGrantEligibility.denied(Decision.CREDENTIAL_INACTIVE);
         }
+        // Status fence before grant lookup: REVOKED/SUPERSEDED must not oracle existence.
+        if (credential.status() != SensorCredentialStatus.ACTIVE) {
+            return SensorPollGrantEligibility.denied(Decision.CREDENTIAL_INACTIVE);
+        }
 
         Optional<SensorPollGrant> locked =
                 grants.findForShare(scope.tenantId(), scope.sensorId(), grantId);
+
+        Instant evaluatedAt = sampleEvaluationInstant();
+        // Post-lock credential revalidation (status + inclusive notBefore/notAfter)
+        // before empty branching — no grant-existence decision on invalid credential.
+        if (!credential.isValidAt(evaluatedAt)) {
+            return SensorPollGrantEligibility.denied(Decision.CREDENTIAL_INACTIVE);
+        }
+
         if (locked.isEmpty()) {
             return SensorPollGrantEligibility.denied(Decision.NOT_VISIBLE);
         }
         SensorPollGrant grant = locked.get();
-
-        Instant evaluatedAt = sampleEvaluationInstant();
-        if (!credential.isValidAt(evaluatedAt)
-                || credential.status() != SensorCredentialStatus.ACTIVE) {
-            return SensorPollGrantEligibility.denied(Decision.CREDENTIAL_INACTIVE);
-        }
 
         if (!entityAuthorized(principal, scope, grant.entityId())) {
             return SensorPollGrantEligibility.denied(Decision.ENTITY_OUT_OF_SCOPE);

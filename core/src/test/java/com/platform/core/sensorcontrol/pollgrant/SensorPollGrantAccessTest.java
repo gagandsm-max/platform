@@ -12,6 +12,10 @@ import com.platform.core.sensorcontrol.SensorRole;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.mockito.InOrder;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -32,7 +36,8 @@ import static org.mockito.Mockito.*;
 
 /**
  * Unit coverage for Issue #229 G1b read-only grant accessor. No public API,
- * companion wire, scheduler or typed admission wiring.
+ * companion wire, scheduler or typed admission wiring. Proves credential-status
+ * and post-lock time nondisclosure of grant existence (internal denial oracle).
  */
 class SensorPollGrantAccessTest {
 
@@ -75,21 +80,42 @@ class SensorPollGrantAccessTest {
         assertEquals(Decision.ELIGIBLE, outcome.decision());
         assertEquals(GRANT, outcome.grant().grantId());
         assertEquals(NOW, outcome.evaluatedAt());
-        verify(grants).requireHeldCallerTransaction("evaluateForNewExecution");
-        verify(sensors).lockPrincipalForShare(TENANT, SENSOR);
-        verify(sensors).lockCredentialForShare(CREDENTIAL);
-        verify(grants).findForShare(TENANT, SENSOR, GRANT);
+        InOrder order = inOrder(grants, sensors);
+        order.verify(grants).requireHeldCallerTransaction("evaluateForNewExecution");
+        order.verify(sensors).lockPrincipalForShare(TENANT, SENSOR);
+        order.verify(sensors).lockCredentialForShare(CREDENTIAL);
+        order.verify(grants).findForShare(TENANT, SENSOR, GRANT);
         verify(sensors, never()).listAllowedEntityIds(any(), any());
     }
 
     @Test
-    void coreTimeSampledOnlyAfterPrincipalCredentialAndGrantLocks() {
+    void activeValidMissingGrantIsNotVisible() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(activeCredential());
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.empty());
+
+        assertEquals(Decision.NOT_VISIBLE,
+                access.evaluateForNewExecution(request(null)).decision());
+        verify(grants).findForShare(TENANT, SENSOR, GRANT);
+    }
+
+    @Test
+    void coreTimeSampledAfterFindForShareForPresentAndAbsentOutcomes() {
+        assertCoreTimeFollowsFindForShare(Optional.of(issuedGrant()), Decision.ELIGIBLE);
+        reset(sensors, grants);
+        access = new SensorPollGrantAccess(sensors, grants, Clock.fixed(NOW, ZoneOffset.UTC));
+        assertCoreTimeFollowsFindForShare(Optional.empty(), Decision.NOT_VISIBLE);
+    }
+
+    private void assertCoreTimeFollowsFindForShare(
+            Optional<SensorPollGrant> locked, Decision expected) {
         AtomicBoolean clockSampled = new AtomicBoolean(false);
-        AtomicBoolean grantLocked = new AtomicBoolean(false);
+        AtomicBoolean grantLookupReturned = new AtomicBoolean(false);
         Clock gated = new Clock() {
             @Override
             public Instant instant() {
-                assertTrue(grantLocked.get(), "Core time must follow all three locks");
+                assertTrue(grantLookupReturned.get(),
+                        "Core time must follow findForShare for present and absent outcomes");
                 clockSampled.set(true);
                 return NOW;
             }
@@ -115,34 +141,106 @@ class SensorPollGrantAccessTest {
         });
         when(grants.findForShare(TENANT, SENSOR, GRANT)).thenAnswer(inv -> {
             assertFalse(clockSampled.get());
-            grantLocked.set(true);
-            return Optional.of(issuedGrant());
+            grantLookupReturned.set(true);
+            return locked;
         });
 
-        assertTrue(access.evaluateForNewExecution(request(null)).eligible());
+        assertEquals(expected, access.evaluateForNewExecution(request(null)).decision());
         assertTrue(clockSampled.get());
+    }
+
+    @ParameterizedTest
+    @EnumSource(value = SensorCredentialStatus.class, names = {"REVOKED", "SUPERSEDED"})
+    void nonActiveCredentialStatusDeniesWithoutGrantLookupWhetherPresentOrMissing(
+            SensorCredentialStatus status) {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                status, NOW.minusSeconds(3600), NOW.plusSeconds(3600)));
+
+        assertEquals(Decision.CREDENTIAL_INACTIVE,
+                access.evaluateForNewExecution(request(null)).decision());
+        verify(grants, never()).findForShare(any(), any(), any());
+
+        // Even if a stubbed present grant were available, status must short-circuit first.
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(issuedGrant()));
+        assertEquals(Decision.CREDENTIAL_INACTIVE,
+                access.evaluateForNewExecution(request(null)).decision());
+        verify(grants, never()).findForShare(any(), any(), any());
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void expiredCredentialDeniesUniformlyWithoutExistenceOracle(boolean grantPresent) {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                SensorCredentialStatus.ACTIVE,
+                NOW.minusSeconds(7200), NOW.minusSeconds(1)));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(
+                grantPresent ? Optional.of(issuedGrant()) : Optional.empty());
+
+        SensorPollGrantEligibility outcome = access.evaluateForNewExecution(request(null));
+        assertEquals(Decision.CREDENTIAL_INACTIVE, outcome.decision());
+        assertNull(outcome.grant());
+        verify(grants).findForShare(TENANT, SENSOR, GRANT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void notYetValidCredentialDeniesUniformlyWithoutExistenceOracle(boolean grantPresent) {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                SensorCredentialStatus.ACTIVE,
+                NOW.plusSeconds(1), NOW.plusSeconds(3600)));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(
+                grantPresent ? Optional.of(issuedGrant()) : Optional.empty());
+
+        assertEquals(Decision.CREDENTIAL_INACTIVE,
+                access.evaluateForNewExecution(request(null)).decision());
+        verify(grants).findForShare(TENANT, SENSOR, GRANT);
+    }
+
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    void credentialExpiryDuringGrantLockWaitDeniesBothOutcomes(boolean grantPresent) {
+        AtomicReference<Instant> now = new AtomicReference<>(NOW);
+        Clock mutable = mutableClock(now);
+        access = new SensorPollGrantAccess(sensors, grants, mutable);
+        Instant notAfter = NOW.plusSeconds(30);
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                SensorCredentialStatus.ACTIVE, NOW.minusSeconds(3600), notAfter));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenAnswer(inv -> {
+            // Simulate wait: credential expires before Core time is sampled.
+            now.set(notAfter.plusSeconds(1));
+            return grantPresent ? Optional.of(issuedGrant()) : Optional.empty();
+        });
+
+        SensorPollGrantEligibility outcome = access.evaluateForNewExecution(request(null));
+        assertEquals(Decision.CREDENTIAL_INACTIVE, outcome.decision());
+        assertNull(outcome.grant());
+        verify(grants).findForShare(TENANT, SENSOR, GRANT);
+    }
+
+    @Test
+    void credentialInclusiveTimeBoundariesRemainEligible() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(issuedGrant()));
+
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                SensorCredentialStatus.ACTIVE, NOW, NOW.plusSeconds(3600)));
+        assertTrue(access.evaluateForNewExecution(request(null)).eligible(),
+                "evaluatedAt == notBefore must be inclusive");
+
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(credential(
+                SensorCredentialStatus.ACTIVE, NOW.minusSeconds(3600), NOW));
+        assertTrue(access.evaluateForNewExecution(request(null)).eligible(),
+                "evaluatedAt == notAfter must be inclusive");
     }
 
     @Test
     void windowExpiryAfterLockWaitDeniesWithoutEligibleSnapshot() {
         AtomicReference<Instant> now = new AtomicReference<>(NOW);
-        Clock mutable = new Clock() {
-            @Override
-            public Instant instant() {
-                return now.get();
-            }
-
-            @Override
-            public ZoneOffset getZone() {
-                return ZoneOffset.UTC;
-            }
-
-            @Override
-            public Clock withZone(java.time.ZoneId zone) {
-                return this;
-            }
-        };
-        access = new SensorPollGrantAccess(sensors, grants, mutable);
+        access = new SensorPollGrantAccess(sensors, grants, mutableClock(now));
         when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenAnswer(inv -> {
             now.set(NOW.plusSeconds(120));
             return activePrincipal(true);
@@ -154,6 +252,27 @@ class SensorPollGrantAccessTest {
         SensorPollGrantEligibility outcome = access.evaluateForNewExecution(request(null));
         assertEquals(Decision.WINDOW_INACTIVE, outcome.decision());
         assertNull(outcome.grant());
+    }
+
+    @Test
+    void grantWindowInclusiveBoundariesRemainEligible() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(activeCredential());
+        SensorPollGrant atStart = new SensorPollGrant(
+                GRANT, TENANT, SENSOR, ENTITY, ENDPOINT, 1L, 0L, Protocol.ICMP,
+                AddressType.IPV4, "192.0.2.10", "plan", "v1",
+                NOW.minusSeconds(10), NOW, NOW.plusSeconds(60),
+                "issuer", Status.ISSUED, null, null, null, null, NOW.minusSeconds(10));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(atStart));
+        assertTrue(access.evaluateForNewExecution(request(null)).eligible());
+
+        SensorPollGrant atEnd = new SensorPollGrant(
+                GRANT, TENANT, SENSOR, ENTITY, ENDPOINT, 1L, 0L, Protocol.ICMP,
+                AddressType.IPV4, "192.0.2.10", "plan", "v1",
+                NOW.minusSeconds(10), NOW.minusSeconds(30), NOW,
+                "issuer", Status.ISSUED, null, null, null, null, NOW.minusSeconds(10));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(atEnd));
+        assertTrue(access.evaluateForNewExecution(request(null)).eligible());
     }
 
     @Test
@@ -177,6 +296,22 @@ class SensorPollGrantAccessTest {
                 "issuer", Status.REVOKED, NOW.minusSeconds(1), "revoker",
                 SensorPollGrant.RevocationClass.SECURITY, "security", NOW.minusSeconds(1));
         when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(revoked));
+
+        assertEquals(Decision.NOT_ISSUED,
+                access.evaluateForNewExecution(request(null)).decision());
+    }
+
+    @Test
+    void supersededGrantIsNotIssued() {
+        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
+        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(activeCredential());
+        SensorPollGrant superseded = new SensorPollGrant(
+                GRANT, TENANT, SENSOR, ENTITY, ENDPOINT, 1L, 0L, Protocol.ICMP,
+                AddressType.IPV4, "192.0.2.10", "plan", "v1",
+                NOW.minusSeconds(10), NOW.minusSeconds(30), NOW.plusSeconds(60),
+                "issuer", Status.SUPERSEDED, NOW.minusSeconds(1), "issuer",
+                SensorPollGrant.RevocationClass.SUPERSEDED, "superseded", NOW.minusSeconds(1));
+        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(superseded));
 
         assertEquals(Decision.NOT_ISSUED,
                 access.evaluateForNewExecution(request(null)).decision());
@@ -286,7 +421,7 @@ class SensorPollGrantAccessTest {
     }
 
     @Test
-    void inactivePrincipalIsDenied() {
+    void inactivePrincipalIsDeniedWithoutGrantLookup() {
         when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(new SensorPrincipal(
                 SENSOR, TENANT, null, SensorRole.NETWORK, SensorLifecycleStatus.DISABLED,
                 true, NOW.minusSeconds(60), NOW.minusSeconds(60)));
@@ -294,26 +429,12 @@ class SensorPollGrantAccessTest {
 
         assertEquals(Decision.PRINCIPAL_INACTIVE,
                 access.evaluateForNewExecution(request(null)).decision());
+        verify(sensors, never()).lockCredentialForShare(any());
         verify(grants, never()).findForShare(any(), any(), any());
     }
 
     @Test
-    void supersededCredentialIsDenied() {
-        when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
-        SensorCertificateCredential superseded = new SensorCertificateCredential(
-                CREDENTIAL, TENANT, SENSOR, FINGERPRINT, null, "serial", "CN=fixture",
-                null, NOW.minusSeconds(3600), NOW.plusSeconds(3600),
-                SensorCredentialStatus.SUPERSEDED, NOW.minusSeconds(3600), NOW.minusSeconds(10),
-                NOW.minusSeconds(3600), NOW.minusSeconds(10));
-        when(sensors.lockCredentialForShare(CREDENTIAL)).thenReturn(superseded);
-        when(grants.findForShare(TENANT, SENSOR, GRANT)).thenReturn(Optional.of(issuedGrant()));
-
-        assertEquals(Decision.CREDENTIAL_INACTIVE,
-                access.evaluateForNewExecution(request(null)).decision());
-    }
-
-    @Test
-    void credentialIdentityMismatchIsDenied() {
+    void credentialIdentityMismatchIsDeniedWithoutGrantLookup() {
         when(sensors.lockPrincipalForShare(TENANT, SENSOR)).thenReturn(activePrincipal(true));
         SensorCertificateCredential other = new SensorCertificateCredential(
                 CREDENTIAL, TENANT, SENSOR,
@@ -380,10 +501,16 @@ class SensorPollGrantAccessTest {
     }
 
     private static SensorCertificateCredential activeCredential(Instant notBefore, Instant notAfter) {
+        return credential(SensorCredentialStatus.ACTIVE, notBefore, notAfter);
+    }
+
+    private static SensorCertificateCredential credential(
+            SensorCredentialStatus status, Instant notBefore, Instant notAfter) {
         return new SensorCertificateCredential(
                 CREDENTIAL, TENANT, SENSOR, FINGERPRINT, null, "serial", "CN=fixture",
-                null, notBefore, notAfter, SensorCredentialStatus.ACTIVE,
-                notBefore, null, notBefore, notBefore);
+                null, notBefore, notAfter, status,
+                notBefore, status == SensorCredentialStatus.ACTIVE ? null : NOW.minusSeconds(10),
+                notBefore, notBefore);
     }
 
     private static SensorPollGrant issuedGrant() {
@@ -392,5 +519,24 @@ class SensorPollGrantAccessTest {
                 AddressType.IPV4, "192.0.2.10", "plan", "v1",
                 NOW.minusSeconds(10), NOW.minusSeconds(30), NOW.plusSeconds(60),
                 "issuer", Status.ISSUED, null, null, null, null, NOW.minusSeconds(10));
+    }
+
+    private static Clock mutableClock(AtomicReference<Instant> now) {
+        return new Clock() {
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(java.time.ZoneId zone) {
+                return this;
+            }
+        };
     }
 }
