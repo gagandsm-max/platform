@@ -10,8 +10,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # PRs share a stable group so superseding commits cancel stale PR checks.
+  # Push/main uses run_id so a later merge cannot cancel earlier main evidence.
+  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PLATFORM_CI: "1"
@@ -231,8 +233,32 @@ jobs:
   integration-security:
     name: Integration, PostgreSQL, contract, security
     runs-on: ubuntu-24.04
+    # Job ceiling remains 50 without Master approval to raise it.
+    # Measured normal overnight integration ≈19m (1140s). Worst-case ≠ normal.
+    # Enforceable work cutoff: 44m from job-start epoch; reserved diagnostics+cleanup
+    # headroom: 6m (diagnostics ≤2 + cleanup/inventory ≤4). 44+6=50, never 60.
+    # Informative hang-guards inside the work cutoff (sum ≤44, not a second ceiling):
+    # setup/preload ≤6; kafka contract ≤5; kafka provision ≤3; clickhouse ≤6;
+    # integration ≤12; postgres ≤4; contract ≤3; security ≤3 (=39 ≤44).
     timeout-minutes: 50
     steps:
+      # Establish job-start epoch before checkout/compose/setup so the 44m work
+      # cutoff accounts for earlier steps and preserves the 6m teardown reserve.
+      - name: Establish hosted work cutoff with teardown reserve
+        run: |
+          set -euo pipefail
+          job_ceiling_seconds=$((50 * 60))
+          reserved_teardown_seconds=$((6 * 60))
+          work_budget_seconds=$((job_ceiling_seconds - reserved_teardown_seconds))
+          start_epoch=$(date +%s)
+          cutoff_epoch=$((start_epoch + work_budget_seconds))
+          {
+            echo "PLATFORM_CI_JOB_START_EPOCH=${start_epoch}"
+            echo "PLATFORM_CI_WORK_CUTOFF_EPOCH=${cutoff_epoch}"
+            echo "PLATFORM_CI_RESERVED_TEARDOWN_SECONDS=${reserved_teardown_seconds}"
+          } >> "$GITHUB_ENV"
+          echo "Hosted timing budget: ceiling=${job_ceiling_seconds}s work_cutoff=${work_budget_seconds}s reserved_teardown=${reserved_teardown_seconds}s (normal overnight ≈1140s)."
+
       - name: Remove leftover root-owned Maven target
         run: |
           set -euo pipefail
@@ -412,47 +438,280 @@ jobs:
           }
 
           echo "Hosted cumulative peak capacity is UNKNOWN. Required free reserve: ${reserve_kib} KiB and 16384 inodes."
+          # Enforceable aggregate work cutoff (job ceiling 50m minus reserved teardown).
+          if [[ -n "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" ]]; then
+            now_epoch=$(date +%s)
+            if (( now_epoch >= PLATFORM_CI_WORK_CUTOFF_EPOCH )); then
+              echo "::error::Hosted work cutoff reached; reserved diagnostics/cleanup headroom must remain"
+              exit 75
+            fi
+          fi
           snapshot || { echo "::error::Hosted disk preflight failed for $*"; exit 75; }
           # Isolate only this command's subprocess group: a failing sampler must
           # stop a blocked test rather than wait for the 50-minute job timeout.
           command -v setsid >/dev/null || { echo "::error::setsid unavailable"; exit 75; }
-          setsid "$@" &
+          # Parent-only bounded TERM→KILL reap. Sampler may signal the group but
+          # must not wait on workload_pid. Never hardcode sampler_status=143.
+          # `( exec setsid … ) &` makes the workload its own session/process-group
+          # leader. Bare `setsid … &` keeps the launcher in this shell's group so
+          # `kill -- -PGID` would TERM the disk wrapper itself.
+          term_grace_seconds=${PLATFORM_CI_TERM_GRACE_SECONDS:-15}
+          sampler_interval_seconds=${PLATFORM_CI_SAMPLER_INTERVAL_SECONDS:-15}
+          cutoff_poll_seconds=${PLATFORM_CI_CUTOFF_POLL_SECONDS:-1}
+          sampler_fail_marker="$RUNNER_TEMP/platform-ci-disk-sampler-failed.$$"
+          sampler_stop_marker="$RUNNER_TEMP/platform-ci-disk-sampler-stop.$$"
+          cutoff_fail_marker="$RUNNER_TEMP/platform-ci-disk-cutoff-failed.$$"
+          rm -f "$sampler_fail_marker" "$sampler_stop_marker" "$cutoff_fail_marker"
+          (
+            exec setsid "$@"
+          ) &
           workload_pid=$!
           sampler=""
-          stop_workload() {
+          escalator=""
+          cutoff_monitor=""
+          process_group_alive() {
+            # Process-group liveness (not PID-only): any remaining member counts.
+            # Fall back to the leader PID when killpg returns ESRCH across sessions.
+            kill -0 -- "-$1" 2>/dev/null || kill -0 "$1" 2>/dev/null
+          }
+          # kill -0 succeeds on zombies; treat zombie/self-exit as exited.
+          pid_has_exited() {
+            local pid="$1" state=""
+            [[ -n "$pid" ]] || return 0
+            if [[ -r "/proc/$pid/status" ]]; then
+              state=$(awk '/^State:/ {print $2; exit}' "/proc/$pid/status" 2>/dev/null || true)
+              [[ "$state" == "Z" ]] && return 0
+              return 1
+            fi
+            ! kill -0 "$pid" 2>/dev/null
+          }
+          # Prevent group-start race: do not arm sampler until PGID is addressable
+          # or the workload has already exited.
+          group_ready_deadline=$((SECONDS + 5))
+          while ! process_group_alive "$workload_pid" && ! pid_has_exited "$workload_pid"; do
+            if (( SECONDS >= group_ready_deadline )); then
+              echo "::error::Workload process group failed to become addressable"
+              wait "$workload_pid" 2>/dev/null || true
+              exit 75
+            fi
+            sleep 0.1
+          done
+          stop_workload_signal() {
+            # Prefer process-group TERM; also signal the leader PID when killpg
+            # returns ESRCH for a setsid session leader visible only by PID.
             kill -TERM -- "-${workload_pid}" 2>/dev/null || true
+            kill -TERM "${workload_pid}" 2>/dev/null || true
+          }
+          publish_sampler_failure() {
+            # Sticky failure BEFORE TERM. Parent observes even if sampler still live
+            # and the workload traps TERM to exit 0.
+            printf '%s\n' "${1:-1}" > "$sampler_fail_marker"
+          }
+          publish_cutoff_failure() {
+            # Sticky aggregate-deadline failure BEFORE TERM. A workload that traps
+            # TERM and exits 0 must still fail closed once the work cutoff is crossed.
+            printf '%s\n' "${1:-75}" > "$sampler_fail_marker"
+            printf 'cutoff\n' > "$cutoff_fail_marker"
+          }
+          work_cutoff_reached() {
+            [[ -n "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" ]] || return 1
+            local now_epoch
+            now_epoch=$(date +%s)
+            (( now_epoch >= PLATFORM_CI_WORK_CUTOFF_EPOCH ))
+          }
+          mark_sampler_stop_intentional() {
+            printf 'stop\n' > "$sampler_stop_marker"
+          }
+          reap_workload_group() {
+            local rc=0 deadline
+            stop_workload_signal
+            deadline=$((SECONDS + term_grace_seconds))
+            while process_group_alive "$workload_pid"; do
+              if (( SECONDS >= deadline )); then
+                echo "::warning::Workload process group ignored SIGTERM; sending SIGKILL"
+                kill -KILL -- "-${workload_pid}" 2>/dev/null || true
+                kill -KILL "${workload_pid}" 2>/dev/null || true
+                sleep 1
+                break
+              fi
+              sleep 1
+            done
+            wait "$workload_pid" 2>/dev/null || rc=$?
+            if process_group_alive "$workload_pid"; then
+              echo "::error::Workload process group still alive after TERM/KILL reap"
+              return 75
+            fi
+            return "$rc"
+          }
+          stop_helper_pid() {
+            local pid="$1"
+            [[ -n "$pid" ]] || return 0
+            # Owned helper only: children of this pid, then the helper itself.
+            pkill -KILL -P "$pid" 2>/dev/null || true
+            kill -KILL "$pid" 2>/dev/null || true
+            wait "$pid" 2>/dev/null || true
           }
           cancel_workload() {
-            stop_workload
-            [[ -z "$sampler" ]] || kill "$sampler" 2>/dev/null || true
+            # Ignore further INT/TERM so restoring default cannot redeliver the
+            # original SIGTERM and kill this shell before exit 130 / reap completes.
+            trap '' INT TERM
+            mark_sampler_stop_intentional
+            stop_helper_pid "${cutoff_monitor:-}"
+            cutoff_monitor=""
+            stop_helper_pid "${escalator:-}"
+            escalator=""
+            stop_helper_pid "${sampler:-}"
+            sampler=""
+            reap_workload_group || true
             echo "::error::Hosted test command cancelled"
             exit 130
           }
           trap cancel_workload INT TERM
           (
-            while sleep 15; do
+            while sleep "$sampler_interval_seconds"; do
               if ! sample; then
                 echo "::error::Hosted free-space/inode reserve crossed or measurement failed during $*"
-                stop_workload
+                publish_sampler_failure 1
+                stop_workload_signal
                 exit 1
               fi
             done
           ) &
           sampler=$!
+          # Signal-only escalator: if sampler dies and the workload ignores TERM,
+          # escalate to KILL. Parent alone waits on workload_pid (no double-wait).
+          (
+            while ! pid_has_exited "$sampler"; do
+              process_group_alive "$workload_pid" || exit 0
+              sleep 1
+            done
+            process_group_alive "$workload_pid" || exit 0
+            deadline=$((SECONDS + term_grace_seconds))
+            while process_group_alive "$workload_pid"; do
+              if (( SECONDS >= deadline )); then
+                echo "::warning::Workload process group ignored SIGTERM; sending SIGKILL"
+                kill -KILL -- "-${workload_pid}" 2>/dev/null || true
+                kill -KILL "${workload_pid}" 2>/dev/null || true
+                exit 0
+              fi
+              sleep 1
+            done
+          ) &
+          escalator=$!
+          # Active aggregate deadline monitor: enforce cutoff during work while the
+          # parent keeps a real wait (cancel/reap path must not become a zombie with
+          # live setsid children holding stdout pipes). Sticky publish before TERM so
+          # a TERM→0 trap cannot green past the reserved teardown window.
+          if [[ -n "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" ]]; then
+            (
+              while ! pid_has_exited "$workload_pid"; do
+                if work_cutoff_reached; then
+                  echo "::error::Hosted work cutoff reached during active command; reserved diagnostics/cleanup headroom must remain"
+                  publish_cutoff_failure 75
+                  stop_workload_signal
+                  deadline=$((SECONDS + term_grace_seconds))
+                  while process_group_alive "$workload_pid"; do
+                    if (( SECONDS >= deadline )); then
+                      echo "::warning::Workload process group ignored SIGTERM; sending SIGKILL"
+                      kill -KILL -- "-${workload_pid}" 2>/dev/null || true
+                      kill -KILL "${workload_pid}" 2>/dev/null || true
+                      break
+                    fi
+                    sleep 1
+                  done
+                  exit 0
+                fi
+                sleep "$cutoff_poll_seconds"
+              done
+            ) &
+            cutoff_monitor=$!
+          fi
 
           status=0
+          sampler_status=0
+          sampler_failed=0
+          sticky_rc=""
           wait "$workload_pid" || status=$?
-          # Check after the command even when it failed. Preserve test failure.
+
+          # Teardown helpers without delivering SIGTERM to this shell's group.
+          trap - INT TERM
+          stop_helper_pid "${cutoff_monitor:-}"
+          cutoff_monitor=""
+          stop_helper_pid "${escalator:-}"
+          escalator=""
+          if [[ -f "$sampler_fail_marker" ]]; then
+            sampler_failed=1
+            sticky_rc=$(tr -cd '0-9' < "$sampler_fail_marker" | head -c 3 || true)
+            [[ -n "$sticky_rc" ]] || sticky_rc=1
+          fi
+          if [[ -n "${sampler:-}" ]]; then
+            if pid_has_exited "$sampler"; then
+              wait "$sampler" 2>/dev/null || sampler_status=$?
+              sampler=""
+              # Unexpected sampler exit without intentional-stop mark is a failure.
+              if [[ ! -f "$sampler_stop_marker" ]]; then
+                sampler_failed=1
+              fi
+            elif [[ -f "$sampler_fail_marker" ]]; then
+              # Sticky failure already published; bounded join then owned reap.
+              join_deadline=$((SECONDS + term_grace_seconds))
+              while ! pid_has_exited "$sampler"; do
+                if (( SECONDS >= join_deadline )); then
+                  break
+                fi
+                sleep 1
+              done
+              if pid_has_exited "$sampler"; then
+                wait "$sampler" 2>/dev/null || sampler_status=$?
+              else
+                stop_helper_pid "$sampler"
+                # Reap artifact (137/143) must not erase sticky disk-failure code.
+                sampler_status=${sticky_rc:-1}
+              fi
+              sampler=""
+              sampler_failed=1
+            else
+              # Intentional post-workload shutdown — not a disk-sampler failure.
+              mark_sampler_stop_intentional
+              stop_helper_pid "$sampler"
+              sampler=""
+            fi
+          fi
+          if process_group_alive "$workload_pid"; then
+            echo "::warning::Workload leader waited but process group still live; escalating"
+            kill -KILL -- "-${workload_pid}" 2>/dev/null || true
+            kill -KILL "${workload_pid}" 2>/dev/null || true
+            sleep 1
+            if process_group_alive "$workload_pid"; then
+              echo "::error::Workload process group still alive after TERM/KILL reap"
+              (( status != 0 )) || status=75
+            fi
+          fi
+
+          # Check after the command even when it failed. Preserve primary status.
           observed=0
           snapshot || observed=$?
-          kill "$sampler" 2>/dev/null || true
-          sampler_status=0
-          wait "$sampler" || sampler_status=$?
-          trap - INT TERM
-          if (( observed != 0 || sampler_status != 143 )); then
+          if (( sampler_failed != 0 )); then
+            # Prefer sticky failure over helper-reap 137/143; never invent success.
+            if [[ -n "${sticky_rc:-}" && "$sticky_rc" != 0 ]]; then
+              if (( sampler_status == 0 || sampler_status == 137 || sampler_status == 143 )); then
+                sampler_status=$sticky_rc
+              fi
+            fi
+            (( sampler_status != 0 )) || sampler_status=1
+            if [[ -f "$cutoff_fail_marker" ]]; then
+              echo "::error::Hosted work cutoff enforced for $* (exit=${sampler_status})"
+            else
+              echo "::error::Hosted disk sampler failed for $* (exit=${sampler_status})"
+            fi
+            (( status != 0 )) || status=$sampler_status
+            (( status != 0 )) || status=75
+          fi
+          if (( observed != 0 )); then
             echo "::error::Hosted disk check failed for $*"
             (( status != 0 )) || status=75
           fi
+          rm -f "$sampler_fail_marker" "$sampler_stop_marker" "$cutoff_fail_marker"
           exit "$status"
           BASH
           chmod 0755 "$RUNNER_TEMP/platform-ci-disk"
@@ -471,6 +730,19 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          if [[ -n "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" ]]; then
+            now_epoch=$(date +%s)
+            if (( now_epoch >= PLATFORM_CI_WORK_CUTOFF_EPOCH )); then
+              echo "::error::Hosted work cutoff reached; reserved diagnostics/cleanup headroom must remain"
+              exit 75
+            fi
+            remaining=$((PLATFORM_CI_WORK_CUTOFF_EPOCH - now_epoch))
+          else
+            remaining=180
+          fi
+          # Informative hang-guard ≤3m inside the aggregate work cutoff.
+          (( remaining > 180 )) && remaining=180
+          (( remaining > 0 )) || { echo "::error::Hosted work cutoff reached; reserved diagnostics/cleanup headroom must remain"; exit 75; }
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
           EXPECTED_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${EXPECTED_VOLUME}" .env
@@ -479,20 +751,26 @@ jobs:
             echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
             exit 1
           fi
-          CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
-            --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
-            -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
-          [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
-          STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
-          printf '\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n' \
-            "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
-          printf 'COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n' \
-            "${RUN_IDENTITY}" >> .env
-          PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
-            bash deploy/docker/kafka/deployment-preflight.sh provision
-          bash deploy/docker/kafka/deployment-preflight.sh check
+          timeout "${remaining}s" bash -euo pipefail -c '
+            CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
+              --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
+              -c "/opt/kafka/bin/kafka-storage.sh random-uuid")
+            [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
+            STORAGE_ID="ci_'"${RUN_IDENTITY}"'_kafka_identity"
+            printf "\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n" \
+              "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
+            printf "COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n" \
+              "'"${RUN_IDENTITY}"'" >> .env
+            PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
+              bash deploy/docker/kafka/deployment-preflight.sh provision
+            bash deploy/docker/kafka/deployment-preflight.sh check
+          '
 
       - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
+        env:
+          # Routing marker for #344 hosted-ci fixture profile. Not isolation proof;
+          # external verified GitHub-hosted VM admission remains the authority.
+          AMRUDAI_REPLAY_RUNTIME_PROFILE: hosted-ci
         run: '"$RUNNER_TEMP/platform-ci-disk" make test-clickhouse-replay-migration'
 
       - name: Run 20-test integration suite
@@ -511,8 +789,9 @@ jobs:
         if: failure()
         run: |
           [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 0
-          docker compose ps || true
-          docker compose logs --no-color --tail=250 || true
+          # Bounded diagnostics inside the reserved teardown window (≤2m).
+          timeout 60s docker compose ps || true
+          timeout 60s docker compose logs --no-color --tail=250 || true
 
       - name: Clean CI stack
         if: always()
@@ -522,6 +801,12 @@ jobs:
         run: |
           set -euo pipefail
           # CI-only disposable fixture cleanup. Production preflight has no volume-rm path.
+          # Interrupted cleanup is positively owned and fails closed (never silent success).
+          cleanup_interrupted() {
+            echo "::error::Owned CI Kafka/stack cleanup interrupted; failing closed"
+            exit 75
+          }
+          trap cleanup_interrupted INT TERM
           [[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo "[ERROR] Kafka volume cleanup requires GitHub Actions."; exit 1; }
           [[ "${RUN_ID}" =~ ^[0-9]+$ && "${RUN_ATTEMPT}" =~ ^[0-9]+$ ]] || exit 1
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
@@ -539,40 +824,59 @@ jobs:
               exit 1
             fi
           }
+          # Ambiguous/unproven ownership: .env declares a different project than this
+          # run identity. Never mutate or volume-delete by fallback.
+          if [[ -f .env ]] && grep -Eq '^COMPOSE_PROJECT_NAME=' .env \
+            && ! grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env; then
+            echo "::error::Ambiguous/unproven Compose project ownership; refusing cleanup mutation"
+            exit 1
+          fi
           if ! grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env 2>/dev/null; then
-            echo "Canonical provisioning marker absent; checking for retained run resources."
+            echo "Canonical provisioning marker absent; verify residuals only (no volume-delete fallback)."
             verify_teardown
+            trap - INT TERM
             exit 0
           fi
           [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 1
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
-          # Non-deleting host gate only; never call a production cleanup/volume-rm action.
-          bash deploy/docker/kafka/deployment-preflight.sh down
-          # Kafka volume: positive disposable provenance = this Actions run identity +
-          # exact ownership labels + no remaining attachments. Matching STORAGE alone
-          # is not deletion authorization.
-          if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
-            [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
-            kafka_labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "${KAFKA_VOLUME}")
-            [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
-            users=$(docker ps -aq --filter "volume=${KAFKA_VOLUME}") || exit 1
-            [[ -z "$users" ]] || exit 1
-            docker volume rm "${KAFKA_VOLUME}"
-          fi
-          # Non-Kafka CI volumes: exact Compose project/volume provenance + no attachments.
-          for pair in platform_pg_data:pg_data platform_ch_data:ch_data \
-              platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
-              platform_sensor_infra_spool:sensor_infra_spool; do
-            resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
-            if docker volume inspect "$volume" >/dev/null 2>&1; then
-              labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume")
-              [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
-              users=$(docker ps -aq --filter "volume=$volume") || exit 1
+          # Bound cleanup inside reserved teardown (≤4m); leave headroom for inventory.
+          cleanup_budget=${PLATFORM_CI_RESERVED_TEARDOWN_SECONDS:-360}
+          (( cleanup_budget > 240 )) && cleanup_budget=240
+          (( cleanup_budget > 0 )) || cleanup_budget=240
+          timeout "${cleanup_budget}s" bash -euo pipefail -c '
+            PROJECT="'"${PROJECT}"'"
+            KAFKA_VOLUME="'"${KAFKA_VOLUME}"'"
+            KAFKA_STORAGE="'"${KAFKA_STORAGE}"'"
+            RUN_IDENTITY="'"${RUN_IDENTITY}"'"
+            # Non-deleting host gate only; never call a production cleanup/volume-rm action.
+            bash deploy/docker/kafka/deployment-preflight.sh down
+            # Kafka volume: positive disposable provenance = this Actions run identity +
+            # exact ownership labels + no remaining attachments. Matching STORAGE alone
+            # is not deletion authorization.
+            if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
+              [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
+              kafka_labels=$(docker volume inspect -f "{{index .Labels \"issue223.owner\"}}|{{index .Labels \"platform.kafka.project\"}}|{{index .Labels \"platform.kafka.storage-id\"}}|{{index .Labels \"platform.kafka.resource\"}}" "${KAFKA_VOLUME}")
+              [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
+              users=$(docker ps -aq --filter "volume=${KAFKA_VOLUME}") || exit 1
               [[ -z "$users" ]] || exit 1
-              docker volume rm "$volume"
+              docker volume rm "${KAFKA_VOLUME}"
             fi
-          done
+            # Non-Kafka CI volumes: exact Compose project/volume provenance + no attachments.
+            for pair in platform_pg_data:pg_data platform_ch_data:ch_data \
+                platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
+                platform_sensor_infra_spool:sensor_infra_spool; do
+              resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
+              if docker volume inspect "$volume" >/dev/null 2>&1; then
+                labels=$(docker volume inspect -f "{{index .Labels \"com.docker.compose.project\"}}|{{index .Labels \"com.docker.compose.volume\"}}" "$volume")
+                [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
+                users=$(docker ps -aq --filter "volume=$volume") || exit 1
+                [[ -z "$users" ]] || exit 1
+                docker volume rm "$volume"
+              fi
+            done
+          '
           verify_teardown
+          trap - INT TERM
 
       - name: Record hosted disk and Docker inventory after cleanup
         if: always()
