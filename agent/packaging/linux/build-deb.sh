@@ -18,9 +18,9 @@ sha256_file() {
 
 usage() {
   cat <<'EOF'
-Usage: build-deb.sh --binary PATH --version VER --source-commit SHA40 --out DIR
-                     [--architecture amd64] [--source-date-epoch EPOCH]
-                     [--binary-sha256 HEX] [--runtime-version TEXT]
+Usage: build-deb.sh --binary PATH --binary-sha256 SHA64 --version VER --source-commit SHA40 --out DIR
+                     [--architecture amd64|arm64] [--source-date-epoch EPOCH]
+                     [--runtime-version TEXT]
 
 Run from repository root. Produces UNSIGNED/INTERNAL_ONLY artifacts only.
 EOF
@@ -43,7 +43,11 @@ while [[ $# -gt 0 ]]; do
     --out) OUT_DIR="${2:-}"; shift 2 ;;
     --architecture) ARCH="${2:-}"; shift 2 ;;
     --source-date-epoch) SOURCE_DATE_EPOCH="${2:-}"; shift 2 ;;
-    --binary-sha256) BINARY_SHA256="${2:-}"; shift 2 ;;
+    --binary-sha256)
+      [[ $# -ge 2 ]] || die "--binary-sha256 is required and must be 64 lowercase hex digits"
+      BINARY_SHA256="$2"
+      shift 2
+      ;;
     --runtime-version) RUNTIME_VERSION="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
@@ -51,6 +55,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ -n "$BINARY" && -n "$VERSION" && -n "$SOURCE_COMMIT" && -n "$OUT_DIR" ]] || { usage; die "missing required arguments"; }
+[[ "$BINARY_SHA256" =~ ^[0123456789abcdef]{64}$ ]] || die "--binary-sha256 is required and must be 64 lowercase hex digits"
 
 REPO_ROOT="$(pwd)"
 LAYOUT="${REPO_ROOT}/agent/packaging/linux/package-layout.json"
@@ -70,19 +75,61 @@ need_cmd dpkg-deb
 need_cmd sha256sum
 need_cmd awk
 need_cmd install
+need_cmd python3
 
 [[ -f "$BINARY" && ! -L "$BINARY" ]] || die "binary must be a regular non-symlink file"
 BIN_SIZE="$(stat -c '%s' "$BINARY")"
 [[ "$BIN_SIZE" -gt 0 && "$BIN_SIZE" -le 268435456 ]] || die "binary size out of bounds: ${BIN_SIZE}"
 ACTUAL_SHA="$(sha256_file "$BINARY")"
-if [[ -n "$BINARY_SHA256" ]]; then
-  [[ "$ACTUAL_SHA" == "$BINARY_SHA256" ]] || die "binary sha256 mismatch want=${BINARY_SHA256} got=${ACTUAL_SHA}"
-fi
+[[ "$ACTUAL_SHA" == "$BINARY_SHA256" ]] || die "binary sha256 mismatch want=${BINARY_SHA256} got=${ACTUAL_SHA}"
 
 [[ "$VERSION" =~ ^[0-9][A-Za-z0-9.+~-]{0,63}$ ]] || die "version unsupported: ${VERSION}"
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "source-commit must be 40 lowercase hex"
 [[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "architecture unsupported for this slice: ${ARCH}"
 [[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || die "source-date-epoch must be integer"
+
+if ! ELF_ERROR="$(python3 - "$BINARY" "$ARCH" "$BIN_SIZE" <<'PY'
+import struct
+import sys
+
+path, arch, size = sys.argv[1:]
+size = int(size)
+expected_machine = {"amd64": 62, "arm64": 183}[arch]
+
+def refuse(message):
+    print(message)
+    sys.exit(1)
+
+with open(path, "rb") as binary:
+    header = binary.read(64)
+    if len(header) != 64 or header[:7] != b'\x7fELF\x02\x01\x01':
+        refuse("binary must be an ELF64 little-endian executable")
+
+    kind, machine, version, entry, phoff, _, _, ehsize, phentsize, phnum, *_ = (
+        struct.unpack_from("<HHIQQQIHHHHHH", header, 16)
+    )
+    if machine != expected_machine:
+        refuse(f"binary ELF machine mismatch for {arch}: expected {expected_machine}, found {machine}")
+    if (kind not in (2, 3) or version != 1 or ehsize != 64 or phentsize != 56
+            or not entry or not phnum or phoff < ehsize or phoff + phnum * phentsize > size):
+        refuse("binary must be an ELF64 little-endian executable with valid program headers")
+
+    # An executable (including PIE) needs an entry point backed by executable file bytes.
+    binary.seek(phoff)
+    for _ in range(phnum):
+        segment = binary.read(phentsize)
+        if len(segment) != phentsize:
+            refuse("binary ELF program headers are truncated")
+        segment_type, flags, offset, vaddr, _, filesz, memsz, _ = struct.unpack("<IIQQQQQQ", segment)
+        if (segment_type == 1 and flags & 1 and filesz <= memsz
+                and offset + filesz <= size and vaddr <= entry < vaddr + filesz):
+            break
+    else:
+        refuse("binary ELF entry point is not backed by an executable load segment")
+PY
+)"; then
+  die "${ELF_ERROR:-could not validate binary ELF}"
+fi
 
 # Native unit contract: ExecStart must be /opt/platform/agent/platform-agent-linux
 grep -qx 'ExecStart=/opt/platform/agent/platform-agent-linux' "$UNIT_SRC" \
@@ -108,6 +155,8 @@ install -d -m 0755 "${STAGE}/usr/share/platform-agent/systemd"
 install -m 0644 "${REPO_ROOT}/agent/linux/systemd/ebpf/20-ebpf.conf" "${STAGE}/usr/share/platform-agent/systemd/20-ebpf.conf"
 
 install -m 0755 "$BINARY" "${STAGE}/opt/platform/agent/platform-agent-linux"
+[[ "$(sha256_file "${STAGE}/opt/platform/agent/platform-agent-linux")" == "$BINARY_SHA256" ]] \
+  || die "staged binary sha256 mismatch"
 install -m 0644 "$UNIT_SRC" "${STAGE}/usr/lib/systemd/system/platform-agent.service"
 install -m 0755 "$LIFECYCLE_SRC" "${STAGE}/usr/lib/platform/agent/packaging/platform-agent-lifecycle.sh"
 install -m 0644 "$LAYOUT" "${STAGE}/usr/lib/platform/agent/packaging/package-layout.json"

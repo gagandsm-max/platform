@@ -39,8 +39,31 @@
     "/var/lib/platform/agent"
   ],
   "purge_customer_state": "UNSUPPORTED_REFUSE",
-  "staged_unconfigured_install": "PERMITTED_REQUIRED_WHEN_ENV_ABSENT",
-  "activation": "enable_only_when_operational_env_present",
+  "staged_unconfigured_install": "PERMITTED_REQUIRED_FRESH_AND_DISABLED",
+  "activation": "explicit_systemd_enable_only_env_never_authority",
+  "activation_authority": "systemctl_is_enabled",
+  "is_enabled_contract": {
+    "enabled": {"exit": 0, "package_state": "ENABLED_PRESERVED"},
+    "disabled": {"exit": "non_zero", "package_state_when_inactive": "STAGED_INACTIVE", "package_state_otherwise": "DISABLED_PRESERVED"},
+    "masked": {"exit": "non_zero", "package_state": "MASKED_PRESERVED"},
+    "masked-runtime": {"exit": "non_zero", "package_state": "MASKED_PRESERVED"},
+    "enabled-runtime": {"exit": 0, "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "linked": {"exit": "non_zero", "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "linked-runtime": {"exit": "non_zero", "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "inconsistent_status_exit": "SERVICE_STATE_QUERY_FAILED"
+  },
+  "configure_must_not": [
+    "enable",
+    "start",
+    "unmask",
+    "disable",
+    "re-enable"
+  ],
+  "try_restart_requires": [
+    "boot_enabled",
+    "active",
+    "mode_safe_operational_env"
+  ],
   "ebpf_default": "disabled_never_enabled_by_package",
   "limits": {
     "max_binary_bytes": 268435456,

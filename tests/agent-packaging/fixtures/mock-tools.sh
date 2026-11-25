@@ -99,13 +99,55 @@ elif name == "systemctl":
         if not quiet:
             print(active)
         sys.exit(3)
-    if args[0] in ("enable", "disable", "stop", "try-restart", "start"):
+    if args[0] == "is-enabled":
+        # support: systemctl is-enabled UNIT — word + exit must both be considered.
+        # systemd contract: enabled/enabled-runtime => 0;
+        # disabled/masked/masked-runtime/linked/linked-runtime => non-zero.
+        # Fixture key enable_exit overrides exit for inconsistent-pair controls.
+        unit = args[-1]
+        u = units.get(unit, {})
+        if u.get("enable_query_error"):
+            save()
+            sys.exit(int(u.get("enable_query_error_exit", 1)))
+        enabled = u.get("enabled", "disabled")
+        exit_override = u.get("enable_exit", None)
+        save()
+        def finish(default_rc):
+            sys.exit(int(exit_override) if exit_override is not None else default_rc)
+        if enabled == "enabled":
+            print("enabled")
+            finish(0)
+        if enabled == "enabled-runtime":
+            print("enabled-runtime")
+            finish(0)
+        if enabled == "linked-runtime":
+            print("linked-runtime")
+            finish(1)
+        if enabled == "linked":
+            print("linked")
+            finish(1)
+        if enabled in ("masked", "masked-runtime"):
+            print(enabled)
+            finish(1)
+        if enabled == "disabled":
+            print("disabled")
+            finish(1)
+        # Unknown fixture enable words fail closed at the mock boundary.
+        print(enabled)
+        finish(1)
+    if args[0] in ("enable", "disable", "stop", "try-restart", "start", "unmask", "mask"):
         unit = args[-1]
         u = units.setdefault(unit, {"active": "inactive", "enabled": "disabled"})
         if args[0] == "enable":
             u["enabled"] = "enabled"
         elif args[0] == "disable":
             u["enabled"] = "disabled"
+        elif args[0] == "mask":
+            u["enabled"] = "masked"
+            u["active"] = "inactive"
+        elif args[0] == "unmask":
+            if u.get("enabled") in ("masked", "masked-runtime"):
+                u["enabled"] = "disabled"
         elif args[0] == "stop":
             u["active"] = "inactive"
         elif args[0] == "start":

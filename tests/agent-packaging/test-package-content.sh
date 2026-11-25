@@ -15,28 +15,65 @@ WORKDIR="$(mktemp -d /tmp/platform-agent-pkg-content.XXXXXX)"
 cleanup() { rm -rf "$WORKDIR"; }
 trap cleanup EXIT
 
-BIN="${WORKDIR}/platform-agent-linux"
-# Synthetic non-executed payload for archive/content assertions.
-printf 'SYNTHETIC_PLATFORM_AGENT_PAYLOAD_NOT_EXECUTED\n' > "$BIN"
-chmod 0755 "$BIN"
+# Real ELF fixture for archive/content assertions. The fixture is never executed.
+BIN=/bin/true
 BIN_SHA="$(sha256sum "$BIN" | awk '{print $1}')"
 COMMIT="$(git rev-parse HEAD)"
 VERSION="0.0.0+internal.test"
 OUT="${WORKDIR}/out"
-mkdir -m 0700 "$OUT"
+REPEAT_OUT="${WORKDIR}/repeat"
+REJECT_OUT="${WORKDIR}/reject"
+mkdir -m 0700 "$OUT" "$REPEAT_OUT" "$REJECT_OUT"
 
-bash agent/packaging/linux/build-deb.sh \
-  --binary "$BIN" \
-  --version "$VERSION" \
-  --source-commit "$COMMIT" \
-  --architecture amd64 \
-  --source-date-epoch 0 \
-  --binary-sha256 "$BIN_SHA" \
-  --runtime-version "RUNTIME_INDEPENDENT_OF_PACKAGE_VERSION" \
-  --out "$OUT" | tee "${WORKDIR}/build.json"
+BUILD=(
+  bash agent/packaging/linux/build-deb.sh
+  --version "$VERSION"
+  --source-commit "$COMMIT"
+  --source-date-epoch 0
+  --runtime-version "RUNTIME_INDEPENDENT_OF_PACKAGE_VERSION"
+)
+INPUT=(
+  --binary "$BIN"
+  --architecture amd64
+  --binary-sha256 "$BIN_SHA"
+)
+"${BUILD[@]}" "${INPUT[@]}" --out "$OUT" | tee "${WORKDIR}/build.json"
+
+expect_refusal() {
+  local name="$1" diagnostic="$2" status=0
+  shift 2
+  "${BUILD[@]}" --out "$REJECT_OUT" "$@" >"${WORKDIR}/${name}.log" 2>&1 || status=$?
+  if [[ "$status" != 78 ]] ||
+     ! grep -Fq "PLATFORM_AGENT_DEB_BUILD_REFUSED: ${diagnostic}" "${WORKDIR}/${name}.log" ||
+     [[ -n "$(find "$REJECT_OUT" -mindepth 1 -print -quit)" ]]; then
+    cat "${WORKDIR}/${name}.log" >&2
+    echo "FAIL: ${name} expected exit 78 before staging, got ${status}" >&2
+    return 1
+  fi
+  echo "PASS ${name} exit=${status}"
+}
+
+DIGEST_DIAGNOSTIC="--binary-sha256 is required and must be 64 lowercase hex digits"
+expect_refusal missing-digest "$DIGEST_DIAGNOSTIC" --binary "$BIN"
+expect_refusal malformed-digest "$DIGEST_DIAGNOSTIC" --binary "$BIN" --binary-sha256 "$(printf '%064d' 0 | tr 0 A)"
+WRONG_SHA="0${BIN_SHA:1}"
+if [[ "$WRONG_SHA" == "$BIN_SHA" ]]; then
+  WRONG_SHA="1${BIN_SHA:1}"
+fi
+expect_refusal hash-mismatch "binary sha256 mismatch" --binary "$BIN" --binary-sha256 "$WRONG_SHA"
+TEXT_BIN="${WORKDIR}/not-elf"
+printf 'This is a text payload.\n' > "$TEXT_BIN"
+TEXT_SHA="$(sha256sum "$TEXT_BIN" | awk '{print $1}')"
+expect_refusal non-elf "binary must be an ELF64 little-endian executable" --binary "$TEXT_BIN" --binary-sha256 "$TEXT_SHA"
+expect_refusal wrong-architecture "binary ELF machine mismatch for arm64: expected 183, found 62" \
+  --binary "$BIN" --binary-sha256 "$BIN_SHA" --architecture arm64
+
+"${BUILD[@]}" "${INPUT[@]}" --out "$REPEAT_OUT" | tee "${WORKDIR}/repeat.json"
 
 DEB="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["deb_path"])' "${OUT}/platform-agent-${VERSION}-amd64-deb/build-receipt.json")"
 test -f "$DEB"
+cmp "$DEB" "${REPEAT_OUT}/platform-agent-${VERSION}-amd64-deb/platform-agent_${VERSION}_amd64.deb"
+echo "PASS byte-identical repeat build"
 DEB_SHA="$(sha256sum "$DEB" | awk '{print $1}')"
 echo "DEB_SHA256=${DEB_SHA}"
 
@@ -75,6 +112,7 @@ root = pathlib.Path("${EXTRACT}")
 binary = root / "opt/platform/agent/platform-agent-linux"
 unit = root / "usr/lib/systemd/system/platform-agent.service"
 assert binary.is_file() and not binary.is_symlink()
+assert binary.read_bytes() == pathlib.Path("${BIN}").read_bytes()
 assert unit.is_file() and not unit.is_symlink()
 mode = stat.S_IMODE(binary.stat().st_mode)
 assert mode == 0o755, oct(mode)

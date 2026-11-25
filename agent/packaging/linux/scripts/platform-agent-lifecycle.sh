@@ -330,14 +330,80 @@ unit_active_state() {
   esac
 }
 
-unit_try_restart() {
-  # Restart only if already active; do not invent a start for STAGED/inactive installs.
+unit_enable_state() {
+  # systemd is-enabled is the sole package activation authority. Status word AND
+  # exit code must both match the supported systemd contract; inconsistent pairs
+  # fail closed. Exit code alone is insufficient (enabled-runtime also returns 0).
+  # Contract (systemctl is-enabled): enabled/enabled-runtime => 0;
+  # disabled/masked/masked-runtime/linked/linked-runtime => non-zero.
+  ensure_service_manager
+  local rc=0
+  local out
+  out="$(tool systemctl is-enabled "${PLATFORM_AGENT_UNIT}" 2>/dev/null)" && rc=0 || rc=$?
+  out="$(printf '%s' "$out" | tr -d '\r' | head -n1)"
+  case "$out" in
+    enabled)
+      [[ "$rc" -eq 0 ]] || die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} state=enabled but rc=${rc}"
+      printf '%s\n' "enabled"
+      ;;
+    disabled)
+      [[ "$rc" -ne 0 ]] || die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} state=disabled but rc=0 (inconsistent)"
+      printf '%s\n' "disabled"
+      ;;
+    masked|masked-runtime)
+      [[ "$rc" -ne 0 ]] || die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} state=${out} but rc=0 (inconsistent)"
+      printf '%s\n' "masked"
+      ;;
+    enabled-runtime)
+      [[ "$rc" -eq 0 ]] || die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} state=enabled-runtime but rc=${rc}"
+      # Runtime-only enablement is not boot activation authority.
+      printf '%s\n' "runtime-only"
+      ;;
+    linked|linked-runtime)
+      [[ "$rc" -ne 0 ]] || die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} state=${out} but rc=0 (inconsistent)"
+      # Linked availability is not boot activation authority.
+      printf '%s\n' "runtime-only"
+      ;;
+    "")
+      die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} rc=${rc} with empty state"
+      ;;
+    *)
+      die SERVICE_STATE_QUERY_FAILED \
+        "systemctl is-enabled ${PLATFORM_AGENT_UNIT} unexpected state='${out}' rc=${rc}"
+      ;;
+  esac
+}
+
+unit_try_restart_if_safe() {
+  # Controlled try-restart only for verified boot-enabled + active units with a
+  # mode-safe operational env already validated by the caller. Never start,
+  # never restart disabled-active / masked / maintenance / unknown.
+  operational_env_present || return 0
   local state
   state="$(unit_active_state)"
-  if [[ "$state" == "active" ]]; then
-    tool systemctl try-restart "${PLATFORM_AGENT_UNIT}" \
-      || die SERVICE_RESTART_FAILED "systemctl try-restart ${PLATFORM_AGENT_UNIT} failed"
-  fi
+  case "$state" in
+    active)
+      tool systemctl try-restart "${PLATFORM_AGENT_UNIT}" \
+        || die SERVICE_RESTART_FAILED "systemctl try-restart ${PLATFORM_AGENT_UNIT} failed"
+      ;;
+    inactive|failed|activating|deactivating|maintenance|reloading)
+      # Preserve non-steady or inactive runtime; do not invent a start.
+      ;;
+    *)
+      die SERVICE_STATE_QUERY_FAILED \
+        "refusing try-restart for unexpected ActiveState='${state}'"
+      ;;
+  esac
+}
+
+emit_activation_hint() {
+  echo "PLATFORM_AGENT_PACKAGE_HINT: staged/package configure never enables; authorized activation is explicit: systemctl enable --now ${PLATFORM_AGENT_UNIT} (after ${PLATFORM_AGENT_ENV} mode 0600/0400 with Sensor URL and cert path references). Env/URL alone is not activation authority."
 }
 
 preinst() {
@@ -370,6 +436,8 @@ postinst() {
   ensure_dir "${PLATFORM_AGENT_CRED_DIR}" 0750 "${PLATFORM_AGENT_USER}:${PLATFORM_AGENT_GROUP}"
   ensure_dir "${PLATFORM_AGENT_HOME}" 0750 "${PLATFORM_AGENT_USER}:${PLATFORM_AGENT_GROUP}"
   # Never fabricate agent.env, certificates, tenant/agent IDs, or enable eBPF.
+  # Never source/execute env contents; mode-safe presence is configuration safety only,
+  # never activation authority (Platform_15 §4.3.1 / Platform_16 §§3–4).
   if [[ -f "$(rooted "${PLATFORM_AGENT_ENV}")" ]]; then
     refuse_symlink_path "${PLATFORM_AGENT_ENV}"
     local mode
@@ -380,17 +448,47 @@ postinst() {
     esac
   fi
   daemon_reload
-  if operational_env_present; then
-    unit_enable
-    if [[ "$action" == "configure" || "$action" == "abort-remove" ]]; then
-      unit_try_restart
-    fi
-    # CONFIGURED_ENABLED means unit enablement was requested successfully — not runtime readiness.
-    echo "PLATFORM_AGENT_PACKAGE_STATE=CONFIGURED_ENABLED"
-  else
-    echo "PLATFORM_AGENT_PACKAGE_STATE=STAGED_UNCONFIGURED"
-    echo "PLATFORM_AGENT_PACKAGE_HINT: place ${PLATFORM_AGENT_ENV} (mode 0600) with Sensor URL and cert path references, then: systemctl enable --now ${PLATFORM_AGENT_UNIT}"
-  fi
+  # configure/upgrade/abort must not enable/start/unmask or disable/re-enable.
+  # Preserve intentional maintenance/disablement, masked, runtime-only, and
+  # existing enabled inactive/active units. systemd is-enabled is authoritative.
+  local enable_state
+  enable_state="$(unit_enable_state)"
+  case "$enable_state" in
+    enabled)
+      case "$action" in
+        configure|abort-upgrade|abort-remove)
+          unit_try_restart_if_safe
+          ;;
+      esac
+      echo "PLATFORM_AGENT_PACKAGE_STATE=ENABLED_PRESERVED"
+      ;;
+    disabled)
+      # Preserve intentional disablement: never enable/start/restart.
+      # Claim STAGED_INACTIVE only when ActiveState is directly verified inactive;
+      # otherwise report DISABLED_PRESERVED (e.g. disabled-but-still-active).
+      local active_state
+      active_state="$(unit_active_state)"
+      case "$active_state" in
+        inactive)
+          echo "PLATFORM_AGENT_PACKAGE_STATE=STAGED_INACTIVE"
+          ;;
+        *)
+          echo "PLATFORM_AGENT_PACKAGE_STATE=DISABLED_PRESERVED"
+          ;;
+      esac
+      emit_activation_hint
+      ;;
+    masked)
+      echo "PLATFORM_AGENT_PACKAGE_STATE=MASKED_PRESERVED"
+      ;;
+    runtime-only)
+      echo "PLATFORM_AGENT_PACKAGE_STATE=RUNTIME_ONLY_PRESERVED"
+      emit_activation_hint
+      ;;
+    *)
+      die SERVICE_STATE_QUERY_FAILED "unhandled enable state '${enable_state}'"
+      ;;
+  esac
   echo "PLATFORM_AGENT_PACKAGE_POSTINST_OK action=${action:-configure} eBPF=not_enabled_by_package signing=UNSIGNED_INTERNAL_ONLY"
 }
 

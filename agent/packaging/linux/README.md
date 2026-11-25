@@ -41,18 +41,29 @@ bash agent/packaging/linux/build-deb.sh \
 
 `--version` is an explicit validated input. It does not rewrite any embedded runtime version string inside the binary. Record runtime version separately when known.
 
-## Install semantics
+## Install semantics (staged vs activated)
 
-- **STAGED_UNCONFIGURED**: no `/etc/platform/agent.env` → user/group/dirs/unit installed; unit **not** enabled; no fabricated config.
-- **CONFIGURED_ENABLED**: operator-created `agent.env` present with safe mode → `systemctl enable` and `try-restart` if already active.
+Platform_15 §4.3.1 and Platform_16 §§3–4: staged package install and deliberate activation are separate. Maintainer `configure` **never** treats `/etc/platform/agent.env` or a Sensor URL as activation authority and **never** implicitly `enable`/`start`/`unmask` or `disable`/`re-enable`.
+
+- **STAGED_INACTIVE**: `is-enabled=disabled` (consistent non-zero exit) **and** `is-active` directly verifies `inactive`. Fresh staged install or intentional disablement that is actually inactive. Env may be absent or mode-safe present; package scripts still do not enable.
+- **DISABLED_PRESERVED**: `is-enabled=disabled` preserved when ActiveState is not verified inactive (e.g. disabled-but-still-active). No enable/start/restart; does **not** claim inactive.
+- **ENABLED_PRESERVED**: `systemctl is-enabled` reports boot `enabled` with exit 0 → preserve; on `configure`/`abort-upgrade`/`abort-remove`, controlled `try-restart` only when also **active** and a mode-safe operational env is present. Enabled+inactive stays inactive (no invented start). Disabled/masked/runtime-only/maintenance/unknown are never restarted.
+- **MASKED_PRESERVED** / **RUNTIME_ONLY_PRESERVED**: preserve masked or enabled-runtime/linked/linked-runtime; no enable/unmask/restart. `is-enabled` status/exit pairs must match the systemd contract (disabled/masked/linked* ⇒ non-zero; enabled/enabled-runtime ⇒ 0); inconsistent pairs and unknown words fail closed with `PLATFORM_AGENT_PACKAGE_SERVICE_STATE_QUERY_FAILED` (never a misleading `CONFIGURED_ENABLED`).
+- **Authorized activation** (explicit operator/systemd): after placing mode-safe `agent.env` (0600/0400) with Sensor URL and cert path references, run `systemctl enable --now platform-agent.service`. Reboot auto-start applies only after that deliberate enablement.
 - **remove**: stops/disables unit; preserves env, credentials, and `/var/lib/platform/agent`.
 - **purge**: refuses customer-state deletion; state remains until a separately audited operator procedure.
 
+Env contents are never sourced or executed by package scripts; customer state is never rewritten.
+
+## DEB integrity contract (builder interface)
+
+`build-deb.sh` (owned separately) stages the Agent binary as a regular file and records its SHA256. Callers must supply an **ELF64 little-endian** executable matching the package architecture (`amd64` machine type 62 / `EM_X86_64`; `arm64` machine type 183 / `EM_AARCH64` when that arch is built). Maintainer fixtures may use a non-executed host `/bin/true` (or equivalent) only after verifying that ELF class/endian/machine match; digest is computed from the fixture bytes. This contract is **input integrity for packaging**, not a claim of source-to-binary provenance or release signing. Artifacts remain `UNSIGNED_INTERNAL_ONLY` until separate gates pass.
+
 ## Tests
 
-- Content/provenance: `tests/agent-packaging/test-package-content.sh`
-- Maintainer-script fixtures (mocked `systemctl`/`getent`/`useradd`/`groupadd`): `tests/agent-packaging/test-maintainer-scripts.sh`
-- Native Ubuntu systemd install/reboot/upgrade/rollback VM evidence: **NOT_RUN** unless an isolated lab VM is explicitly available. Docker content tests are not reboot certification.
+- Content/provenance: `tests/agent-packaging/test-package-content.sh` (separate Codex checkout; not modified here)
+- Maintainer-script fixtures (mocked `systemctl`/`getent`/`useradd`/`groupadd`; generated/extracted DEB hooks via private rooted mocks; non-executed `/bin/true` fixture with exact digest; no host package install): `tests/agent-packaging/test-maintainer-scripts.sh`
+- Native Ubuntu systemd install/reboot/upgrade/rollback VM evidence: **NOT_RUN** unless an isolated lab VM is explicitly available. Mocked fixtures are not reboot certification.
 
 ## Non-goals for this slice
 
