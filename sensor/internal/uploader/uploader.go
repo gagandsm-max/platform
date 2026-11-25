@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"sync"
@@ -113,7 +114,8 @@ type Uploader struct {
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Uploader, error) {
-	if cfg.SensorID == "" || cfg.StreamID == "" || cfg.MaxBatchRecords <= 0 || cfg.MaxBatchPayloadBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxAttempts <= 0 || cfg.InitialBackoff <= 0 || cfg.MaxBackoff < cfg.InitialBackoff || cfg.JitterFraction < 0 || cfg.JitterFraction > 1 || cfg.IdleInterval <= 0 || sp == nil || tr == nil {
+	// !(f>=0 && f<=1) rejects NaN/±Inf; the prior f<0 || f>1 form let NaN through.
+	if cfg.SensorID == "" || cfg.StreamID == "" || cfg.MaxBatchRecords <= 0 || cfg.MaxBatchPayloadBytes <= 0 || cfg.MaxRequestBytes <= 0 || cfg.MaxAttempts <= 0 || cfg.InitialBackoff <= 0 || cfg.MaxBackoff < cfg.InitialBackoff || !(cfg.JitterFraction >= 0 && cfg.JitterFraction <= 1) || cfg.IdleInterval <= 0 || sp == nil || tr == nil {
 		return nil, codeErr(CodeInvalidConfig, "uploader requires explicit identity, bounded batch/retry timings, spool and transport", nil, false)
 	}
 	u := &Uploader{cfg: cfg, spool: sp, transport: tr, state: StateIdle, done: make(chan struct{})}
@@ -155,13 +157,7 @@ func (u *Uploader) loop(ctx context.Context) {
 			u.setState(StateStopped, "", time.Time{})
 			return
 		}
-		delay := u.cfg.IdleInterval
-		if err != nil {
-			var te *Error
-			if errors.As(err, &te) && te.transient {
-				delay = u.cfg.MaxBackoff
-			}
-		}
+		delay := u.outerCycleDelay(err)
 		u.mu.Lock()
 		u.nextAttempt = time.Now().Add(delay)
 		u.mu.Unlock()
@@ -170,6 +166,23 @@ func (u *Uploader) loop(ctx context.Context) {
 			return
 		}
 	}
+}
+
+// outerCycleDelay selects the wait before the next outer RunOnce.
+// Successful or empty cycles use IdleInterval. Any RunOnce error — permanent
+// rejection, invalid/missing ACK, spool fault, or transient attempt exhaustion —
+// uses MaxBackoff as the deterministic outer failure cadence. Inner transient
+// retries remain separately jittered via backoff(); this outer delay is not
+// jittered. Policy when IdleInterval > MaxBackoff: failure pacing stays at
+// MaxBackoff and is not raised to IdleInterval; IdleInterval is only the
+// success/empty poll cadence. Production validated timings use IdleInterval
+// (1s) < MaxBackoff (5s); the prior bug applied IdleInterval to permanent
+// rejection and resubmitted the frozen batch at the 1s idle cadence.
+func (u *Uploader) outerCycleDelay(err error) time.Duration {
+	if err != nil {
+		return u.cfg.MaxBackoff
+	}
+	return u.cfg.IdleInterval
 }
 
 func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
@@ -377,14 +390,37 @@ func backoff(initial, max time.Duration, attempt int, j func(time.Duration, floa
 	if d > max {
 		d = max
 	}
-	return j(d, f)
+	// Clamp the post-jitter delay: jitter must not escape the selected max or
+	// collapse to a non-positive wait (edge configs / adversarial injectors).
+	return clampBackoffDelay(j(d, f), max)
 }
+
+// clampBackoffDelay enforces a positive delay that never exceeds max after jitter.
+func clampBackoffDelay(d, max time.Duration) time.Duration {
+	if max <= 0 {
+		return time.Nanosecond
+	}
+	if d > max {
+		return max
+	}
+	if d <= 0 {
+		return time.Nanosecond
+	}
+	return d
+}
+
 func jitterDuration(d time.Duration, f float64) time.Duration {
 	if f <= 0 {
 		return d
 	}
 	delta := float64(d) * f
 	v := float64(d) - delta + rand.Float64()*2*delta
+	// Saturate BEFORE float64→Duration: float64(MaxInt64) is 2^63, so MaxInt64-scale
+	// (and NaN/Inf) intermediates overflow the cast into a non-positive wait that the
+	// positive max clamp would otherwise floor to 1ns (tight retry).
+	if math.IsNaN(v) || math.IsInf(v, 0) || v >= float64(math.MaxInt64) {
+		return time.Duration(math.MaxInt64)
+	}
 	if v < 0 {
 		return 0
 	}

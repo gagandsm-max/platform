@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -267,24 +268,53 @@ func (s *DiskSpool) clearOutboundWindowLocked() error {
 }
 
 func (s *DiskSpool) readExactRangeLocked(first, last uint64, maxRecords, maxPayloadBytes int) (Batch, error) {
-	if last < first {
-		return Batch{}, newError(CodeOutboundWindow, "outbound window range is impossible", nil)
-	}
-	count := int(last - first + 1)
-	if count <= 0 || uint64(count) != last-first+1 {
-		return Batch{}, newError(CodeOutboundWindow, "outbound window range overflows", nil)
-	}
+	// maxRecords/maxPayloadBytes are admission bounds for new selection only.
+	// Frozen replay must preserve exact historical identity under smaller caps
+	// (see TestRebatchOutboundWindowDisabledPreservesIdentity).
 	_ = maxRecords
 	_ = maxPayloadBytes
-	batch := Batch{Records: make([]Record, 0, count)}
+	if first == 0 || last < first {
+		return Batch{}, newError(CodeOutboundWindow, "outbound window range is impossible", nil)
+	}
+	if first > MaxSafeSequence || last > MaxSafeSequence {
+		return Batch{}, newError(CodeOutboundWindow, "outbound window sequence exceeds MAX_SAFE_SEQUENCE", nil)
+	}
+	// Authoritative pending frontier is (AckedThrough, NextSequence). Validate the
+	// untrusted sidecar range against it before any record reconstruction or
+	// capacity derived from last-first. Fully-ACKed sidecars are reconciled by
+	// callers (LastSequence <= AckedThrough) without entering this path for
+	// cleanup; reconstruction of an already-ACKed range still fails closed.
+	if first <= s.state.AckedThrough || last <= s.state.AckedThrough {
+		return Batch{}, newError(CodeOutboundWindow, "frozen outbound window includes already-acknowledged sequence", nil)
+	}
+	if s.state.NextSequence == 0 || first >= s.state.NextSequence || last >= s.state.NextSequence {
+		return Batch{}, newError(CodeOutboundWindow, "outbound window range is impossible", nil)
+	}
+	// Legitimate reservation always selects the pending head (AckedThrough+1)
+	// with contiguous sequences. Contiguous ACK advancement either preserves
+	// that equality for an active window or moves LastSequence into the
+	// already-ACKed reconcile path. A gapped first sequence is not a valid
+	// historical active window.
+	if first != s.state.AckedThrough+1 {
+		return Batch{}, newError(CodeOutboundWindow, "outbound window range is impossible", nil)
+	}
+	span := last - first + 1
+	if int(span) <= 0 || uint64(int(span)) != span {
+		return Batch{}, newError(CodeOutboundWindow, "outbound window range overflows", nil)
+	}
+
+	// Append only verified records. Never preallocate from the (now-checked)
+	// span: speculative capacity from an unverified sidecar was the Issue #351
+	// makeslice panic; legitimate large replay bounds remain a separate gate.
+	batch := Batch{}
 	for seq := first; seq <= last; seq++ {
-		if seq <= s.state.AckedThrough {
-			return Batch{}, newError(CodeOutboundWindow, "frozen outbound window includes already-acknowledged sequence", nil)
-		}
 		path := filepath.Join(s.dir, recordFileName(seq))
 		rec, err := s.readRecordFileLocked(path, seq)
 		if err != nil {
 			return Batch{}, newError(CodeOutboundWindow, fmt.Sprintf("frozen outbound window missing or corrupt record %d", seq), err)
+		}
+		if rec.ContentLength < 0 || batch.PayloadBytes > math.MaxInt-rec.ContentLength {
+			return Batch{}, newError(CodeOutboundWindow, "outbound window range overflows", nil)
 		}
 		batch.Records = append(batch.Records, rec)
 		batch.PayloadBytes += rec.ContentLength
@@ -299,7 +329,7 @@ func (s *DiskSpool) readExactRangeLocked(first, last uint64, maxRecords, maxPayl
 			return Batch{}, newError(CodeOutboundWindow, "outbound window sequence would wrap", nil)
 		}
 	}
-	if batch.FirstSequence != first || batch.LastSequence != last || len(batch.Records) != count {
+	if batch.FirstSequence != first || batch.LastSequence != last || len(batch.Records) != int(span) {
 		return Batch{}, newError(CodeOutboundWindow, "reconstructed outbound window does not match sidecar range", nil)
 	}
 	return batch, nil
