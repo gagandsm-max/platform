@@ -493,11 +493,15 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=15
 TEST_DESC="Sensor 80% Storage Watermark Protection Logic"
-GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.27.1-alpine3.24 go test -v -run "TestProtectionAndRecoveryAfterFreeSpace|TestFixedWatermarkCannotBeChanged" ./internal/... 2>/dev/null || echo "FAIL")
-if echo "${GUARD_TEST}" | grep -q "PASS"; then
+GUARD_STATUS=0
+GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.27.1-alpine3.24 go test -v -count=1 -run "^(TestProtectionAndRecoveryAfterFreeSpace|TestFixedWatermarkCannotBeChanged)$" ./internal/... 2>&1) || GUARD_STATUS=$?
+if [ "${GUARD_STATUS}" -eq 0 ] && \
+   grep -Eq '^--- PASS: TestProtectionAndRecoveryAfterFreeSpace [(]' <<< "${GUARD_TEST}" && \
+   grep -Eq '^--- PASS: TestFixedWatermarkCannotBeChanged [(]' <<< "${GUARD_TEST}"; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Watermark threshold unit test failed"
+    printf '%s\n' "${GUARD_TEST}" >&2
+    fail ${TEST_NUM} "${TEST_DESC}" "Watermark tests exited ${GUARD_STATUS} or required PASS evidence is missing"
 fi
 
 # ------------------------------------------------------------------------------
