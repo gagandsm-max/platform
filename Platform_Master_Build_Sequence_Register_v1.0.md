@@ -1,12 +1,48 @@
 # Platform Master Build Sequence Register v1.0
 
 **Authority:** Master Chat / Platform CTO Control Plane
-**Execution model:** Contract-first, bottom-up implementation, end-to-end certification per slice.
+**Execution model:** Contract-first, dependency-aware parallel implementation and testing; formal certification is deferred to the applicable later integration/release gates (Founder direction 2026-11-25).
 **Purpose:** Stable module-by-module build sequence that survives future chat handoffs.
 
 **Product identity:** Platform is the internal engineering/build identifier. AmrudAi is the default commercial/customer-facing product identity. Licensed governed tenant/MSP white-label branding may override customer-facing branding. Internal BUILD IDs and technical identity remain Platform.
 
-## Current execution checkpoint — 2026-11-10
+## Current execution checkpoint — 2026-11-25: implementation-first / build-and-test
+
+**Authority:** Founder direction 25 November 2026; Master Chat owns the architecture, Mother References, Skills, Agents, engineering decisions, build sequencing, integration and quality. This checkpoint supersedes earlier *current dispatch* and *certification-before-development* restrictions, not historical evidence, frozen product requirements, BUILD IDs, security/data-integrity invariants or applicable commercial-release obligations. Canonical GitHub main independently read at `8adae453ddb79a1b924dd6ec32f579a0b8de0856`. This is a proposed update to the attached Register; existing PR #295/#300 owners must reconcile it with live source before canonical merge.
+
+### Operating decision
+
+- Current objective: implement, compile, test, debug and integrate the approved product, in parallel wherever scopes and dependencies permit. Formal module, native-profile, scale and commercial release certification is deferred; no routine certificate paperwork or repeated unchanged-source audit is a prerequisite to the next independent development slice.
+- Actual unit, integration, contract, security/tenant, failure and data-integrity tests remain part of implementation. Fix genuine failures. Use mocks for independent leaves while real predecessors are being developed, and label that limitation; never activate a dependency-unsafe path. Do not remove or bypass protected branch checks or production safety invariants. Native/package tests remain development tasks where the environment is available; formal signed release and profile certification remain later gates.
+- Status vocabulary for current execution: `NOT_STARTED`, `IMPLEMENTING`, `IMPLEMENTED_UNTESTED`, `BUILD_TEST_PASS`, `BUILD_TEST_FAIL`, `INTEGRATION_PENDING`, `INTEGRATED_TESTED`, `BLOCKED`. Historic `CERTIFIED` entries remain immutable. `BUILD_TEST_PASS` binds exact source, scope, actual command and exit, not GA, deployment, native certification or whole-BUILD completion. Keep release obligations and unresolved tests separately; no invented readiness percent.
+- The existing 106 BUILD IDs, requirement IDs, phase mappings and seven-point module records remain the programme baseline. Treat historical source/maturity rows as dated evidence, not live source truth. Reconcile stale source paths from actual code. Design and implementation dependencies still matter; a predecessor's formal certification is not required for an isolated build/test leaf when its contract is sufficiently fixed. Integration requires actual compatible predecessors. Do not expand roadmap scope or silently defer mandatory product requirements.
+- Cursor CLI, Codex CLI/Desktop (one authority family), Antigravity CLI and GitHub AI coding features may implement, read, test, debug and peer-review in bounded assignments with nonoverlapping write paths. Master assigns tasks explicitly and retains integration/final acceptance. No writer independently certifies its own work, no broad privileges, no paid services, no uncontrolled merge or direct protected-main write. Cursor Cloud is not newly authorized by local-only wording. Canonical automated tool policy must be reconciled under Issues #309/#285; manually assigned isolated Antigravity development candidates do not constitute automatic elevation or retroactive approval of historical quarantined source. Actual model/tool access and exit status must be reported. GitHub Copilot direct availability remains unverified (prior HTTP 404), not a reason to idle other tools.
+- Mother References, Skills and Agents are Master-owned; correct real contradictions and implementation requirements surgically, preserve traceability and use existing ownership. Consolidate conflicting governance source separately instead of stopping unrelated product development. Preserve historical worktrees and exact source evidence; no destructive environment changes. Use the existing engineering test infrastructure, no new service/dependency just to make a tool run.
+
+### Verified current development checkpoint and next parallel dispatch
+
+| BUILD / workstream | Verified source or evidence | Next development action |
+|---|---|---|
+| 018 Linux package | DEB integrated source snapshot `98922edc37917e1f1f4dcc57fa2f6cf9956b26cb` verified remotely, seven-file delta; 47 lifecycle assertions and DEB reproducibility passed in prior exact-source private fixtures. RPM three-file candidate independently passed 129 source-only assertions; actual rpm parser/build/transaction/native tests NOT_RUN. | Preserve RPM exact source; Cursor fixes verified DEB output receipt/source-commit input defects. Reconcile remaining shared lifecycle and all-segment ELF findings and build actual RPM when existing toolchain is available. No signed/native certification prerequisite to further work. |
+| 012 EDS | No `agent/common/diagnostics` on verified main; Issue #358 opened. | Codex implements bounded deterministic per-binding capture eligibility leaf and tests. Follow with built-in definitions, OS evidence, authorized job execution and existing durable delivery. |
+| 067 Query | Existing `PageResult` is offset based; no Core query package on verified main; Issue #359 opened. | Antigravity implements and tests bounded LIVE_KEYSET opaque codec leaf. Follow with per-page server authorization and real repository keyset queries; no invented snapshot consistency. |
+| 047 HTTP | `integration/342-http-redirect-snapshot-20261125@72f47eca70205c8dd4b243b8a04687fceafc8d03`, prior exact-toolchain Sensor regression accepted. | Integrate with DNS/synthetic runtime and actual scheduling/storage/query contracts. |
+| 022/023 integrity | `integration/350-post-ack-snapshot-20261125@189ead0ebb7cf156807c44b961afbe7b71760c13`, source snapshot only. | Resolve retained post-ACK recovery and pacing engineering issues; preserve original custody. |
+| Governance | Existing #309 workspaces overlap #285/PR286; five conflicting owners found in latest inventory. | Recover exact existing changes, reconcile once, amend authoritative tool policy/validators/AGENTS/Skill mirrors under existing owners, then test. Do not block unrelated development. |
+
+### Dependency-aware programme lanes (existing BUILD IDs only)
+
+- Agent 010–018: Linux/Windows collectors, EDS, durable delivery, identity and native packaging. Build OS-profile work concurrently against shared contracts; 019 formal certification deferred.
+- Sensor 020–026 and Core 060–075: prioritize authenticated grant/ingestion, scheduler, spool/replay, durable ACK, Kafka/ClickHouse/query correctness; no unsafe activation. These are shared integration critical path.
+- Network/Flow/Log 040–054/093/094: independent parser, normalization, enrichment and analytics leaves can build/test against governed inputs while real runtime integration progresses. Preserve role separation and all failure semantics.
+- Infrastructure 030–037 and 098: freeze each applicable profile contract, build isolated domain/OS collectors and software inventory while shared transport is being completed. No unverified vendor capability claims.
+- Core product services 066–074, 080–086, 090–098, 100–101: inventory, credentials, graph, deterministic state/alerts/incidents/RCA, notifications/ITSM, NCM/IPAM/reporting, query and related operations. Build independent deterministic components early; integrate with real authority/storage and test end-to-end.
+- UI 110–118: parallel implement existing UI contracts and component tests; wire real authorized APIs as available, never fabricate healthy/live data or invent backend semantics.
+- Operations 125–132: build installers, migration, rollback, recovery, security, support and test harness in parallel where their contracts permit; run actual tests on available isolated environments. Formal 019/037/048/054/075/131/134 certification decisions deferred, not deleted; 133 AWS readiness/spend constraint unchanged. Phase 1.5 120–124 and other roadmap expansions retain phase/architecture boundaries; no implicit first-GA scope change.
+
+The actual engineering register is reconciled in Issue #211 and existing documentation owners. This candidate changes execution sequencing only; the historical checkpoint and all BUILD rows below are preserved. Release remains unapproved; this development directive is not a commercial commitment.
+
+## Historical execution checkpoint — 2026-11-10
 
 This checkpoint supersedes earlier current-dispatch assertions only. Historical accepted technical certificates, dates, source/CI hashes and dated snapshots below remain provenance and MUST NOT be rewritten. Mother References remain v3.3.0 and BUILD IDs are unchanged. Documentation correction does not recertify product code, packages, capacity, HA or Phase-1 GA. `SPECIFIED != IMPLEMENTED != TESTED != BENCHMARKED != CERTIFIED != DEPLOYED`.
 
