@@ -184,8 +184,9 @@ func TestOutboundWindowStaleAfterAckSelfReconciles(t *testing.T) {
 // TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved
 // reproduces restart after a post-commit sidecar unlink failure: Open recover
 // clears the in-memory unresolved flag, but a continuing clear failure on the
-// next ReadOrReserveOutboundBatch must re-latch cleanupUnresolved + degraded
-// without inventing ACK progress or touching unacked records / active windows.
+// next ReadOrReserveOutboundBatch must re-latch cleanupUnresolved (cleanup-only,
+// not confirmed corruption) without inventing ACK progress or touching unacked
+// records / active windows.
 func TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(Config{Dir: dir, MaxRecordBytes: 1024})
@@ -253,8 +254,8 @@ func TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.ProtectionState != ProtectionDegraded {
-		t.Fatalf("continuing unlink failure must degrade storage: %+v", st)
+	if st.ProtectionState != ProtectionDegraded || st.CorruptionDetected || reopened.degraded {
+		t.Fatalf("continuing sidecar unlink must degrade via cleanup-only latch: %+v degraded=%v", st, reopened.degraded)
 	}
 	if st.AckedThrough < 1 || st.RecordCount != 1 {
 		t.Fatalf("watermark and unacked identity must hold: %+v", st)
@@ -277,6 +278,9 @@ func TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved(t
 	if err != nil || unresolved {
 		t.Fatalf("verified cleanup must clear unresolved: unresolved=%v err=%v", unresolved, err)
 	}
+	if _, err := reopened.CheckStorageUsage(); err != nil {
+		t.Fatalf("health must recover after cleanup-only sidecar repair: %v", err)
+	}
 	next, err := reopened.ReadOrReserveOutboundBatch(10, 1024)
 	if err != nil {
 		t.Fatal(err)
@@ -288,7 +292,7 @@ func TestReadOrReserveOutboundBatchRestartSidecarClearFailureLatchesUnresolved(t
 
 // TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved proves that
 // after durable ACK, outbound-window sidecar unlink failure latches
-// cleanupUnresolved and ReconcileAckedCleanup repairs the stale sidecar.
+// cleanupUnresolved (cleanup-only) and ReconcileAckedCleanup repairs the stale sidecar.
 func TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved(t *testing.T) {
 	s := openTest(t, 1024)
 	add(t, s, "body")
@@ -311,10 +315,32 @@ func TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved(t *testing.T)
 	if err != nil || !unresolved || seq != batch.LastSequence {
 		t.Fatalf("sidecar clear failure must latch unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
 	}
+	if s.degraded {
+		t.Fatal("stale-sidecar unlink must not set independent degraded")
+	}
+	st, err := s.Stats()
+	if err != nil || st.ProtectionState != ProtectionDegraded || st.CorruptionDetected {
+		t.Fatalf("sidecar cleanup fault must degrade without CorruptionDetected: %+v err=%v", st, err)
+	}
 	if _, err := os.Stat(sidecar); err != nil {
 		t.Fatalf("failed sidecar clear must leave sidecar intact: %v", err)
 	}
+
+	// Sidecar directory fsync failure after successful unlink is also cleanup-only.
 	s.removeOutboundWindow = nil
+	s.syncDirFn = func(string) error {
+		return newError(CodeIO, "failed to fsync spool directory", errors.New("injected sidecar dir fsync failure"))
+	}
+	// Restore sidecar so clear path runs unlink then failing fsync.
+	writeOutboundSidecar(t, s, batch.FirstSequence, batch.LastSequence)
+	if err := s.ReconcileAckedCleanup(); err == nil {
+		t.Fatal("expected stale-sidecar directory fsync failure during reconcile")
+	}
+	if !s.cleanupUnresolved || s.degraded {
+		t.Fatalf("sidecar fsync must stay cleanup-only: unresolved=%v degraded=%v", s.cleanupUnresolved, s.degraded)
+	}
+
+	s.syncDirFn = nil
 	if err := s.ReconcileAckedCleanup(); err != nil {
 		t.Fatalf("reconcile must clear stale sidecar: %v", err)
 	}
@@ -324,6 +350,9 @@ func TestCompleteOutboundBatchSidecarClearFailureLatchesUnresolved(t *testing.T)
 	unresolved, _, err = s.UnresolvedAckedCleanup()
 	if err != nil || unresolved {
 		t.Fatalf("reconcile must clear unresolved: unresolved=%v err=%v", unresolved, err)
+	}
+	if _, err := s.CheckStorageUsage(); err != nil {
+		t.Fatalf("health must recover after cleanup-only sidecar repair: %v", err)
 	}
 }
 

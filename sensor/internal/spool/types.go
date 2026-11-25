@@ -151,8 +151,13 @@ type DiskSpool struct {
 	logger         *slog.Logger
 	mu             sync.Mutex
 	state          diskState
-	closed         bool
-	degraded       bool
+	closed bool
+	// degraded latches independent integrity/IO/security faults (corruption,
+	// unsafe paths, sequence gaps, capacity-inspect failures, failed quarantine).
+	// Proven post-ACK cleanup-only unlink/fsync/stale-sidecar failures must not
+	// set this latch; those use cleanupUnresolved so health can recover after
+	// validated cleanup without labelling cleanup-only faults as confirmed corruption.
+	degraded bool
 	// cleanupUnresolved is set when AckedThrough advanced but record removal,
 	// final directory fsync, or outbound-window sidecar clear/fsync did not
 	// complete. Cleared only by successful ReconcileAckedCleanup (or Open
@@ -165,6 +170,9 @@ type DiskSpool struct {
 	// removeOutboundWindow is an optional test seam for outbound-window sidecar
 	// unlink failures after durable ACK. Nil uses os.Remove.
 	removeOutboundWindow func(string) error
+	// syncDirFn is an optional test seam for post-ACK directory fsync failures.
+	// Nil uses syncDir. Only cleanup/reconcile/sidecar-clear paths call it.
+	syncDirFn func(string) error
 }
 
 // Transitional compatibility only until production main wiring is replaced.

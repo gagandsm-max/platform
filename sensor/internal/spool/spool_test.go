@@ -552,8 +552,9 @@ func TestAcknowledgeThroughRemoveFailureSetsUnresolvedFlag(t *testing.T) {
 // TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite is the
 // negative record-removal case: inject os.Remove failure via the DiskSpool
 // seam during AcknowledgeThrough (no rewrite of an already-deleted file).
-// Watermark stays durable, orphan remains, storage is DEGRADED, and only a
-// successful ReconcileAckedCleanup + directory sync clears the fault.
+// Watermark stays durable, orphan remains, storage is DEGRADED via unresolved
+// cleanup (not CorruptionDetected), and only a successful ReconcileAckedCleanup
+// + directory sync clears the cleanup latch / restores health.
 func TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite(t *testing.T) {
 	s := openTest(t, 1024)
 	defer s.Close()
@@ -570,12 +571,15 @@ func TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite(t *testing.
 	if err != nil || !unresolved || seq != acked.Sequence {
 		t.Fatalf("remove failure must latch unresolved: unresolved=%v seq=%d err=%v", unresolved, seq, err)
 	}
+	if s.degraded {
+		t.Fatal("cleanup-only unlink must not set independent degraded")
+	}
 	st, err := s.Stats()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if st.ProtectionState != ProtectionDegraded || !st.CorruptionDetected {
-		t.Fatalf("remove failure must degrade storage: %+v", st)
+	if st.ProtectionState != ProtectionDegraded || st.CorruptionDetected {
+		t.Fatalf("cleanup-only remove failure must degrade without CorruptionDetected: %+v", st)
 	}
 	if st.AckedThrough != acked.Sequence || st.RecordCount != 1 {
 		t.Fatalf("watermark/pending must hold: %+v", st)
@@ -586,6 +590,15 @@ func TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite(t *testing.
 	pendingPath := filepath.Join(s.dir, recordFileName(pending.Sequence))
 	if _, err := os.Stat(pendingPath); err != nil {
 		t.Fatalf("unacked record must remain: %v", err)
+	}
+
+	// Repeated failed unlink keeps the recoverable latch asserted.
+	if err := s.ReconcileAckedCleanup(); err == nil {
+		t.Fatal("expected repeated reconcile unlink failure")
+	}
+	unresolved, _, err = s.UnresolvedAckedCleanup()
+	if err != nil || !unresolved || s.degraded {
+		t.Fatalf("repeated cleanup-only failure must stay unresolved without degraded: unresolved=%v degraded=%v err=%v", unresolved, s.degraded, err)
 	}
 
 	s.removeFile = nil
@@ -601,6 +614,59 @@ func TestAcknowledgeThroughRecordRemoveFailureDegradesWithoutRewrite(t *testing.
 	}
 	if _, err := os.Stat(pendingPath); err != nil {
 		t.Fatalf("pending record must survive reconcile: %v", err)
+	}
+	st, err = s.Stats()
+	if err != nil || st.ProtectionState != ProtectionSafe || st.CorruptionDetected {
+		t.Fatalf("cleanup-only repair must restore SAFE without corruption: %+v err=%v", st, err)
+	}
+	if _, err := s.CheckStorageUsage(); err != nil {
+		t.Fatalf("health must recover after cleanup-only repair: %v", err)
+	}
+}
+
+func TestReconcileAckedCleanupPreservesDiscoveredCorruptionDegradation(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	acked := add(t, s, "acked-body")
+	pending := add(t, s, "pending-body")
+	orphanPath := filepath.Join(s.dir, recordFileName(acked.Sequence))
+	pendingPath := filepath.Join(s.dir, recordFileName(pending.Sequence))
+	pendingRaw, err := os.ReadFile(pendingPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.removeFile = func(string) error { return errors.New("injected record remove failure") }
+	if err := s.AcknowledgeThrough(acked.Sequence); err == nil {
+		t.Fatal("expected cleanup-only unlink failure")
+	}
+	s.removeFile = nil
+	if err := os.WriteFile(orphanPath, []byte(`{"sequence":1,"not":"valid"}`), 0640); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	unresolved, _, err := s.UnresolvedAckedCleanup()
+	if err != nil || unresolved {
+		t.Fatalf("reconcile must clear cleanupUnresolved after quarantine+sync: unresolved=%v err=%v", unresolved, err)
+	}
+	if !s.degraded {
+		t.Fatal("corrupt artifact quarantine during reconcile must preserve independent degraded")
+	}
+	st, err := s.Stats()
+	if err != nil || !st.CorruptionDetected || st.ProtectionState != ProtectionDegraded {
+		t.Fatalf("discovered corruption must remain visible: %+v err=%v", st, err)
+	}
+	if _, err := s.CheckStorageUsage(); CodeOf(err) != CodeIO {
+		t.Fatalf("independent degradation must keep health failing: %v", err)
+	}
+	gotPending, err := os.ReadFile(pendingPath)
+	if err != nil || string(gotPending) != string(pendingRaw) {
+		t.Fatalf("pending record must remain intact")
+	}
+	ackedThrough, err := s.AckedThrough()
+	if err != nil || ackedThrough != acked.Sequence {
+		t.Fatalf("watermark must stay durable: acked=%d err=%v", ackedThrough, err)
 	}
 }
 

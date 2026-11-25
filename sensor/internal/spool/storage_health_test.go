@@ -95,6 +95,27 @@ func TestCheckStorageUsagePostAckUnlinkFailure(t *testing.T) {
 	if strings.Contains(strings.ToLower(err.Error()), "corrupt") {
 		t.Fatalf("unlink cleanup failure must not be labelled confirmed corruption: %v", err)
 	}
+	if s.degraded {
+		t.Fatal("cleanup-only unlink must not set the independent degraded latch")
+	}
+	st, err := s.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.ProtectionState != ProtectionDegraded || st.CorruptionDetected {
+		t.Fatalf("cleanup-only fault must degrade without CorruptionDetected: %+v", st)
+	}
+
+	s.removeFile = nil
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CheckStorageUsage(); err != nil {
+		t.Fatalf("health must recover after proven cleanup-only repair: %v", err)
+	}
+	if s.degraded || s.cleanupUnresolved {
+		t.Fatalf("cleanup-only repair must clear unresolved without inventing degraded: degraded=%v unresolved=%v", s.degraded, s.cleanupUnresolved)
+	}
 }
 
 func TestCheckStorageUsageAfterPublicCorruptionQuarantine(t *testing.T) {
@@ -149,12 +170,16 @@ func TestCheckStorageUsageHonoursCleanupUnresolvedIndependently(t *testing.T) {
 		t.Fatalf("capacity must remain truthful: pct=%v", pct)
 	}
 
-	// Proven cleanup clears cleanupUnresolved but preserves the separate degraded latch.
+	// Preexisting independent degradation must survive cleanup-only repair.
+	s.degraded = true
 	acked := add(t, s, "acked")
 	pending := add(t, s, "pending")
 	s.removeFile = func(string) error { return errors.New("injected record remove failure") }
 	if err := s.AcknowledgeThrough(acked.Sequence); err == nil {
 		t.Fatal("expected remove failure")
+	}
+	if !s.cleanupUnresolved {
+		t.Fatal("cleanup-only unlink must latch cleanupUnresolved")
 	}
 	s.removeFile = nil
 	if err := s.ReconcileAckedCleanup(); err != nil {
@@ -172,6 +197,44 @@ func TestCheckStorageUsageHonoursCleanupUnresolvedIndependently(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(s.dir, recordFileName(pending.Sequence))); err != nil {
 		t.Fatalf("pending record must survive reconcile: %v", err)
+	}
+}
+
+func TestCheckStorageUsageDirectoryFsyncFailureIsCleanupOnly(t *testing.T) {
+	s := openTest(t, 1024)
+	defer s.Close()
+	acked := add(t, s, "acked-body")
+	pending := add(t, s, "pending-body")
+	s.syncDirFn = func(string) error {
+		return newError(CodeIO, "failed to fsync spool directory", errors.New("injected dir fsync failure"))
+	}
+	if err := s.AcknowledgeThrough(acked.Sequence); err == nil {
+		t.Fatal("expected post-ACK directory fsync failure")
+	}
+	if s.degraded || !s.cleanupUnresolved {
+		t.Fatalf("dir fsync must be cleanup-only: degraded=%v unresolved=%v", s.degraded, s.cleanupUnresolved)
+	}
+	if _, err := s.CheckStorageUsage(); CodeOf(err) != CodeIO {
+		t.Fatal("unresolved cleanup must fail storage health")
+	}
+	st, err := s.Stats()
+	if err != nil || st.ProtectionState != ProtectionDegraded || st.CorruptionDetected {
+		t.Fatalf("fsync cleanup fault must degrade without CorruptionDetected: %+v err=%v", st, err)
+	}
+	ackedThrough, err := s.AckedThrough()
+	if err != nil || ackedThrough != acked.Sequence {
+		t.Fatalf("watermark must stay durable: acked=%d err=%v", ackedThrough, err)
+	}
+	if _, err := os.Stat(filepath.Join(s.dir, recordFileName(pending.Sequence))); err != nil {
+		t.Fatalf("pending record must remain: %v", err)
+	}
+
+	s.syncDirFn = nil
+	if err := s.ReconcileAckedCleanup(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CheckStorageUsage(); err != nil {
+		t.Fatalf("health must recover after cleanup-only fsync repair: %v", err)
 	}
 }
 

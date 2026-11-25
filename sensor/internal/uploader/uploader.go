@@ -78,6 +78,14 @@ type Spool interface {
 	Stats() (spool.Stats, error)
 }
 
+// Optional DiskSpool capabilities used to prove and recover acknowledged
+// cleanup without requiring directory Stats on the healthy upload path.
+type ackedThroughReporter interface{ AckedThrough() (uint64, error) }
+type unresolvedCleanupReporter interface {
+	UnresolvedAckedCleanup() (bool, uint64, error)
+}
+type ackedCleanupReconciler interface{ ReconcileAckedCleanup() error }
+
 type Snapshot struct {
 	State                State
 	Uploads              uint64
@@ -93,24 +101,31 @@ type Snapshot struct {
 }
 
 type Uploader struct {
-	cfg         Config
-	spool       Spool
-	transport   Transport
-	mu          sync.Mutex
-	state       State
-	lastSuccess time.Time
-	nextAttempt time.Time
-	lastErr     ErrorCode
-	acked       uint64
-	uploads     atomic.Uint64
-	retries     atomic.Uint64
-	wait        func(context.Context, time.Duration) error
-	jitter      func(time.Duration, float64) time.Duration
-	cancel      context.CancelFunc
-	started     bool
-	done        chan struct{}
-	startOnce   sync.Once
-	stopOnce    sync.Once
+	cfg               Config
+	spool             Spool
+	transport         Transport
+	mu                sync.Mutex
+	state             State
+	lastSuccess       time.Time
+	nextAttempt       time.Time
+	lastErr           ErrorCode
+	acked             uint64
+	cleanupFault      bool
+	cleanupRetryAfter time.Time
+	cleanupWatermark  uint64
+	cleanupProbed     bool
+	pendingAckSeq     uint64
+	pendingAckCounted bool
+	pendingAckProven  bool
+	uploads           atomic.Uint64
+	retries           atomic.Uint64
+	wait              func(context.Context, time.Duration) error
+	jitter            func(time.Duration, float64) time.Duration
+	cancel            context.CancelFunc
+	started           bool
+	done              chan struct{}
+	startOnce         sync.Once
+	stopOnce          sync.Once
 }
 
 func New(cfg Config, sp Spool, tr Transport) (*Uploader, error) {
@@ -186,6 +201,25 @@ func (u *Uploader) outerCycleDelay(err error) time.Duration {
 }
 
 func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
+	// RunOnce is serialized by the owning uploader loop. Direct callers must
+	// preserve the same single-flight invariant because reservation is mutable.
+	if err := ctxErr(ctx); err != nil {
+		return false, err
+	}
+	if err := u.resolvePendingAck(ctx); err != nil {
+		return false, err
+	}
+	cleanupErr := u.recoverAckedCleanup(ctx)
+	if cleanupErr != nil {
+		u.mu.Lock()
+		canDrain := u.cleanupFault && u.cleanupWatermark != 0 && u.pendingAckSeq == 0
+		u.mu.Unlock()
+		if !canDrain {
+			return false, cleanupErr
+		}
+	}
+	// Spool reservation mutates the durable outbound window. Recheck cancellation
+	// immediately before crossing that boundary.
 	if err := ctxErr(ctx); err != nil {
 		return false, err
 	}
@@ -195,8 +229,19 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 		return false, codeErr(CodeSpool, "failed reading durable spool batch", err, false)
 	}
 	if len(batch.Records) == 0 {
+		if cleanupErr != nil {
+			return false, cleanupErr
+		}
 		u.setState(StateIdle, "", time.Time{})
 		return false, nil
+	}
+	u.mu.Lock()
+	cleanupWatermark := u.cleanupWatermark
+	cleanupFault := u.cleanupFault
+	u.mu.Unlock()
+	if cleanupFault && (cleanupWatermark == 0 || batch.FirstSequence <= cleanupWatermark) {
+		u.paceCleanupFault()
+		return false, codeErr(CodeSpool, "spool reservation is not authoritatively beyond acknowledged cleanup watermark", nil, false)
 	}
 	request, err := u.makeBatch(batch)
 	if err != nil {
@@ -220,17 +265,12 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 				u.setState(StateDegraded, CodeAckInvalid, time.Time{})
 				return false, err
 			} else if aerr := u.spool.CompleteOutboundBatch(*ack.AcceptedThroughSequence); aerr != nil {
-				u.setState(StateDegraded, CodeSpool, time.Time{})
-				return false, codeErr(CodeSpool, "failed applying durable acknowledgement to spool", aerr, false)
+				u.markPendingAck(*ack.AcceptedThroughSequence)
+				_ = u.resolvePendingAck(ctx)
+				u.setState(StateDegraded, CodeSpool, time.Now().Add(u.cfg.MaxBackoff))
+				return false, codeErr(CodeSpool, "failed applying durable acknowledgement to spool; reconciliation remains pending", aerr, false)
 			} else {
-				now := time.Now().UTC()
-				u.mu.Lock()
-				u.state = StateIdle
-				u.lastSuccess = now
-				u.lastErr = ""
-				u.acked = *ack.AcceptedThroughSequence
-				u.nextAttempt = time.Time{}
-				u.mu.Unlock()
+				u.recordDelivery(*ack.AcceptedThroughSequence)
 				return true, nil
 			}
 		}
@@ -259,6 +299,231 @@ func (u *Uploader) RunOnce(ctx context.Context) (bool, error) {
 	}
 	u.setState(StateCoreUnavailable, CodeTransport, time.Now().Add(u.cfg.MaxBackoff))
 	return false, codeErr(CodeTransport, "transient Core upload attempts exhausted; spool retained", last, true)
+}
+
+func (u *Uploader) recordDelivery(seq uint64) {
+	u.mu.Lock()
+	if seq > u.acked {
+		u.acked = seq
+		u.lastSuccess = time.Now().UTC()
+	}
+	if u.cleanupFault {
+		u.state = StateDegraded
+		u.lastErr = CodeSpool
+		u.nextAttempt = u.cleanupRetryAfter
+	} else {
+		u.state = StateIdle
+		u.lastErr = ""
+		u.nextAttempt = time.Time{}
+	}
+	u.mu.Unlock()
+}
+
+func (u *Uploader) markPendingAck(seq uint64) {
+	u.mu.Lock()
+	if u.pendingAckSeq == 0 {
+		u.pendingAckSeq = seq
+		u.pendingAckCounted = false
+		u.pendingAckProven = false
+	}
+	u.cleanupFault = true
+	u.cleanupRetryAfter = time.Now().Add(u.cfg.MaxBackoff)
+	u.cleanupProbed = false
+	u.state = StateDegraded
+	u.lastErr = CodeSpool
+	u.nextAttempt = u.cleanupRetryAfter
+	u.mu.Unlock()
+}
+
+// resolvePendingAck preserves the attempted completion as an in-memory intent
+// until an authoritative exact watermark settles whether it committed. No new
+// batch may be reserved while that intent is unresolved.
+func (u *Uploader) resolvePendingAck(ctx context.Context) error {
+	u.mu.Lock()
+	seq, counted := u.pendingAckSeq, u.pendingAckCounted
+	paced := u.cleanupFault && u.cleanupProbed && time.Now().Before(u.cleanupRetryAfter)
+	u.mu.Unlock()
+	if seq == 0 {
+		return nil
+	}
+	if paced {
+		return codeErr(CodeSpool, "ambiguous spool acknowledgement remains unresolved", nil, false)
+	}
+	acked, proven := u.provenAckedThrough()
+	if ctxErr(ctx) != nil {
+		u.paceCleanupFault()
+		return ctxErr(ctx)
+	}
+	if !proven {
+		u.paceCleanupFault()
+		return codeErr(CodeSpool, "ambiguous spool acknowledgement remains unresolved", nil, false)
+	}
+	if acked < seq {
+		if counted {
+			u.paceCleanupFault()
+			return codeErr(CodeSpool, "previously proven acknowledgement now has a contradictory lower watermark", nil, false)
+		}
+		u.mu.Lock()
+		if u.pendingAckSeq == seq {
+			u.pendingAckSeq = 0
+			u.pendingAckCounted = false
+		}
+		u.cleanupFault = false
+		u.cleanupRetryAfter = time.Time{}
+		u.cleanupWatermark = 0
+		u.mu.Unlock()
+		return nil
+	}
+	if acked != seq {
+		u.paceCleanupFault()
+		return codeErr(CodeSpool, "spool acknowledgement watermark does not exactly match pending completion", nil, false)
+	}
+	if !counted {
+		u.recordDelivery(seq)
+		u.mu.Lock()
+		if u.pendingAckSeq == seq {
+			u.pendingAckCounted = true
+			u.pendingAckProven = true
+		}
+		u.cleanupWatermark = seq
+		u.mu.Unlock()
+	}
+	if _, ok := u.spool.(unresolvedCleanupReporter); !ok {
+		u.paceCleanupFault()
+		return codeErr(CodeSpool, "exact acknowledgement is proven but cleanup recovery cannot be established", nil, false)
+	}
+	if err := u.recoverAckedCleanup(ctx); err != nil {
+		return err
+	}
+	u.mu.Lock()
+	if u.pendingAckSeq == seq {
+		u.pendingAckSeq = 0
+		u.pendingAckCounted = false
+		u.pendingAckProven = false
+	}
+	u.mu.Unlock()
+	return nil
+}
+
+// Only O(1) spool evidence can settle a failed completion. Stats scans are
+// deliberately excluded here because they cannot establish custody of the
+// exact attempted completion.
+func (u *Uploader) provenAckedThrough() (uint64, bool) {
+	hasO1 := false
+	if r, ok := u.spool.(ackedThroughReporter); ok {
+		hasO1 = true
+		if acked, err := r.AckedThrough(); err == nil {
+			return acked, true
+		}
+	}
+	if r, ok := u.spool.(unresolvedCleanupReporter); ok {
+		hasO1 = true
+		if _, acked, err := r.UnresolvedAckedCleanup(); err == nil {
+			return acked, true
+		}
+	}
+	if hasO1 {
+		return 0, false
+	}
+	return 0, false
+}
+
+// recoverAckedCleanup inspects the O(1) latch on every capable spool. It calls
+// the directory-scanning reconciler only when the spool reports real unresolved
+// ACK cleanup, and paces failures even when RunOnce is called directly.
+func (u *Uploader) recoverAckedCleanup(ctx context.Context) error {
+	if err := ctxErr(ctx); err != nil {
+		return err
+	}
+	u.mu.Lock()
+	if u.cleanupFault && u.cleanupProbed && time.Now().Before(u.cleanupRetryAfter) {
+		u.mu.Unlock()
+		return codeErr(CodeSpool, "durable acknowledged spool cleanup remains unresolved", nil, false)
+	}
+	u.mu.Unlock()
+	r, ok := u.spool.(unresolvedCleanupReporter)
+	if !ok {
+		u.mu.Lock()
+		fault := u.cleanupFault
+		u.mu.Unlock()
+		if fault {
+			u.paceCleanupFault()
+			return codeErr(CodeSpool, "durable acknowledged cleanup cannot be inspected", nil, false)
+		}
+		return nil
+	}
+	unresolved, watermark, err := r.UnresolvedAckedCleanup()
+	if ctxErr(ctx) != nil {
+		u.markCleanupFailure()
+		return ctxErr(ctx)
+	}
+	if err != nil {
+		u.markCleanupFailure()
+		return codeErr(CodeSpool, "failed inspecting durable acknowledged cleanup", err, false)
+	}
+	u.mu.Lock()
+	fault := u.cleanupFault
+	if unresolved {
+		u.cleanupWatermark = watermark
+	}
+	if u.cleanupProbed && time.Now().Before(u.cleanupRetryAfter) {
+		u.mu.Unlock()
+		return codeErr(CodeSpool, "durable acknowledged spool cleanup remains unresolved", nil, false)
+	}
+	u.mu.Unlock()
+	if !unresolved && !fault {
+		return nil
+	}
+	if err := ctxErr(ctx); err != nil {
+		return err
+	}
+	reconciler, ok := u.spool.(ackedCleanupReconciler)
+	if !unresolved {
+		watermark = u.cleanupWatermark
+	}
+	if !ok || watermark == 0 {
+		u.markCleanupFailure()
+		return codeErr(CodeSpool, "durable acknowledged spool cleanup cannot be reconciled", nil, false)
+	}
+	if err := reconciler.ReconcileAckedCleanup(); err != nil {
+		u.markCleanupFailure()
+		return codeErr(CodeSpool, "failed reconciling durable acknowledged spool cleanup", err, false)
+	}
+	if ctxErr(ctx) != nil {
+		u.markCleanupFailure()
+		return ctxErr(ctx)
+	}
+	u.mu.Lock()
+	u.cleanupFault = false
+	u.cleanupRetryAfter = time.Time{}
+	u.cleanupWatermark = 0
+	u.cleanupProbed = false
+	u.mu.Unlock()
+	return nil
+}
+
+func (u *Uploader) paceCleanupFault() {
+	u.mu.Lock()
+	if !u.cleanupFault {
+		u.cleanupFault = true
+		u.cleanupRetryAfter = time.Now().Add(u.cfg.MaxBackoff)
+	}
+	u.cleanupProbed = true
+	u.state = StateDegraded
+	u.lastErr = CodeSpool
+	u.nextAttempt = u.cleanupRetryAfter
+	u.mu.Unlock()
+}
+
+func (u *Uploader) markCleanupFailure() {
+	u.mu.Lock()
+	u.cleanupFault = true
+	u.cleanupRetryAfter = time.Now().Add(u.cfg.MaxBackoff)
+	u.cleanupProbed = true
+	u.state = StateDegraded
+	u.lastErr = CodeSpool
+	u.nextAttempt = u.cleanupRetryAfter
+	u.mu.Unlock()
 }
 
 func (u *Uploader) makeBatch(b spool.Batch) (coreclient.Batch, error) {

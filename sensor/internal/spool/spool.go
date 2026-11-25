@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -149,14 +150,13 @@ func (s *DiskSpool) acknowledgeThroughLocked(sequence uint64) error {
 	}
 	for seq := previous + 1; seq <= sequence; seq++ {
 		if err := s.removeRecordFileLocked(filepath.Join(s.dir, recordFileName(seq))); err != nil && !os.IsNotExist(err) {
-			s.degraded = true
-			s.cleanupUnresolved = true
-			return newError(CodeIO, "acknowledged record metadata is durable but file cleanup failed", err)
+			out := newError(CodeIO, "acknowledged record metadata is durable but file cleanup failed", err)
+			s.latchCleanupFailureLocked(out)
+			return out
 		}
 	}
-	if err := syncDir(s.dir); err != nil {
-		s.degraded = true
-		s.cleanupUnresolved = true
+	if err := s.syncSpoolDirLocked(); err != nil {
+		s.latchCleanupFailureLocked(err)
 		return err
 	}
 	return nil
@@ -200,7 +200,10 @@ func (s *DiskSpool) Stats() (Stats, error) {
 	if status.usedPct >= storageWatermarkPercent {
 		state = ProtectionTriggered
 	}
-	if s.degraded {
+	// Either independent integrity degradation or unresolved post-ACK cleanup
+	// fails closed as DEGRADED. CorruptionDetected stays tied to the independent
+	// degraded latch only so cleanup-only faults are not labelled confirmed corruption.
+	if s.degraded || s.cleanupUnresolved {
 		state = ProtectionDegraded
 	}
 	out := Stats{NextSequence: s.state.NextSequence, AckedThrough: s.state.AckedThrough, RecordCount: len(seqs), SpoolBytes: bytes, FilesystemUsedPct: status.usedPct, ProtectionState: state, QuarantinedRecords: s.quarantined, CorruptionDetected: s.degraded}
@@ -240,6 +243,44 @@ func (s *DiskSpool) removeRecordFileLocked(path string) error {
 	return removeFn(path)
 }
 
+func (s *DiskSpool) syncSpoolDirLocked() error {
+	if s.syncDirFn != nil {
+		return s.syncDirFn(s.dir)
+	}
+	return syncDir(s.dir)
+}
+
+// isRecoverableCleanupOnlyError reports whether err is a verified post-ACK
+// cleanup-only unlink/fsync/stale-sidecar failure. Independent corruption,
+// unsafe-path, outbound-window contract, and other IO faults return false.
+func isRecoverableCleanupOnlyError(err error) bool {
+	var e *Error
+	if !errors.As(err, &e) || e.Code != CodeIO {
+		return false
+	}
+	switch e.msg {
+	case "acknowledged record metadata is durable but file cleanup failed",
+		"failed to remove already acknowledged record during recovery",
+		"failed to clear outbound window sidecar",
+		"failed to fsync spool directory",
+		"failed to open spool directory for fsync":
+		return true
+	default:
+		return false
+	}
+}
+
+// latchCleanupFailureLocked asserts unresolved post-ACK cleanup. Independent
+// faults also set degraded; proven cleanup-only IO does not, so repair can
+// restore health without clearing preexisting integrity degradation or claiming
+// confirmed corruption for unlink/fsync/stale-sidecar failures.
+func (s *DiskSpool) latchCleanupFailureLocked(err error) {
+	s.cleanupUnresolved = true
+	if !isRecoverableCleanupOnlyError(err) {
+		s.degraded = true
+	}
+}
+
 // UnresolvedAckedCleanup reports whether durable AckedThrough advanced while
 // record cleanup or directory fsync remains incomplete. O(1); no directory scan.
 func (s *DiskSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
@@ -258,7 +299,8 @@ func (s *DiskSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
 // being read. Also clears a stale outbound-window sidecar whose last sequence
 // is already covered by AckedThrough (crash between durable ACK and sidecar
 // unlink/fsync). Active frozen windows for unacked ranges are left untouched.
-// Clears cleanupUnresolved only after successful directory fsync.
+// Clears cleanupUnresolved only after successful directory fsync. Never clears
+// the independent degraded latch.
 func (s *DiskSpool) ReconcileAckedCleanup() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -266,18 +308,15 @@ func (s *DiskSpool) ReconcileAckedCleanup() error {
 		return newError(CodeClosed, "spool is closed", nil)
 	}
 	if _, err := s.reconcileEntriesLocked(false); err != nil {
-		s.degraded = true
-		s.cleanupUnresolved = true
+		s.latchCleanupFailureLocked(err)
 		return err
 	}
 	if err := s.reconcileStaleOutboundWindowLocked(); err != nil {
-		s.degraded = true
-		s.cleanupUnresolved = true
+		s.latchCleanupFailureLocked(err)
 		return err
 	}
-	if err := syncDir(s.dir); err != nil {
-		s.degraded = true
-		s.cleanupUnresolved = true
+	if err := s.syncSpoolDirLocked(); err != nil {
+		s.latchCleanupFailureLocked(err)
 		return err
 	}
 	s.cleanupUnresolved = false

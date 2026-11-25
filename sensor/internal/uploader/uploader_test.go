@@ -19,21 +19,64 @@ func (transientErr) Error() string   { return "transient" }
 func (transientErr) Transient() bool { return true }
 
 type fakeSpool struct {
-	batch   spool.Batch
-	stats   spool.Stats
-	acks    []uint64
-	readErr error
-	ackErr  error
+	batch      spool.Batch
+	stats      spool.Stats
+	acks       []uint64
+	reads      int
+	readErr    error
+	ackErr     error
+	statsReads int
+}
+
+type cleanupSpool struct {
+	*fakeSpool
+	watermark        uint64
+	unresolved       bool
+	inspectErr       error
+	reconcileErr     error
+	inspections      int
+	reconciles       int
+	completeErr      error
+	commitOnComplete bool
+}
+
+func (s *cleanupSpool) CompleteOutboundBatch(v uint64) error {
+	s.acks = append(s.acks, v)
+	if s.completeErr != nil {
+		if s.commitOnComplete {
+			s.watermark = v
+			s.unresolved = true
+		}
+		return s.completeErr
+	}
+	return nil
+}
+func (s *cleanupSpool) AckedThrough() (uint64, error) { return s.watermark, nil }
+func (s *cleanupSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	s.inspections++
+	return s.unresolved, s.watermark, s.inspectErr
+}
+func (s *cleanupSpool) ReconcileAckedCleanup() error {
+	s.reconciles++
+	if s.reconcileErr != nil {
+		return s.reconcileErr
+	}
+	s.unresolved = false
+	if s.watermark != 0 && s.batch.LastSequence <= s.watermark {
+		s.batch = spool.Batch{}
+	}
+	return nil
 }
 
 func (f *fakeSpool) ReadOrReserveOutboundBatch(int, int) (spool.Batch, error) {
+	f.reads++
 	return f.batch, f.readErr
 }
 func (f *fakeSpool) CompleteOutboundBatch(v uint64) error {
 	f.acks = append(f.acks, v)
 	return f.ackErr
 }
-func (f *fakeSpool) Stats() (spool.Stats, error) { return f.stats, nil }
+func (f *fakeSpool) Stats() (spool.Stats, error) { f.statsReads++; return f.stats, nil }
 
 type fakeTransport struct {
 	calls int
@@ -69,6 +112,371 @@ func TestSuccessRequiresExactTerminalAck(t *testing.T) {
 	}
 	if len(sp.acks) != 1 || sp.acks[0] != 2 {
 		t.Fatalf("acks %#v", sp.acks)
+	}
+}
+
+func TestHealthyCleanupInspectorDoesNotReconcile(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	ok, err := u.RunOnce(context.Background())
+	if !ok || err != nil || sp.inspections != 1 || sp.reconciles != 0 {
+		t.Fatalf("ok=%v err=%v inspections=%d reconciles=%d", ok, err, sp.inspections, sp.reconciles)
+	}
+}
+
+func TestCleanupOnlyRecoveryAndLaterDelivery(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{}, watermark: 1, unresolved: true}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		t.Fatal("empty backlog must not upload")
+		return coreclient.UploadAck{}, nil
+	}})
+	ok, err := u.RunOnce(context.Background())
+	if ok || err != nil || sp.reconciles != 1 || sp.unresolved {
+		t.Fatalf("cleanup recovery ok=%v err=%v reconciles=%d unresolved=%v", ok, err, sp.reconciles, sp.unresolved)
+	}
+	sp.batch = spool.Batch{FirstSequence: 2, LastSequence: 2, Records: []spool.Record{rec(2)}}
+	v := uint64(2)
+	u.transport = &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	ok, err = u.RunOnce(context.Background())
+	if !ok || err != nil || len(sp.acks) != 1 || sp.acks[0] != 2 {
+		t.Fatalf("later delivery ok=%v err=%v acks=%v", ok, err, sp.acks)
+	}
+}
+
+func TestCompleteFailureRequiresWatermarkAndDoesNotSecondAck(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, completeErr: errors.New("ambiguous")}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	ok, err := u.RunOnce(context.Background())
+	if ok || !isCode(err, CodeSpool) || len(sp.acks) != 1 {
+		t.Fatalf("unproven completion ok=%v err=%v acks=%v", ok, err, sp.acks)
+	}
+	if u.acked != 0 || !u.lastSuccess.IsZero() {
+		t.Fatal("ambiguous precommit completion was counted as delivery")
+	}
+	// A fresh wrapper proves post-commit cleanup trouble. Recovery operates on
+	// the empty logical backlog and must not send a second Core request/ACK.
+	sp = &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, completeErr: errors.New("postcommit"), commitOnComplete: true, reconcileErr: errors.New("persistent cleanup")}
+	u, _ = New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	ok, err = u.RunOnce(context.Background())
+	if ok || !isCode(err, CodeSpool) || sp.reconciles != 1 || len(sp.acks) != 1 {
+		t.Fatalf("proven cleanup failure ok=%v err=%v reconciles=%d acks=%v", ok, err, sp.reconciles, sp.acks)
+	}
+	snap, _ := u.Snapshot()
+	if snap.AcknowledgedThrough != 1 || snap.LastSuccessfulUpload.IsZero() {
+		t.Fatalf("proven Core delivery accounting=%+v", snap)
+	}
+}
+
+func TestAmbiguousCompletionBlocksReservationUntilExactWatermark(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, completeErr: errors.New("ambiguous"), watermark: 2}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	if _, err := u.RunOnce(context.Background()); !isCode(err, CodeSpool) {
+		t.Fatalf("ambiguous completion err=%v", err)
+	}
+	if sp.reads != 1 || u.pendingAckSeq != 1 {
+		t.Fatalf("pending barrier state reads=%d pending=%d", sp.reads, u.pendingAckSeq)
+	}
+	u.cleanupRetryAfter = time.Time{}
+	if _, err := u.RunOnce(context.Background()); !isCode(err, CodeSpool) || sp.reads != 1 {
+		t.Fatalf("watermark greater than intent must block reservation: err=%v reads=%d", err, sp.reads)
+	}
+	sp.watermark = 1
+	u.cleanupRetryAfter = time.Time{}
+	if _, err := u.RunOnce(context.Background()); err != nil || sp.reads != 2 || u.pendingAckSeq != 0 {
+		t.Fatalf("exact watermark should resolve barrier: err=%v reads=%d pending=%d", err, sp.reads, u.pendingAckSeq)
+	}
+}
+
+type cancelOnInspectSpool struct {
+	*fakeSpool
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnInspectSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	s.cancel()
+	return false, 0, nil
+}
+
+func TestCancellationCheckedBeforeBatchReservation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sp := &cancelOnInspectSpool{fakeSpool: &fakeSpool{}, cancel: cancel}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		t.Fatal("cancelled uploader must not upload")
+		return coreclient.UploadAck{}, nil
+	}})
+	if _, err := u.RunOnce(ctx); !isCode(err, CodeCancelled) || sp.reads != 0 {
+		t.Fatalf("cancellation must precede reservation: err=%v reads=%d", err, sp.reads)
+	}
+	snap, snapErr := u.Snapshot()
+	if snapErr != nil || snap.State != StateDegraded || snap.LastErrorCode != CodeSpool {
+		t.Fatalf("cancellation at inspector exposed clean state: snapshot=%+v err=%v", snap, snapErr)
+	}
+}
+
+type postCommitErrorSpool struct {
+	*spool.DiskSpool
+}
+
+func (s *postCommitErrorSpool) CompleteOutboundBatch(seq uint64) error {
+	if err := s.DiskSpool.CompleteOutboundBatch(seq); err != nil {
+		return err
+	}
+	return errors.New("adapter: completion returned an ambiguous post-commit error")
+}
+
+func TestPostCommitErrorWithRealDiskSpoolRequiresPositiveReconcileAndNoDuplicateUpload(t *testing.T) {
+	dir := t.TempDir()
+	disk, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer disk.Close()
+	if _, err := disk.Append(spool.AppendRequest{Class: spool.ClassMetric, Type: "m", Payload: []byte("x")}); err != nil {
+		t.Fatal(err)
+	}
+	sp := &postCommitErrorSpool{DiskSpool: disk}
+	v := uint64(1)
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, _ := New(cfg(), sp, tr)
+	ok, err := u.RunOnce(context.Background())
+	if ok || !isCode(err, CodeSpool) || tr.calls != 1 {
+		t.Fatalf("failed completion must remain failed despite exact proof: ok=%v err=%v calls=%d", ok, err, tr.calls)
+	}
+	st, err := disk.Stats()
+	if err != nil || st.RecordCount != 0 || st.AckedThrough != 1 {
+		t.Fatalf("DiskSpool custody after exact ACK: stats=%+v err=%v", st, err)
+	}
+	snap, err := u.Snapshot()
+	if err != nil || snap.State != StateDegraded || snap.LastErrorCode != CodeSpool || snap.AcknowledgedThrough != 1 || snap.LastSuccessfulUpload.IsZero() {
+		t.Fatalf("failed completion accounting/state: snapshot=%+v err=%v", snap, err)
+	}
+	u.mu.Lock()
+	firstSuccess := u.lastSuccess
+	u.cleanupRetryAfter = time.Time{}
+	u.mu.Unlock()
+	ok, err = u.RunOnce(context.Background())
+	if ok || err != nil || tr.calls != 1 {
+		t.Fatalf("positive cleanup reconciliation then empty idle: ok=%v err=%v calls=%d", ok, err, tr.calls)
+	}
+	snap, err = u.Snapshot()
+	if err != nil || snap.State != StateIdle || snap.AcknowledgedThrough != 1 || !snap.LastSuccessfulUpload.Equal(firstSuccess) {
+		t.Fatalf("reconciled empty state/accounting: snapshot=%+v err=%v", snap, err)
+	}
+}
+
+func TestCleanupInspectionFailureRetainsFaultAndPaces(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{}, unresolved: true, watermark: 1, inspectErr: errors.New("inspect")}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		t.Fatal("no backlog")
+		return coreclient.UploadAck{}, nil
+	}})
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || sp.reconciles != 0 {
+		t.Fatalf("err=%v reconciles=%d", err, sp.reconciles)
+	}
+	first := u.cleanupRetryAfter
+	_, err = u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || sp.reconciles != 0 || !u.cleanupRetryAfter.Equal(first) {
+		t.Fatalf("paced inspection err=%v reconciles=%d retry=%v first=%v", err, sp.reconciles, u.cleanupRetryAfter, first)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err = u.RunOnce(ctx)
+	if !isCode(err, CodeCancelled) {
+		t.Fatalf("cancel err=%v", err)
+	}
+}
+
+func TestPersistentCleanupFailureDirectRunOnceCadence(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{}, unresolved: true, watermark: 1, reconcileErr: errors.New("sync")}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) { return coreclient.UploadAck{}, nil }})
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || sp.reconciles != 1 {
+		t.Fatalf("first err=%v reconciles=%d", err, sp.reconciles)
+	}
+	_, err = u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || sp.reconciles != 1 {
+		t.Fatalf("second err=%v reconciles=%d", err, sp.reconciles)
+	}
+	snap, snapErr := u.Snapshot()
+	if snapErr != nil || snap.State != StateDegraded || snap.LastErrorCode != CodeSpool || !snap.LastSuccessfulUpload.IsZero() {
+		t.Fatalf("unresolved cleanup must remain visible without false success: snapshot=%+v err=%v", snap, snapErr)
+	}
+	if got := u.outerCycleDelay(err); got != cfg().MaxBackoff {
+		t.Fatalf("cleanup failure delay=%s", got)
+	}
+}
+
+type failingProofSpool struct {
+	*cleanupSpool
+	proofErr   error
+	failProof  bool
+	proofCalls int
+}
+
+func (s *failingProofSpool) AckedThrough() (uint64, error) {
+	s.proofCalls++
+	if s.failProof {
+		return 0, s.proofErr
+	}
+	return s.watermark, nil
+}
+func (s *failingProofSpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	s.inspections++
+	if s.failProof {
+		return false, 0, s.proofErr
+	}
+	return s.unresolved, s.watermark, nil
+}
+func (s *failingProofSpool) CompleteOutboundBatch(v uint64) error {
+	s.acks = append(s.acks, v)
+	s.failProof = true
+	return s.completeErr
+}
+
+func TestBothO1ProofFailuresDoNotUseStatsOrReserve(t *testing.T) {
+	base := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, completeErr: errors.New("ambiguous")}
+	sp := &failingProofSpool{cleanupSpool: base, proofErr: errors.New("proof unavailable")}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	if ok, err := u.RunOnce(context.Background()); ok || !isCode(err, CodeSpool) {
+		t.Fatalf("ok=%v err=%v", ok, err)
+	}
+	if base.reads != 1 || base.statsReads != 0 || u.pendingAckSeq != 1 {
+		t.Fatalf("failed proof must block new reserve with no Stats fallback: reads=%d stats=%d pending=%d", base.reads, base.statsReads, u.pendingAckSeq)
+	}
+	firstDeadline, firstProofCalls := u.cleanupRetryAfter, sp.proofCalls
+	if ok, err := u.RunOnce(context.Background()); ok || !isCode(err, CodeSpool) || base.statsReads != 0 || base.reads != 1 || sp.proofCalls != firstProofCalls || !u.cleanupRetryAfter.Equal(firstDeadline) {
+		t.Fatalf("repeated failed proof crossed barrier: ok=%v err=%v reads=%d stats=%d", ok, err, base.reads, base.statsReads)
+	}
+}
+
+func TestKnownCleanupOnlyFaultAllowsSafeNextWindowAndRetainsDegradedState(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 2, LastSequence: 2, Records: []spool.Record{rec(2)}}}, watermark: 1, unresolved: true, reconcileErr: errors.New("cleanup fsync")}
+	v := uint64(2)
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, _ := New(cfg(), sp, tr)
+	ok, err := u.RunOnce(context.Background())
+	if !ok || err != nil || tr.calls != 1 || sp.reads != 1 {
+		t.Fatalf("affirmatively safe later window: ok=%v err=%v calls=%d reads=%d", ok, err, tr.calls, sp.reads)
+	}
+	snap, err := u.Snapshot()
+	if err != nil || snap.State != StateDegraded || snap.LastErrorCode != CodeSpool || snap.AcknowledgedThrough != 2 || snap.LastSuccessfulUpload.IsZero() || !u.cleanupFault {
+		t.Fatalf("later delivery erased cleanup custody fault: snapshot=%+v cleanupFault=%v err=%v", snap, u.cleanupFault, err)
+	}
+}
+
+func TestTransportFailurePreservesTransportRetryStateWithCleanupFault(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 2, LastSequence: 2, Records: []spool.Record{rec(2)}}}, watermark: 1, unresolved: true, reconcileErr: errors.New("cleanup fsync")}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{}, transientErr{}
+	}})
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeTransport) {
+		t.Fatalf("transport code lost: %v", err)
+	}
+	snap, snapErr := u.Snapshot()
+	if snapErr != nil || snap.State != StateCoreUnavailable || snap.LastErrorCode != CodeTransport || snap.NextAttempt.IsZero() || !u.cleanupFault {
+		t.Fatalf("transport retry state/custody: snapshot=%+v fault=%v err=%v", snap, u.cleanupFault, snapErr)
+	}
+}
+
+func TestPreviouslyCountedExactCommitmentRejectsLaterLowerWatermark(t *testing.T) {
+	sp := &cleanupSpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, completeErr: errors.New("postcommit"), commitOnComplete: true, reconcileErr: errors.New("cleanup")}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	_, err := u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || !u.pendingAckCounted || u.acked != 1 {
+		t.Fatalf("exact commitment not retained: err=%v counted=%v acked=%d", err, u.pendingAckCounted, u.acked)
+	}
+	firstSuccess := u.lastSuccess
+	sp.watermark = 0
+	u.cleanupRetryAfter = time.Time{}
+	_, err = u.RunOnce(context.Background())
+	if !isCode(err, CodeSpool) || sp.reads != 1 || u.acked != 1 || !u.lastSuccess.Equal(firstSuccess) {
+		t.Fatalf("contradictory lower proof regressed commitment: err=%v reads=%d acked=%d success=%v", err, sp.reads, u.acked, u.lastSuccess)
+	}
+}
+
+type cancelOnReconcileSpool struct {
+	*cleanupSpool
+	cancel context.CancelFunc
+}
+
+func (s *cancelOnReconcileSpool) ReconcileAckedCleanup() error {
+	s.reconciles++
+	s.cancel()
+	return nil
+}
+
+func TestCancellationAtReconcileBoundaryRetainsDegradedFault(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	sp := &cancelOnReconcileSpool{cleanupSpool: &cleanupSpool{fakeSpool: &fakeSpool{}, watermark: 1, unresolved: true}, cancel: cancel}
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		t.Fatal("cancelled recovery must not upload")
+		return coreclient.UploadAck{}, nil
+	}})
+	_, err := u.RunOnce(ctx)
+	snap, snapErr := u.Snapshot()
+	if !isCode(err, CodeCancelled) || snapErr != nil || snap.State != StateDegraded || snap.LastErrorCode != CodeSpool || sp.reads != 0 {
+		t.Fatalf("cancelled reconcile exposed clean state: err=%v snapshot=%+v reads=%d", err, snap, sp.reads)
+	}
+}
+
+func TestMissingCleanupReporterCannotSettleFailedCompletion(t *testing.T) {
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}, ackErr: errors.New("ambiguous")}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	ok, err := u.RunOnce(context.Background())
+	if ok || !isCode(err, CodeSpool) || u.pendingAckSeq != 1 || sp.reads != 1 {
+		t.Fatalf("missing cleanup capability settled completion: ok=%v err=%v pending=%d reads=%d", ok, err, u.pendingAckSeq, sp.reads)
+	}
+}
+
+type reporterOnlySpool struct {
+	*fakeSpool
+	watermark   uint64
+	completeErr error
+}
+
+func (s *reporterOnlySpool) AckedThrough() (uint64, error) { return s.watermark, nil }
+func (s *reporterOnlySpool) UnresolvedAckedCleanup() (bool, uint64, error) {
+	return false, s.watermark, nil
+}
+func (s *reporterOnlySpool) CompleteOutboundBatch(uint64) error { return s.completeErr }
+
+func TestMissingCleanupReconcilerCannotClearExactCommitmentFault(t *testing.T) {
+	sp := &reporterOnlySpool{fakeSpool: &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}}}, watermark: 1, completeErr: errors.New("adapter error")}
+	v := uint64(1)
+	u, _ := New(cfg(), sp, &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}})
+	ok, err := u.RunOnce(context.Background())
+	if ok || !isCode(err, CodeSpool) || u.pendingAckSeq != 1 || !u.pendingAckCounted || u.acked != 1 {
+		t.Fatalf("missing reconciler cleared exact fault: ok=%v err=%v pending=%d counted=%v acked=%d", ok, err, u.pendingAckSeq, u.pendingAckCounted, u.acked)
 	}
 }
 
