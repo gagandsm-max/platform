@@ -613,8 +613,25 @@ class CapabilityPackRoutingTests(unittest.TestCase):
             (REPO_ROOT / "project_agents" / "TOOL_COMPATIBILITY.md").read_text(encoding="utf-8")
             + (REPO_ROOT / "project_agents" / "CHATGPT_AGENT_ROUTER.md").read_text(encoding="utf-8")
         )
-        self.assertRegex(docs, r"read-only\s*/\s*adversarial")
-        self.assertIn("Antigravity is rejected as a writer", docs)
+        self.assertIn(
+            "Antigravity CLI | Bounded implementation, testing and exact-head adversarial peer review.",
+            docs,
+        )
+        self.assertIn(
+            "Generated adapters remain read-only. Bounded writing requires a separate explicit assignment.",
+            docs,
+        )
+        authority = control_plane.load_tool_authority()
+        self.assertIn("antigravity", authority["legalCombinations"]["writerTools"])
+        antigravity = authority["tools"]["antigravity"]
+        self.assertEqual(antigravity["status"], "authorized")
+        self.assertTrue(antigravity["mayWriteProductCode"])
+        self.assertEqual(antigravity["defaultGeneratedCapability"], "read-only")
+        adapter = REPO_ROOT / ".agents" / "agents" / "platform-minimal-change-engineer.md"
+        frontmatter = adapter.read_text(encoding="utf-8").split("---", 2)[1]
+        tools = [line.strip() for line in frontmatter.splitlines() if line.startswith("  - ")]
+        self.assertCountEqual(tools, ["- view_file", "- grep_search", "- run_command"])
+        self.assertIn("commandExecutionPolicy: sandbox", frontmatter)
         self.assertIn("write` becomes `sandbox_mode=workspace-write", docs)
         self.assertIn("Codex CLI and ChatGPT Desktop App Codex mode", docs)
 

@@ -239,6 +239,115 @@ class ControlPlaneContractTests(unittest.TestCase):
         with self.assertRaises(control_plane.ControlPlaneError):
             control_plane.validate_task_manifest(manifest, observed_main=SHA_A, observed_head=SHA_C)
 
+    def test_selected_tool_statuses_fail_closed(self) -> None:
+        for tool in ("cursor-cli", "chatgpt-github", "founder"):
+            for status in ("unknown", "suspended", "prohibited", None):
+                with self.subTest(tool=tool, status=status):
+                    authority = control_plane.load_tool_authority()
+                    if status is None:
+                        del authority["tools"][tool]["status"]
+                    else:
+                        authority["tools"][tool]["status"] = status
+                    with self.assertRaises(control_plane.ControlPlaneError):
+                        control_plane.assert_legal_tool_roles(
+                            writer_tool="cursor-cli", verifier_tool="chatgpt-github",
+                            gatekeeper="founder", status="INTAKE", authority=authority,
+                        )
+
+    def test_exact_identifiers_and_timestamps(self) -> None:
+        for overrides in (
+            {"taskId": "CPV2-1\n"},
+            {"authoritativeMain": SHA_A + "\n"},
+            {"exactHead": None},
+            {"exactHead": ""},
+            {"createdAt": "2026-02-30T00:00:00Z"},
+            {"updatedAt": "2026-09-12T00:00:00+00:60"},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(control_plane.ControlPlaneError):
+                control_plane.validate_task_manifest(_task(**overrides))
+        for overrides in (
+            {"taskId": "CPV2-1\n"},
+            {"outputHead": SHA_C + "\n"},
+            {"timestamp": "2026-01-01T25:00:00Z"},
+        ):
+            with self.subTest(overrides=overrides), self.assertRaises(control_plane.ControlPlaneError):
+                control_plane.validate_handoff(_handoff(**overrides))
+
+    def test_write_paths_require_valid_syntax_and_frozen_scope(self) -> None:
+        for paths, scope, state, message in (
+            ([], [], "UNKNOWN", "unknown"),
+            ([], ["../core"], "DIAGNOSIS", "safe repository-relative"),
+            (["/core"], [], "ROUTING", "safe repository-relative"),
+            (["core/file"], ["core/"], "ROUTING", "frozen scope"),
+            (["core/file"], ["core/"], "BLOCKED", "frozen scope"),
+        ):
+            with self.subTest(state=state, paths=paths), self.assertRaisesRegex(
+                control_plane.ControlPlaneError, message
+            ):
+                control_plane.assert_write_paths_in_scope(paths, scope, state)
+        control_plane.assert_write_paths_in_scope([], ["core/"], "DIAGNOSIS")
+
+    def test_handoff_checks_changed_path_syntax_and_phase(self) -> None:
+        for path in ("../file", "/file", "C:/file", "file/", ".Git/config", "file\n"):
+            with self.subTest(path=path), self.assertRaisesRegex(
+                control_plane.ControlPlaneError, "safe repository-relative"
+            ):
+                control_plane.validate_handoff(_handoff(filesChanged=[path]))
+        with self.assertRaisesRegex(control_plane.ControlPlaneError, "phase"):
+            control_plane.validate_handoff(
+                _handoff(phase="ROUTING"), previous_state="IMPLEMENTATION"
+            )
+
+    def test_formal_gate_requires_gatekeeper_and_evidence_context(self) -> None:
+        handoff = _handoff(phase="CI_VALIDATION", nextState="REALITY_GATE")
+        requirements = [handoff["claims"][0]["evidencePointer"]]
+        context = {
+            "previous_state": "CI_VALIDATION",
+            "required_evidence": requirements,
+        }
+        self.assertEqual(control_plane.validate_handoff(handoff), handoff)
+        self.assertEqual(
+            control_plane.assert_legal_transition("CI_VALIDATION", "REALITY_GATE"),
+            "structural_only",
+        )
+        for role in (None, "", "unknown", "writer", "verifier"):
+            with self.subTest(role=role), self.assertRaises(control_plane.ControlPlaneError):
+                control_plane.validate_handoff(handoff, actor_role=role, promotion=True, **context)
+        with self.assertRaisesRegex(control_plane.ControlPlaneError, "gatekeeper role"):
+            control_plane.validate_handoff(handoff, actor_role="verifier", **context)
+        with self.assertRaisesRegex(control_plane.ControlPlaneError, "previous_state"):
+            control_plane.validate_handoff(handoff, actor_role="gatekeeper", promotion=True)
+        with self.assertRaisesRegex(control_plane.ControlPlaneError, "required evidence"):
+            control_plane.validate_handoff(
+                handoff, actor_role="gatekeeper", previous_state="CI_VALIDATION", promotion=True
+            )
+        for changes in (
+            {"claims": []},
+            {"claims": [{"claimType": "INFERENCE", "statement": "likely", "evidencePointer": requirements[0]}]},
+            {"claims": [dict(handoff["claims"][0], evidencePointer="other-evidence")]},
+            {"testResults": [{"name": "focused", "status": "FAIL"}]},
+            {"testResults": [{"name": "focused", "status": "ERROR"}]},
+            {"knownFailures": ["test fixture failed"]},
+        ):
+            with self.subTest(changes=changes), self.assertRaises(control_plane.ControlPlaneError):
+                control_plane.validate_handoff(
+                    dict(handoff, **changes), actor_role="gatekeeper", promotion=True, **context
+                )
+        failure_record = dict(handoff, knownFailures=["test fixture failed"])
+        self.assertEqual(control_plane.validate_handoff(failure_record), failure_record)
+        self.assertEqual(
+            control_plane.validate_handoff(handoff, actor_role="gatekeeper", promotion=True, **context),
+            handoff,
+        )
+
+    def test_writer_cannot_submit_independent_review_for_promotion(self) -> None:
+        handoff = _handoff(phase="SOURCE_REVIEW", nextState="ADVERSARIAL_RUNTIME")
+        with self.assertRaisesRegex(control_plane.ControlPlaneError, "self-review"):
+            control_plane.validate_handoff(
+                handoff, previous_state="SOURCE_REVIEW", actor_role="writer", promotion=True,
+                required_evidence=[handoff["claims"][0]["evidencePointer"]],
+            )
+
     def test_evidence_pointer_required_for_source_facts(self) -> None:
         with self.assertRaises(control_plane.ControlPlaneError):
             control_plane.validate_handoff(

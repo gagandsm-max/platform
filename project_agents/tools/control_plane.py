@@ -12,7 +12,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Literal, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 AGENTS_ROOT = REPO_ROOT / "project_agents"
@@ -26,7 +26,8 @@ TOOL_AUTHORITY_PATH = AGENTS_ROOT / "tool_authority.json"
 SCHEMA_VERSION = "v2"
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 ISO_TIME_RE = re.compile(
-    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$"
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:Z|[+-](?:[01][0-9]|2[0-3]):[0-5][0-9])"
 )
 TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{1,127}$")
 AGENT_NAME_RE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -85,6 +86,9 @@ VALIDATION_GATE_STATES = frozenset(
         "POST_MERGE_VERIFY",
         "COMPLETE",
     }
+)
+INDEPENDENT_REVIEW_STATES = frozenset(
+    {"SOURCE_REVIEW", "ADVERSARIAL_RUNTIME", "SECURITY_DOMAIN_REVIEW", "CI_VALIDATION"}
 )
 
 
@@ -207,6 +211,14 @@ def assert_legal_tool_roles(
         raise ControlPlaneError(
             f"gatekeeper {gatekeeper!r} is not an authorized gatekeeper under tool_authority.json"
         )
+    for field, tool in (
+        ("writerTool", writer_tool),
+        ("verifierTool", verifier_tool),
+        ("gatekeeper", gatekeeper),
+    ):
+        tool_status = tools[tool].get("status")
+        if tool_status != "authorized":
+            raise ControlPlaneError(f"{field} {tool!r} requires authorized status, got {tool_status!r}")
     # Canonical tool IDs name families. Client interfaces are not selectable IDs.
     if writer_tool == verifier_tool:
         raise ControlPlaneError(
@@ -376,7 +388,8 @@ def assert_legal_transition(
     *,
     actor_role: str | None = None,
     machine: Mapping[str, Any] | None = None,
-) -> None:
+) -> Literal["structural_only"]:
+    """Inspect a graph edge and any declared role. Success is structural only."""
     machine = machine or load_state_machine()
     states = set(authoritative_states(machine))
     if source not in states:
@@ -389,6 +402,18 @@ def assert_legal_transition(
         raise ControlPlaneError(
             f"writer cannot self-certify transition into {target}"
         )
+    if actor_role is not None:
+        if actor_role not in ("writer", "verifier", "gatekeeper"):
+            raise ControlPlaneError(f"unknown actor role {actor_role!r}")
+        if target in WRITER_SELF_CERTIFY_FORBIDDEN and actor_role != "gatekeeper":
+            raise ControlPlaneError(f"transition into {target} requires the gatekeeper role")
+        if (
+            actor_role == "writer"
+            and source in INDEPENDENT_REVIEW_STATES
+            and target in VALIDATION_GATE_STATES
+        ):
+            raise ControlPlaneError(f"writer cannot self-review at {source}")
+    return "structural_only"
 
 
 def _require_object(value: Any, label: str) -> dict[str, Any]:
@@ -413,15 +438,18 @@ def _require_string_array(value: Any, label: str) -> list[str]:
 
 def _require_iso_time(value: Any, label: str) -> str:
     text = _require_string(value, label)
-    if not ISO_TIME_RE.match(text):
+    if not ISO_TIME_RE.fullmatch(text):
         raise ControlPlaneError(f"{label} must be an ISO-8601 timestamp")
-    datetime.fromisoformat(text.replace("Z", "+00:00"))
+    try:
+        datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ControlPlaneError(f"{label} must be an ISO-8601 timestamp") from exc
     return text
 
 
 def _require_sha(value: Any, label: str) -> str:
     text = _require_string(value, label)
-    if not GIT_SHA_RE.match(text):
+    if not GIT_SHA_RE.fullmatch(text):
         raise ControlPlaneError(f"{label} must be a 40-character lowercase git SHA")
     return text
 
@@ -518,7 +546,7 @@ def validate_task_manifest(
     if _require_string(obj["schemaVersion"], "schemaVersion") != SCHEMA_VERSION:
         raise ControlPlaneError(f"schemaVersion must be {SCHEMA_VERSION}")
     task_id = _require_string(obj["taskId"], "taskId")
-    if not TASK_ID_RE.match(task_id):
+    if not TASK_ID_RE.fullmatch(task_id):
         raise ControlPlaneError("taskId has an invalid format")
     status = _require_enum(obj["status"], "status", states)
     _require_string(obj["taskType"], "taskType")
@@ -564,7 +592,7 @@ def validate_task_manifest(
         raise ControlPlaneError("updatedAt must not precede createdAt")
 
     exact_head: str | None = None
-    if "exactHead" in obj and obj["exactHead"] not in (None, ""):
+    if "exactHead" in obj:
         exact_head = _require_sha(obj["exactHead"], "exactHead")
     if status in HEAD_REQUIRED_STATES and not exact_head:
         raise ControlPlaneError(
@@ -598,7 +626,7 @@ def _scope_path(raw: str, label: str, worktree_root: Path | None = None) -> str:
         not part
         or part.endswith((".", " "))
         or part.casefold() in {".git", "git~1"}
-        or any(char in part for char in "\\:\x00")
+        or any(char in "\\:" or ord(char) < 32 or ord(char) == 127 for char in part)
         for part in parts
     ):
         raise ControlPlaneError(f"{label} must be a safe repository-relative path: {raw!r}")
@@ -622,7 +650,15 @@ def assert_write_paths_in_scope(
     worktree_root: Path = REPO_ROOT,
 ) -> None:
     """Check changed paths within frozen scope using a caller-observed worktree root."""
+    if status not in authoritative_states():
+        raise ControlPlaneError(f"unknown write scope state {status!r}")
     if status not in FROZEN_SCOPE_STATES:
+        for entry in scope:
+            _scope_path(entry.removesuffix("/"), "scope")
+        for path in files_changed:
+            _scope_path(path, "write path")
+        if files_changed:
+            raise ControlPlaneError(f"write paths require frozen scope; status={status}")
         return
     if not scope:
         raise ControlPlaneError("frozen scope is empty; return through DIAGNOSIS/ROUTING")
@@ -697,8 +733,15 @@ def validate_handoff(
     required_evidence: list[str] | None = None,
     actor_role: str | None = None,
     previous_state: str | None = None,
+    promotion: bool = False,
     machine: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
+    """Validate a handoff payload without applying a state transition.
+
+    By default this is structural inspection. Promotion checks also apply to
+    validation-gate handoffs with a declared actor role. The caller owns
+    authentication, evidence verification and any eventual state change.
+    """
     obj = _require_object(handoff, "handoff")
     states = authoritative_states(machine)
     required = {
@@ -727,13 +770,16 @@ def validate_handoff(
     if _require_string(obj["schemaVersion"], "schemaVersion") != SCHEMA_VERSION:
         raise ControlPlaneError(f"schemaVersion must be {SCHEMA_VERSION}")
     task_id = _require_string(obj["taskId"], "taskId")
-    if not TASK_ID_RE.match(task_id):
+    if not TASK_ID_RE.fullmatch(task_id):
         raise ControlPlaneError("taskId has an invalid format")
     phase = _require_enum(obj["phase"], "phase", states)
+    if previous_state is not None and previous_state != phase:
+        raise ControlPlaneError("handoff phase must match previous_state")
     next_state = _require_enum(obj["nextState"], "nextState", states)
     _require_sha(obj["inputHead"], "inputHead")
     _require_sha(obj["outputHead"], "outputHead")
-    _require_string_array(obj["filesChanged"], "filesChanged")
+    for path in _require_string_array(obj["filesChanged"], "filesChanged"):
+        _scope_path(path, "filesChanged")
     _require_string_array(obj["requirementsAddressed"], "requirementsAddressed")
     _require_string_array(obj["testsExecuted"], "testsExecuted")
     test_results = obj["testResults"]
@@ -753,8 +799,16 @@ def validate_handoff(
     claims = [_validate_claim(claim, index) for index, claim in enumerate(claims_raw)]
     _require_string(obj["nextOwner"], "nextOwner")
     _require_iso_time(obj["timestamp"], "timestamp")
-    source_state = previous_state or phase
-    assert_legal_transition(source_state, next_state, actor_role=actor_role, machine=machine)
+    assert_legal_transition(phase, next_state, actor_role=actor_role, machine=machine)
+    if promotion or (actor_role is not None and next_state in VALIDATION_GATE_STATES):
+        if actor_role is None:
+            raise ControlPlaneError("promotion requires an explicit actor role")
+        if previous_state is None:
+            raise ControlPlaneError("promotion requires previous_state from the caller")
+        if not required_evidence:
+            raise ControlPlaneError("promotion requires caller-supplied required evidence")
+        if obj["knownFailures"] or any(result["status"] in ("FAIL", "ERROR") for result in test_results):
+            raise ControlPlaneError("promotion cannot proceed with failed tests or known failures")
     claims_satisfy_required_evidence(claims, required_evidence or [])
     unverified_only = claims and all(claim["claimType"] == UNVERIFIED for claim in claims)
     if unverified_only and next_state in {
