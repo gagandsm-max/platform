@@ -615,11 +615,11 @@ class LiveKeysetCursorCodecTest {
         String token = codec.encode(PRIMARY_KEY, BASE_CONTEXT, BASE_TUPLE, BASE_RESOURCE_ID, FIXED_NOW, STANDARD_TTL);
         DecodedCursor decoded = codec.decode(PRIMARY_KEY, token, BASE_CONTEXT, FIXED_NOW);
 
-        assertFalse(codec instanceof Serializable);
-        assertFalse(BASE_CONTEXT instanceof Serializable);
-        assertFalse(BASE_CONTEXT.sortDefinition().get(0) instanceof Serializable);
-        assertFalse(BASE_TUPLE.get(0) instanceof Serializable);
-        assertFalse(decoded instanceof Serializable);
+        assertFalse(Serializable.class.isInstance(codec));
+        assertFalse(Serializable.class.isInstance(BASE_CONTEXT));
+        assertFalse(Serializable.class.isInstance(BASE_CONTEXT.sortDefinition().get(0)));
+        assertFalse(Serializable.class.isInstance(BASE_TUPLE.get(0)));
+        assertFalse(Serializable.class.isInstance(decoded));
 
         // Duplicate sort field names rejected
         assertThrows(
