@@ -13,7 +13,23 @@ need_cmd() {
 }
 
 sha256_file() {
-  sha256sum "$1" | awk '{print $1}'
+  # Hash via stdin so GNU sha256sum never emits backslash-escaped path lines.
+  sha256sum <"$1" | awk '{print $1}'
+}
+
+# Refuse if any path component (including the leaf) is a symlink.
+refuse_symlink_path() {
+  local path="$1" label="$2" cur="$1"
+  while [[ -n "$cur" && "$cur" != "/" && "$cur" != "." ]]; do
+    [[ ! -L "$cur" ]] || die "symlink refused in ${label}: ${cur}"
+    cur="$(dirname -- "$cur")"
+  done
+}
+
+# True when a and b are the same path or one is a parent of the other.
+paths_overlap() {
+  local a="$1" b="$2"
+  [[ "$a" == "$b" || "$a" == "$b"/* || "$b" == "$a"/* ]]
 }
 
 usage() {
@@ -37,18 +53,22 @@ RUNTIME_VERSION=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --binary) BINARY="${2:-}"; shift 2 ;;
-    --version) VERSION="${2:-}"; shift 2 ;;
-    --source-commit) SOURCE_COMMIT="${2:-}"; shift 2 ;;
-    --out) OUT_DIR="${2:-}"; shift 2 ;;
-    --architecture) ARCH="${2:-}"; shift 2 ;;
-    --source-date-epoch) SOURCE_DATE_EPOCH="${2:-}"; shift 2 ;;
+    --binary|--version|--source-commit|--out|--architecture|--source-date-epoch|--binary-sha256|--runtime-version)
+      [[ $# -ge 2 ]] || die "$1 requires a value"
+      ;;
+  esac
+  case "$1" in
+    --binary) BINARY="$2"; shift 2 ;;
+    --version) VERSION="$2"; shift 2 ;;
+    --source-commit) SOURCE_COMMIT="$2"; shift 2 ;;
+    --out) OUT_DIR="$2"; shift 2 ;;
+    --architecture) ARCH="$2"; shift 2 ;;
+    --source-date-epoch) SOURCE_DATE_EPOCH="$2"; shift 2 ;;
     --binary-sha256)
-      [[ $# -ge 2 ]] || die "--binary-sha256 is required and must be 64 lowercase hex digits"
       BINARY_SHA256="$2"
       shift 2
       ;;
-    --runtime-version) RUNTIME_VERSION="${2:-}"; shift 2 ;;
+    --runtime-version) RUNTIME_VERSION="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) die "unknown argument: $1" ;;
   esac
@@ -57,7 +77,7 @@ done
 [[ -n "$BINARY" && -n "$VERSION" && -n "$SOURCE_COMMIT" && -n "$OUT_DIR" ]] || { usage; die "missing required arguments"; }
 [[ "$BINARY_SHA256" =~ ^[0123456789abcdef]{64}$ ]] || die "--binary-sha256 is required and must be 64 lowercase hex digits"
 
-REPO_ROOT="$(pwd)"
+REPO_ROOT="$(pwd -P)"
 LAYOUT="${REPO_ROOT}/agent/packaging/linux/package-layout.json"
 UNIT_SRC="${REPO_ROOT}/agent/linux/systemd/platform-agent.service"
 UNIT_MIRROR="${REPO_ROOT}/deploy/systemd/platform-agent.service"
@@ -76,7 +96,10 @@ need_cmd sha256sum
 need_cmd awk
 need_cmd install
 need_cmd python3
+need_cmd git
 
+# Binary leaf must not be a symlink (OS path ancestors like /bin -> usr/bin are allowed so
+# nonexecuted fixtures such as /bin/true remain usable). Output/packaging inputs stay fail-closed.
 [[ -f "$BINARY" && ! -L "$BINARY" ]] || die "binary must be a regular non-symlink file"
 BIN_SIZE="$(stat -c '%s' "$BINARY")"
 [[ "$BIN_SIZE" -gt 0 && "$BIN_SIZE" -le 268435456 ]] || die "binary size out of bounds: ${BIN_SIZE}"
@@ -86,7 +109,14 @@ ACTUAL_SHA="$(sha256_file "$BINARY")"
 [[ "$VERSION" =~ ^[0-9][A-Za-z0-9.+~-]{0,63}$ ]] || die "version unsupported: ${VERSION}"
 [[ "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "source-commit must be 40 lowercase hex"
 [[ "$ARCH" == "amd64" || "$ARCH" == "arm64" ]] || die "architecture unsupported for this slice: ${ARCH}"
-[[ "$SOURCE_DATE_EPOCH" =~ ^[0-9]+$ ]] || die "source-date-epoch must be integer"
+[[ "$SOURCE_DATE_EPOCH" =~ ^(0|[1-9][0-9]{0,9})$ ]] || die "source-date-epoch must be integer"
+[[ "$SOURCE_DATE_EPOCH" -le 4294967295 ]] || die "source-date-epoch exceeds timestamp range"
+
+# Exact commit object only: refuse missing objects, tags, trees, blobs.
+if ! OBJ_TYPE="$(git cat-file -t "$SOURCE_COMMIT" 2>/dev/null)"; then
+  die "source-commit is not a git object"
+fi
+[[ "$OBJ_TYPE" == "commit" ]] || die "source-commit must be a commit object (got ${OBJ_TYPE})"
 
 if ! ELF_ERROR="$(python3 - "$BINARY" "$ARCH" "$BIN_SIZE" <<'PY'
 import struct
@@ -114,17 +144,21 @@ with open(path, "rb") as binary:
             or not entry or not phnum or phoff < ehsize or phoff + phnum * phentsize > size):
         refuse("binary must be an ELF64 little-endian executable with valid program headers")
 
-    # An executable (including PIE) needs an entry point backed by executable file bytes.
+    # Validate every PT_LOAD for bounds; entry must still be backed by an executable load.
     binary.seek(phoff)
+    entry_backed = False
     for _ in range(phnum):
         segment = binary.read(phentsize)
         if len(segment) != phentsize:
             refuse("binary ELF program headers are truncated")
         segment_type, flags, offset, vaddr, _, filesz, memsz, _ = struct.unpack("<IIQQQQQQ", segment)
-        if (segment_type == 1 and flags & 1 and filesz <= memsz
-                and offset + filesz <= size and vaddr <= entry < vaddr + filesz):
-            break
-    else:
+        if segment_type != 1:
+            continue
+        if filesz > memsz or offset > size or filesz > size - offset:
+            refuse("binary ELF load segment is bounds-invalid")
+        if flags & 1 and filesz and vaddr <= entry < vaddr + filesz:
+            entry_backed = True
+    if not entry_backed:
         refuse("binary ELF entry point is not backed by an executable load segment")
 PY
 )"; then
@@ -136,10 +170,31 @@ grep -qx 'ExecStart=/opt/platform/agent/platform-agent-linux' "$UNIT_SRC" \
   || die "unit ExecStart is not the governed /opt/platform/agent path"
 grep -q '/usr/local/' "$UNIT_SRC" && die "unit still references /usr/local"
 
-[[ -d "$OUT_DIR" && ! -L "$OUT_DIR" ]] || die "--out must be an existing non-symlink directory"
-OUT_DIR="$(cd "$OUT_DIR" && pwd)"
+# Packaging inputs: regular files, no symlink leaf/ancestors (truthful staging inputs).
+for _pkg_input in "$LAYOUT" "$UNIT_SRC" "$UNIT_MIRROR" "$ENV_EXAMPLE" "$CONTROL_TEMPLATE" "$LIFECYCLE_SRC" "$README_SRC"; do
+  refuse_symlink_path "$_pkg_input" "packaging input"
+  [[ -f "$_pkg_input" && ! -L "$_pkg_input" ]] || die "packaging input must be a regular non-symlink file: ${_pkg_input}"
+done
+
+[[ -d "$OUT_DIR" ]] || die "--out must be an existing non-symlink directory"
+refuse_symlink_path "$OUT_DIR" "output"
+[[ ! -L "$OUT_DIR" ]] || die "--out must be an existing non-symlink directory"
+OUT_DIR="$(cd -- "$OUT_DIR" && pwd -P)"
+BINARY_DIR="$(cd -- "$(dirname -- "$BINARY")" && pwd -P)"
+BINARY="${BINARY_DIR}/$(basename -- "$BINARY")"
+
+paths_overlap "$OUT_DIR" "$REPO_ROOT" && die "source/output overlap"
+for _git_flag in --absolute-git-dir --git-common-dir; do
+  _git_meta="$(git rev-parse "$_git_flag")"
+  _git_meta="$(cd -- "$_git_meta" && pwd -P)"
+  paths_overlap "$OUT_DIR" "$_git_meta" && die "Git metadata/output overlap"
+done
+paths_overlap "$OUT_DIR" "$BINARY_DIR" && die "binary/output overlap"
+
 DEST="${OUT_DIR}/platform-agent-${VERSION}-${ARCH}-deb"
 [[ ! -e "$DEST" ]] || die "output collision: ${DEST}"
+
+# All validation complete — only now create private output child (never delete existing out contents).
 mkdir -m 0700 "$DEST"
 STAGE="${DEST}/payload"
 mkdir -m 0755 "$STAGE"
@@ -175,29 +230,42 @@ install -m 0644 "$README_SRC" "${STAGE}/usr/share/doc/platform-agent/README.pack
 } > "${STAGE}/usr/share/doc/platform-agent/ARTIFACT_TRUTH.txt"
 chmod 0644 "${STAGE}/usr/share/doc/platform-agent/ARTIFACT_TRUTH.txt"
 
-RUNTIME_JSON="null"
-if [[ -n "$RUNTIME_VERSION" ]]; then
-  RUNTIME_JSON="$(printf '%s' "$RUNTIME_VERSION" | python3 -c 'import json,sys; print(json.dumps(sys.stdin.read()))')"
-fi
-PROVENANCE="$(cat <<EOF
-{
-  "schema": "PLATFORM_AGENT_DEB_PROVENANCE_V1",
-  "package": "platform-agent",
-  "version": "${VERSION}",
-  "architecture": "${ARCH}",
-  "source_commit": "${SOURCE_COMMIT}",
-  "source_date_epoch": ${SOURCE_DATE_EPOCH},
-  "binary_sha256": "${ACTUAL_SHA}",
-  "binary_bytes": ${BIN_SIZE},
-  "runtime_version_input": ${RUNTIME_JSON},
-  "unit_sha256": "$(sha256_file "$UNIT_SRC")",
-  "lifecycle_sha256": "$(sha256_file "$LIFECYCLE_SRC")",
-  "layout_sha256": "$(sha256_file "$LAYOUT")",
-  "signing": "UNSIGNED_INTERNAL_ONLY",
-  "forbidden_checked": ["/usr/local"],
-  "ebpf_enabled_by_package": false
+# Provenance via real JSON serialization; argv/path treated as data (not source interpolation).
+# binary_sha256 records the packaged input digest only — not compilation provenance from source_commit.
+PROVENANCE="$(
+  python3 - "$VERSION" "$ARCH" "$SOURCE_COMMIT" "$SOURCE_DATE_EPOCH" "$ACTUAL_SHA" "$BIN_SIZE" \
+    "$RUNTIME_VERSION" "$UNIT_SRC" "$LIFECYCLE_SRC" "$LAYOUT" <<'PY'
+import hashlib, json, sys
+
+def sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+(version, arch, source_commit, source_date_epoch, binary_sha256, binary_bytes,
+ runtime_version, unit_src, lifecycle_src, layout) = sys.argv[1:]
+runtime = runtime_version if runtime_version != "" else None
+doc = {
+    "schema": "PLATFORM_AGENT_DEB_PROVENANCE_V1",
+    "package": "platform-agent",
+    "version": version,
+    "architecture": arch,
+    "source_commit": source_commit,
+    "source_date_epoch": int(source_date_epoch),
+    "binary_sha256": binary_sha256,
+    "binary_bytes": int(binary_bytes),
+    "runtime_version_input": runtime,
+    "unit_sha256": sha256_file(unit_src),
+    "lifecycle_sha256": sha256_file(lifecycle_src),
+    "layout_sha256": sha256_file(layout),
+    "signing": "UNSIGNED_INTERNAL_ONLY",
+    "forbidden_checked": ["/usr/local"],
+    "ebpf_enabled_by_package": False,
 }
-EOF
+print(json.dumps(doc, indent=2))
+PY
 )"
 printf '%s\n' "$PROVENANCE" > "${STAGE}/usr/lib/platform/agent/packaging/provenance.json"
 chmod 0644 "${STAGE}/usr/lib/platform/agent/packaging/provenance.json"
@@ -237,33 +305,40 @@ find "$STAGE" -exec touch -d "@${SOURCE_DATE_EPOCH}" {} +
 DEB_PATH="${DEST}/platform-agent_${VERSION}_${ARCH}.deb"
 SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH}" dpkg-deb --root-owner-group --build "$STAGE" "$DEB_PATH" >/dev/null
 DEB_SHA="$(sha256_file "$DEB_PATH")"
+DEB_BYTES="$(stat -c '%s' "$DEB_PATH")"
 
-RECEIPT="$(cat <<EOF
-{
-  "schema": "PLATFORM_AGENT_DEB_BUILD_RECEIPT_V1",
-  "package": "platform-agent",
-  "version": "${VERSION}",
-  "architecture": "${ARCH}",
-  "source_commit": "${SOURCE_COMMIT}",
-  "source_date_epoch": ${SOURCE_DATE_EPOCH},
-  "deb_path": "${DEB_PATH}",
-  "deb_sha256": "${DEB_SHA}",
-  "deb_bytes": $(stat -c '%s' "$DEB_PATH"),
-  "binary_sha256": "${ACTUAL_SHA}",
-  "signing": "UNSIGNED_INTERNAL_ONLY",
-  "install_performed": false,
-  "native_vm_lifecycle": "NOT_RUN_BY_BUILD"
+RECEIPT="$(
+  python3 - "$VERSION" "$ARCH" "$SOURCE_COMMIT" "$SOURCE_DATE_EPOCH" "$DEB_PATH" "$DEB_SHA" "$DEB_BYTES" "$ACTUAL_SHA" <<'PY'
+import json, sys
+(version, arch, source_commit, source_date_epoch, deb_path, deb_sha256, deb_bytes, binary_sha256) = sys.argv[1:]
+doc = {
+    "schema": "PLATFORM_AGENT_DEB_BUILD_RECEIPT_V1",
+    "package": "platform-agent",
+    "version": version,
+    "architecture": arch,
+    "source_commit": source_commit,
+    "source_date_epoch": int(source_date_epoch),
+    "deb_path": deb_path,
+    "deb_sha256": deb_sha256,
+    "deb_bytes": int(deb_bytes),
+    "binary_sha256": binary_sha256,
+    "signing": "UNSIGNED_INTERNAL_ONLY",
+    "install_performed": False,
+    "native_vm_lifecycle": "NOT_RUN_BY_BUILD",
 }
-EOF
+print(json.dumps(doc, indent=2))
+PY
 )"
 printf '%s\n' "$RECEIPT" > "${DEST}/build-receipt.json"
 
-# Fail closed if the archive contains /usr/local.
-if dpkg-deb -c "$DEB_PATH" | grep -E '/usr/local(/|$)'; then
+# Verify archive listing succeeds before absence checks.
+if ! DEB_LISTING="$(dpkg-deb -c "$DEB_PATH")"; then
+  die "dpkg-deb listing failed for built package"
+fi
+if printf '%s\n' "$DEB_LISTING" | grep -E '/usr/local(/|$)'; then
   die "built package unexpectedly contains /usr/local paths"
 fi
 
-python3 - <<PY
-import json
-print(json.dumps(json.load(open("${DEST}/build-receipt.json")), sort_keys=True))
-PY
+# Emit receipt as JSON; path is argv data, never interpolated into Python source.
+python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1], encoding="utf-8")), sort_keys=True))' \
+  "${DEST}/build-receipt.json"
