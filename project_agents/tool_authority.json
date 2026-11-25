@@ -15,7 +15,7 @@
     "cursor-cli": {
       "id": "cursor-cli",
       "displayName": "Cursor CLI",
-      "roles": ["writer"],
+      "roles": ["writer", "test", "verifier"],
       "mayWriteProductCode": true,
       "mayMerge": false,
       "mayCertify": false,
@@ -26,8 +26,8 @@
     "cursor-cloud": {
       "id": "cursor-cloud",
       "displayName": "Cursor Cloud",
-      "roles": ["writer"],
-      "mayWriteProductCode": true,
+      "roles": [],
+      "mayWriteProductCode": false,
       "mayMerge": false,
       "mayCertify": false,
       "defaultWriter": false,
@@ -37,19 +37,19 @@
     "antigravity": {
       "id": "antigravity",
       "displayName": "Antigravity CLI",
-      "roles": ["verifier", "adversarial", "auditor", "certification_gate"],
-      "mayWriteProductCode": false,
+      "roles": ["writer", "test", "verifier", "adversarial", "auditor", "certification_gate"],
+      "mayWriteProductCode": true,
       "mayMerge": false,
       "mayCertify": false,
       "defaultWriter": false,
       "defaultGeneratedCapability": "read-only",
       "status": "authorized",
-      "notes": "Read-only/adversarial independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider. Antigravity is not the sole auditor: any suitable authorized tool may perform read-only/advisory review of another tool's candidate. mayCertify=false means Antigravity supplies independent certification-gate evidence/recommendation; ChatGPT + GitHub performs final technical certification. Generated adapters must not gain write tools. Antigravity is not an implementation writer and cannot validate its own changes."
+      "notes": "Eligible for assigned bounded implementation, testing and adversarial peer review of another tool family's candidate. Generated adapters remain read-only."
     },
     "codex": {
       "id": "codex",
       "displayName": "Codex",
-      "roles": ["writer", "test", "debugging"],
+      "roles": ["writer", "test", "debugging", "verifier"],
       "mayWriteProductCode": true,
       "mayMerge": false,
       "mayCertify": false,
@@ -58,18 +58,18 @@
       "writeAgentSandboxMode": "workspace-write",
       "clientInterfaces": ["codex-cli", "chatgpt-desktop-codex-mode"],
       "status": "authorized",
-      "notes": "Founder-reactivated 2026-10-07 as an approved bounded implementation, test and debugging writer. Codex CLI and Codex Desktop (ChatGPT Desktop App Codex mode) are one Codex authority family — client interfaces to this single authority, not independent writers or independent certification sources from each other. Plain ChatGPT Desktop conversation has no assumed repository filesystem/execution access. Codex cannot independently verify, act as gatekeeper, merge or self-certify, and cannot certify its own candidate. Read-only canonical agents remain read-only; write agents default to workspace-write without implied network or unrestricted host access."
+      "notes": "Codex CLI and ChatGPT Desktop Codex mode share one authority family. Codex may implement, test, debug or peer-review another family's candidate within an explicit assignment. Plain ChatGPT Desktop has no assumed filesystem or execution access. Generated read agents use read-only and write agents use workspace-write."
     },
     "github-copilot": {
       "id": "github-copilot",
       "displayName": "GitHub Copilot",
-      "roles": ["auxiliary_pr_review"],
-      "mayWriteProductCode": false,
+      "roles": ["writer", "test", "verifier"],
+      "mayWriteProductCode": true,
       "mayMerge": false,
       "mayCertify": false,
       "defaultWriter": false,
-      "status": "authorized_limited",
-      "notes": "Never-writer. Limited auxiliary PR/code-review only. Elevation cannot authorize GitHub Copilot as writer, verifier, gatekeeper, merge authority, or sole certification evidence."
+      "status": "authorized",
+      "notes": "Policy-eligible for assigned bounded writing, testing and peer review. Actual entitlement and invocation remain unverified."
     },
     "founder": {
       "id": "founder",
@@ -85,32 +85,26 @@
   "legalCombinations": {
     "defaultWriterTools": ["cursor-cli"],
     "exceptionalWriterTools": [],
-    "writerTools": ["cursor-cli", "codex"],
-    "neverWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "founder"],
-    "prohibitedWriterTools": ["cursor-cloud", "github-copilot", "chatgpt-github", "founder"],
-    "verifierTools": ["chatgpt-github", "antigravity"],
-    "prohibitedVerifierTools": ["cursor-cloud", "github-copilot", "cursor-cli", "founder", "codex"],
+    "writerTools": ["cursor-cli", "codex", "antigravity", "github-copilot"],
+    "neverWriterTools": ["cursor-cloud", "chatgpt-github", "founder"],
+    "prohibitedWriterTools": ["cursor-cloud", "chatgpt-github", "founder"],
+    "verifierTools": ["chatgpt-github", "antigravity", "cursor-cli", "codex", "github-copilot"],
+    "prohibitedVerifierTools": ["cursor-cloud", "founder"],
     "gatekeepers": ["chatgpt-github", "founder"],
     "prohibitedGatekeepers": ["cursor-cli", "cursor-cloud", "antigravity", "codex", "github-copilot"],
-    "writerElevationAuthorizers": ["chatgpt-github", "founder"],
+    "writerElevationAuthorizers": [],
     "rules": [
-      "default writerTool is cursor-cli and requires no writerElevation",
-      "codex is an authorized non-default bounded writer and requires no writerElevation",
-      "exceptionalWriterTools is empty under the current active workflow; Antigravity cannot be elevated into a writer",
-      "neverWriterTools (cursor-cloud, github-copilot, chatgpt-github, founder) cannot become writers via elevation",
-      "one writer may own a checkout/worktree; Cursor CLI and Codex may be bounded writers in isolated worktrees concurrently only on non-overlapping lanes",
-      "a writer cannot independently certify its own candidate",
-      "verifierTool must be distinct from writerTool",
-      "gatekeeper must be distinct from writerTool",
-      "any suitable authorized tool may perform read-only/advisory review of another tool's candidate; Antigravity is an independent adversarial reviewer, not the sole auditor",
-      "Codex cannot self-certify, independently verify, act as gatekeeper or merge",
-      "generated Antigravity adapters remain read-only and Antigravity cannot write or validate its own changes",
-      "Codex CLI and Codex Desktop are one Codex authority family, not separate authorities or independent certification sources",
+      "cursor-cli is the default bounded writer",
+      "eligible writers require explicit task assignment, verified current source, and bounded branch, worktree and file scope",
+      "writerElevation must be absent or null; manifest fields cannot authenticate an actor or lease or promote quarantined source",
+      "one writer may own a checkout/worktree; concurrent writers require isolated non-overlapping lanes",
+      "a verifier must belong to a distinct tool family from the writer; Codex CLI and Codex Desktop are one family",
+      "generated Antigravity adapters remain read-only",
+      "global automatic approval is prohibited",
       "generated Codex read agents use sandbox_mode=read-only and write agents use sandbox_mode=workspace-write; never generate danger-full-access or imply network access",
       "dot is not a Platform writer, verifier, gatekeeper, merge or certification authority; any later Codex orchestration requires a separately frozen environment, branch, SHA, permissions and scope",
-      "github-copilot is never writer, verifier, gatekeeper, merge authority, or sole certification evidence",
-      "cursor-cloud is prohibited as writerTool; elevation cannot authorize it under current policy",
-      "final technical gate/certification authority remains ChatGPT + GitHub (Antigravity mayCertify=false supplies gate evidence only)"
+      "ChatGPT + GitHub and Founder retain final gate, merge and certification authority; tools cannot merge autonomously or certify their own work",
+      "bounded BUILD and TEST may proceed under explicit assignment while formal certification remains a separate promotion gate"
     ]
   }
 }

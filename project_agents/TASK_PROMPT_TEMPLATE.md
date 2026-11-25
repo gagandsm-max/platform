@@ -27,7 +27,7 @@ selectedAgents: [<exact canonical agent names>]
 selectedSkills: [<exact canonical skill names>]
 
 TOOL AUTHORITY
-Select exactly one writerTool for this checkout: cursor-cli (default) or codex. Codex CLI and ChatGPT Desktop Codex mode are interfaces to one Codex authority. Use antigravity or chatgpt-github as the independent verifierTool, and chatgpt-github or founder as gatekeeper. writerTool must differ from verifierTool and gatekeeper. Antigravity is not a writer. Do not place Cursor and Codex on the same checkout or file set.
+Select exactly one writerTool for the assigned checkout from cursor-cli (default), codex, antigravity or github-copilot. Select a distinct-family verifierTool from those tools or chatgpt-github. Codex CLI and ChatGPT Desktop Codex mode share one family. Set gatekeeper to chatgpt-github or founder. Record the verified current source and explicit branch, worktree and file scope. Leave writerElevation absent or null. Check tool availability for the assignment, including GitHub Copilot entitlement and invocation.
 
 COMPLETION
 Return changed files, tests/evidence, risks/limitations and unresolved items. Do not claim production/GA readiness unless platform-reality-checker verifies the applicable quality gates.

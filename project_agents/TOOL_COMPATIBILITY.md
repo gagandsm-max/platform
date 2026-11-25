@@ -24,11 +24,11 @@ subagent loaders.
 | ChatGPT + GitHub | Control plane; architecture/technical authority; sequencing; PR/merge; **final** certification/progress; does not write product code |
 | Cursor CLI | **Default** bounded implementation writer; one writer per checkout/worktree; cannot self-certify; no `writerElevation` required |
 | Cursor Cloud | **Never-writer** under current policy; elevation cannot authorize it |
-| Codex | Authorized non-default bounded implementation/test/debug writer; Codex CLI and ChatGPT Desktop App Codex mode are client interfaces to one authority; cannot independently verify, gatekeep, merge or certify |
-| Antigravity CLI | Independent read-only verifier / adversarial / exact-SHA auditor / certification-gate **evidence** lane; generated adapters stay read-only; not an implementation writer; `mayCertify=false` (evidence only — ChatGPT + GitHub certifies) |
-| GitHub Copilot | Never-writer; limited auxiliary PR/code-review only; elevation cannot authorize writer/verifier/gatekeeper/merge/sole certification |
+| Codex | Bounded implementation, testing, debugging and peer review. CLI and Desktop Codex mode share one family |
+| Antigravity CLI | Bounded implementation, testing and exact-head adversarial peer review. Generated adapters stay read-only |
+| GitHub Copilot | Eligible for bounded writing, testing and peer review. Entitlement and invocation remain unverified |
 
-Rules: `writerTool` is exactly one of `cursor-cli` or `codex`; Cursor remains the default. `exceptionalWriterTools` is empty and neither active writer accepts `writerElevation`. Antigravity is rejected as a writer. `verifierTool` and gatekeeper must each differ from `writerTool`. Cursor and Codex may run concurrently only on isolated non-overlapping lanes, never the same checkout/task manifest.
+Assign one eligible writer to a verified branch, worktree and file scope. For peer review choose a distinct eligible family or `chatgpt-github`. Keep `writerElevation` absent or null. Manifest validation checks role eligibility and cannot establish actor identity, a workspace lease or provenance for recovered source. The Master retains the gate, merge and final certification. Autonomous tool merge is prohibited.
 
 Dot is not a Platform writer, verifier, gatekeeper, merge or certification authority. Its readiness is evaluated separately; any future orchestration of an approved Codex task requires the exact environment, branch, SHA, permissions and scope to be frozen first.
 
@@ -78,7 +78,7 @@ Programme contract (binary `agy` **not present** on this Cloud VM, so flags were
 not re-executed here):
 
 - `--agent` is supported.
-- Platform posture is read-only / adversarial.
+- Generated adapters remain read-only. Bounded writing requires a separate explicit assignment.
 - Independent exact-SHA auditor, negative/failure/security challenger and certification-gate evidence provider (`mayCertify=false`; ChatGPT + GitHub retains final certification).
 - Previously documented read-only planning flag: `--mode plan`.
 
@@ -101,9 +101,9 @@ Do **not** invent a native ChatGPT filesystem subagent mechanism.
 - Founder reactivated Codex on 2026-10-07 for bounded implementation, testing and debugging.
 - Generated `.codex/agents/` adapters derive sandbox from canonical agent mode: `read` stays `sandbox_mode=read-only`; `write` becomes `sandbox_mode=workspace-write`.
 - Never generate `danger-full-access`, unrestricted host access or network authority merely because an agent is writable.
-- Codex CLI and ChatGPT Desktop App Codex mode are approved client interfaces to the same Codex writer authority. They are not separate writers, verifiers or certification authorities.
+- Codex CLI and ChatGPT Desktop App Codex mode share one authority family for writing and review.
 - Plain ChatGPT Desktop conversation is not assumed to have repository filesystem/execution access unless Codex mode or explicitly connected local-computer access is active.
-- Codex is prohibited as independent verifier/gatekeeper, cannot merge, and cannot self-certify.
+- Codex may review another tool family's candidate. Gatekeeping, merge and final certification stay with the Master.
 - Presence of generated adapters does not expand task scope or override one-writer-per-worktree isolation.
 
 ## Native binaries on this Cloud VM (2026-09-12)

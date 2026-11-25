@@ -46,12 +46,12 @@ First map the actual implementation with platform-codebase-onboarding-engineer. 
 
 ### Tool/runtime boundaries
 
-- ChatGPT+GitHub coordinates repository truth, architecture, task assignment, GitHub writes, PR state and CI evidence; it does not write product code or claim local Cursor/Codex/Antigravity execution. Merge and final technical certification remain ChatGPT + GitHub.
+- ChatGPT + GitHub coordinates repository truth, architecture, task assignment, GitHub writes, PR state and CI evidence. Final gate, merge and certification authority stays with the Master (ChatGPT + GitHub or Founder).
 - Cursor CLI is the primary/default bounded writer and uses `.cursor/agents/` plus shared `.agents/skills/` with the proven flags in `TOOL_COMPATIBILITY.md`. Cursor Cloud is a never-writer under current policy (elevation cannot authorize it). Do not invent `--agent`.
-- Antigravity uses `.agents/agents/` and `.agents/skills/`. `--agent` is supported. Platform posture is read-only/adversarial: Antigravity is the independent exact-SHA auditor, negative/security challenger and certification-gate evidence provider. Generated adapters remain read-only. Antigravity cannot write, validate its own work, self-certify or act as final certification authority.
-- Codex is an authorized non-default bounded implementation/test/debug writer. Canonical read-agent adapters use `sandbox_mode=read-only`; write-agent adapters use `sandbox_mode=workspace-write`. Never grant `danger-full-access`, unrestricted host access or network merely from write mode. Codex CLI and ChatGPT Desktop App Codex mode are client interfaces to one Codex authority; plain Desktop conversation has no assumed repository execution/filesystem access. Codex cannot independently verify, gatekeep, merge or self-certify.
-- Cursor CLI and Codex may operate concurrently only on isolated branches/worktrees with non-overlapping file ownership. Exactly one writer owns each checkout/task manifest.
-- GitHub Copilot is never a writer (elevation cannot authorize it), never a verifier/gatekeeper, and never sole certification evidence.
+- Antigravity uses `.agents/agents/` and `.agents/skills/`. `--agent` is supported. Generated adapters stay read-only. Antigravity may take a separate bounded write assignment or provide exact-head adversarial review of another tool family's candidate.
+- Codex may take bounded implementation, test, debugging or peer review assignments. Codex CLI and ChatGPT Desktop Codex mode share one family. Generated read agents use `read-only` and write agents use `workspace-write`. Keep unrestricted host access and global automatic approval disabled.
+- Eligible writers may operate concurrently only on isolated branches/worktrees with non-overlapping file ownership. Exactly one writer owns each checkout/task manifest.
+- GitHub Copilot may take bounded write, test or peer review assignments. Actual entitlement and invocation remain unverified.
 - Never use destructive generic Docker cleanup such as broad prune or `down -v` as an orchestration shortcut.
 
 ## Routing chain
@@ -78,4 +78,4 @@ Do not load every Skill body. Use this table, `AGENT_MATRIX.md` and `skills/AGEN
 
 Material UI pipeline: requirements/source review → `platform-ux-architect` → `platform-product-ui-designer` → implementation-ready UI specification → `platform-frontend-developer` → runtime/UI tests → `platform-accessibility-auditor` → large-estate/performance review where applicable → `platform-ui-finish-gate-reviewer` → `platform-evidence-collector`. Tiny UI fixes need not invoke the entire chain.
 
-Writer self-certification is prohibited. `writerTool` must be `cursor-cli` or `codex`; `verifierTool` and gatekeeper must each differ from the writer. Antigravity remains read-only and is not eligible for `writerElevation` under the active workflow.
+Assign exactly one eligible writer (`cursor-cli` by default, `codex`, `antigravity` or `github-copilot`) and a distinct-family verifier from the eligible tools or `chatgpt-github`. Bind the assignment to verified current source and explicit branch, worktree and file scope. Omit `writerElevation` or set it to null. Role eligibility provides no actor or lease authentication and grants no promotion to quarantined source. Assigned BUILD and TEST may proceed while formal certification is deferred.

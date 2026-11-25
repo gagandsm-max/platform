@@ -908,50 +908,16 @@ def validate_agent_pack(repo: Path) -> list[str]:
         tools = authority["tools"]
         if tools.get("cursor-cloud", {}).get("status") != "prohibited":
             errors.append("tool_authority.json must mark cursor-cloud as prohibited")
-        if "cursor-cli" not in set(legal["defaultWriterTools"]):
-            errors.append("tool_authority.json must authorize cursor-cli as default writer")
-        if "cursor-cli" not in set(legal["writerTools"]):
-            errors.append("tool_authority.json must authorize cursor-cli as writer")
-        if "cursor-cloud" in set(legal["writerTools"]) or "github-copilot" in set(legal["writerTools"]):
-            errors.append(
-                "tool_authority.json must not list cursor-cloud or github-copilot as authorized writers"
-            )
-        for never in ("cursor-cloud", "github-copilot", "chatgpt-github", "founder"):
-            if never not in set(legal["neverWriterTools"]):
-                errors.append(f"tool_authority.json neverWriterTools must include {never}")
-        if legal["exceptionalWriterTools"]:
-            errors.append("tool_authority.json exceptionalWriterTools must be empty")
-        if set(legal["writerTools"]) != {"cursor-cli", "codex"}:
-            errors.append("tool_authority.json writerTools must be exactly {cursor-cli, codex}")
-        if "antigravity" in set(legal["writerTools"]):
-            errors.append("antigravity must not be an authorized writerTool")
-        if tools.get("antigravity", {}).get("mayWriteProductCode") is not False:
-            errors.append(
-                "antigravity must keep mayWriteProductCode=false"
-            )
+        for tool_id, tool in tools.items():
+            if tool.get("mayWriteProductCode") is not (tool_id in legal["writerTools"]):
+                errors.append(f"{tool_id} mayWriteProductCode must match writerTools")
+            for capability in ("mayMerge", "mayCertify"):
+                if tool.get(capability) is not (tool_id in legal["gatekeepers"]):
+                    errors.append(f"{tool_id} {capability} must match gatekeepers")
+            if tool.get("defaultWriter") is not (tool_id in legal["defaultWriterTools"]):
+                errors.append(f"{tool_id} defaultWriter must match defaultWriterTools")
         if tools.get("antigravity", {}).get("defaultGeneratedCapability") != "read-only":
             errors.append("antigravity defaultGeneratedCapability must remain read-only")
-        if tools.get("antigravity", {}).get("mayCertify") is not False:
-            errors.append(
-                "antigravity mayCertify must remain false "
-                "(supplies certification-gate evidence; ChatGPT + GitHub certifies)"
-            )
-        if tools.get("codex", {}).get("status") != "authorized":
-            errors.append("codex status must be authorized under the 2026-10-07 Founder decision")
-        if "codex" not in set(legal["writerTools"]):
-            errors.append("codex must be an authorized writerTool")
-        if "codex" in set(legal["exceptionalWriterTools"]):
-            errors.append("codex must not require exceptional writer elevation")
-        if "codex" in set(legal["verifierTools"]):
-            errors.append("codex must not be an authorized verifierTool")
-        if "codex" in set(legal.get("prohibitedWriterTools") or []):
-            errors.append("codex must not be listed in prohibitedWriterTools")
-        if "codex" not in set(legal.get("prohibitedVerifierTools") or []):
-            errors.append("codex must be listed in prohibitedVerifierTools")
-        if tools.get("codex", {}).get("mayWriteProductCode") is not True:
-            errors.append("codex mayWriteProductCode must be true")
-        if tools.get("codex", {}).get("mayCertify") is not False:
-            errors.append("codex mayCertify must remain false")
         if tools.get("codex", {}).get("readAgentSandboxMode") != "read-only":
             errors.append("codex readAgentSandboxMode must be read-only")
         if tools.get("codex", {}).get("writeAgentSandboxMode") != "workspace-write":
@@ -961,8 +927,6 @@ def validate_agent_pack(repo: Path) -> list[str]:
             "chatgpt-desktop-codex-mode",
         }:
             errors.append("codex clientInterfaces must declare CLI and Desktop Codex mode")
-        if tools.get("codex", {}).get("defaultWriter") is not False:
-            errors.append("codex defaultWriter must remain false")
     except (OSError, json.JSONDecodeError, ControlPlaneError) as exc:
         errors.append(f"tool authority validation failed: {exc}")
 

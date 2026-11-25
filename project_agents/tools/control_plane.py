@@ -115,68 +115,30 @@ def load_tool_authority(path: Path = TOOL_AUTHORITY_PATH) -> dict[str, Any]:
         raise ControlPlaneError("tool_authority.json tools must be a non-empty object")
     if not isinstance(legal, dict):
         raise ControlPlaneError("tool_authority.json legalCombinations must be an object")
-    for key in (
-        "defaultWriterTools",
-        "writerTools",
-        "neverWriterTools",
-        "verifierTools",
-        "gatekeepers",
-        "prohibitedWriterTools",
-        "writerElevationAuthorizers",
+    writers = {"cursor-cli", "codex", "antigravity", "github-copilot"}
+    gatekeepers = {"chatgpt-github", "founder"}
+    never_writers = {"cursor-cloud", *gatekeepers}
+    for key, allowed in (
+        ("defaultWriterTools", {"cursor-cli"}),
+        ("writerTools", writers),
+        ("neverWriterTools", never_writers),
+        ("prohibitedWriterTools", never_writers),
+        ("verifierTools", {"chatgpt-github", *writers}),
+        ("prohibitedVerifierTools", {"cursor-cloud", "founder"}),
+        ("gatekeepers", gatekeepers),
+        ("prohibitedGatekeepers", {"cursor-cloud", *writers}),
+        ("exceptionalWriterTools", set()),
+        ("writerElevationAuthorizers", set()),
     ):
-        if key not in legal or not isinstance(legal[key], list) or not legal[key]:
-            raise ControlPlaneError(
-                f"tool_authority.json legalCombinations.{key} must be a non-empty array"
-            )
-    if not isinstance(legal.get("exceptionalWriterTools"), list):
-        raise ControlPlaneError(
-            "tool_authority.json legalCombinations.exceptionalWriterTools must be an array"
-        )
-    default_writers = set(legal["defaultWriterTools"])
-    exceptional_writers = set(legal["exceptionalWriterTools"])
-    never_writers = set(legal["neverWriterTools"])
-    writer_tools = set(legal["writerTools"])
-    if not default_writers <= writer_tools or not exceptional_writers <= writer_tools:
-        raise ControlPlaneError(
-            "tool_authority.json defaultWriterTools and exceptionalWriterTools must be subsets of writerTools"
-        )
-    if never_writers & writer_tools:
-        raise ControlPlaneError(
-            "tool_authority.json neverWriterTools must not intersect writerTools"
-        )
-    if "cursor-cli" not in default_writers:
-        raise ControlPlaneError("tool_authority.json defaultWriterTools must include cursor-cli")
-    if "cursor-cloud" in writer_tools or "github-copilot" in writer_tools:
-        raise ControlPlaneError(
-            "tool_authority.json must not authorize cursor-cloud or github-copilot as writers"
-        )
+        entries = legal.get(key)
+        if (
+            not isinstance(entries, list)
+            or len(entries) != len(allowed)
+            or any(not isinstance(entry, str) or entry not in tools for entry in entries)
+            or set(entries) != allowed
+        ):
+            raise ControlPlaneError(f"tool_authority.json {key} must contain exactly {sorted(allowed)}")
     return data
-
-
-def validate_writer_elevation(
-    elevation: Any,
-    *,
-    label: str = "writerElevation",
-    authority: Mapping[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Validate the exceptional-writer elevation object."""
-    auth = dict(authority) if authority is not None else load_tool_authority()
-    legal = auth["legalCombinations"]
-    obj = _require_object(elevation, label)
-    _unknown_keys(obj, {"authorizedBy", "reason", "isolatedWorkspace"}, label)
-    authorized_by = _require_enum(
-        obj.get("authorizedBy"),
-        f"{label}.authorizedBy",
-        set(legal["writerElevationAuthorizers"]),
-    )
-    reason = _require_string(obj.get("reason"), f"{label}.reason")
-    if obj.get("isolatedWorkspace") is not True:
-        raise ControlPlaneError(f"{label}.isolatedWorkspace must be true")
-    return {
-        "authorizedBy": authorized_by,
-        "reason": reason,
-        "isolatedWorkspace": True,
-    }
 
 
 def assert_legal_tool_roles(
@@ -188,12 +150,10 @@ def assert_legal_tool_roles(
     writer_elevation: Any | None = None,
     authority: Mapping[str, Any] | None = None,
 ) -> None:
-    """Enforce canonical tool-authority combinations for task manifests."""
+    """Validate role eligibility without authenticating actors or task assignments."""
     auth = dict(authority) if authority is not None else load_tool_authority()
     tools = auth["tools"]
     legal = auth["legalCombinations"]
-    default_writers = set(legal["defaultWriterTools"])
-    exceptional_writers = set(legal["exceptionalWriterTools"])
     never_writers = set(legal["neverWriterTools"])
     if writer_tool not in tools:
         raise ControlPlaneError(f"writerTool {writer_tool!r} is not a declared tool id")
@@ -222,22 +182,8 @@ def assert_legal_tool_roles(
             f"writerTool {writer_tool!r} is not an authorized writer under tool_authority.json"
         )
 
-    if writer_tool in default_writers:
-        if writer_elevation is not None:
-            raise ControlPlaneError(
-                f"writerTool {writer_tool!r} is the default writer and must not include writerElevation"
-            )
-    elif writer_tool in exceptional_writers:
-        if writer_elevation is None:
-            raise ControlPlaneError(
-                f"writerTool {writer_tool!r} requires explicit writerElevation "
-                "(authorizedBy, reason, isolatedWorkspace=true)"
-            )
-        validate_writer_elevation(writer_elevation, authority=auth)
-    elif writer_elevation is not None:
-        raise ControlPlaneError(
-            f"writerTool {writer_tool!r} is an authorized non-default writer and must not include writerElevation"
-        )
+    if writer_elevation is not None:
+        raise ControlPlaneError(f"writerTool {writer_tool!r} must not include writerElevation except null")
 
     verifier_status = tools[verifier_tool].get("status")
     if verifier_status == "suspended":
@@ -261,6 +207,7 @@ def assert_legal_tool_roles(
         raise ControlPlaneError(
             f"gatekeeper {gatekeeper!r} is not an authorized gatekeeper under tool_authority.json"
         )
+    # Canonical tool IDs name families. Client interfaces are not selectable IDs.
     if writer_tool == verifier_tool:
         raise ControlPlaneError(
             "writerTool and verifierTool must be distinct; writers cannot self-verify"
@@ -268,10 +215,6 @@ def assert_legal_tool_roles(
     if writer_tool == gatekeeper:
         raise ControlPlaneError(
             "writerTool and gatekeeper must be distinct; writers cannot self-certify"
-        )
-    if status in WRITER_SELF_CERTIFY_FORBIDDEN and writer_tool == gatekeeper:
-        raise ControlPlaneError(
-            f"writerTool cannot be gatekeeper for self-certification status {status}"
         )
 
 
@@ -392,82 +335,34 @@ def assert_schema_tool_enums_match_authority(
         raise ControlPlaneError(
             "tool_authority writerTools must not include never-writer tools"
         )
-    if "cursor-cloud" in expected["writerTool"] or "github-copilot" in expected["writerTool"]:
-        raise ControlPlaneError(
-            "tool_authority writerTools must not include prohibited cursor-cloud or github-copilot"
-        )
-    elevation = task_schema.get("properties", {}).get("writerElevation")
-    if not isinstance(elevation, dict):
-        raise ControlPlaneError("task_manifest.writerElevation schema object is required")
-    auth_by = schema_enum(elevation, "properties", "authorizedBy", "enum")
-    if auth_by != list(legal["writerElevationAuthorizers"]):
-        raise ControlPlaneError(
-            "task_manifest.writerElevation.authorizedBy enum must match "
-            "tool_authority writerElevationAuthorizers"
-        )
     assert_schema_writer_elevation_conditionals(task_schema)
+    expected_exclusions = [
+        {
+            "not": {
+                "properties": {
+                    "writerTool": {"const": tool},
+                    "verifierTool": {"const": tool},
+                },
+                "required": ["writerTool", "verifierTool"],
+            }
+        }
+        for tool in expected["writerTool"]
+        if tool in expected["verifierTool"]
+    ]
+    if task_schema.get("allOf") != expected_exclusions:
+        raise ControlPlaneError("task_manifest schema must reject same-family writer/verifier pairs")
 
 
 def assert_schema_writer_elevation_conditionals(
     task_schema: Mapping[str, Any] | None = None,
 ) -> None:
-    """Prove JSON Schema encodes the same elevation rules as runtime validation."""
+    """Check the unconditional null-only rule for the reserved elevation field."""
     task_schema = task_schema or load_json(TASK_SCHEMA_PATH)
-    allof = task_schema.get("allOf")
-    if not isinstance(allof, list) or not allof:
-        raise ControlPlaneError(
-            "task_manifest.schema.json must declare allOf writerElevation conditionals"
-        )
-
-    def _writer_const(branch: Mapping[str, Any]) -> str | None:
-        props = branch.get("properties")
-        if not isinstance(props, dict):
-            return None
-        writer = props.get("writerTool")
-        if isinstance(writer, dict) and isinstance(writer.get("const"), str):
-            return writer["const"]
-        return None
-
-    by_writer: dict[str, Mapping[str, Any]] = {}
-    for item in allof:
-        if not isinstance(item, dict):
-            continue
-        cond = item.get("if")
-        then = item.get("then")
-        if not isinstance(cond, dict) or not isinstance(then, dict):
-            continue
-        writer = _writer_const(cond)
-        if writer is None:
-            continue
-        by_writer[writer] = then
-
-    for writer in ("cursor-cli", "codex"):
-        if writer not in by_writer:
-            raise ControlPlaneError(
-                f"task_manifest.schema.json missing writerElevation conditional for {writer}"
-            )
-    if "antigravity" in by_writer:
-        raise ControlPlaneError(
-            "task_manifest.schema.json must not retain an Antigravity writerElevation conditional"
-        )
-
-    for writer in ("cursor-cli", "codex"):
-        then = by_writer[writer]
-        forbidden = then.get("not")
-        if not (
-            isinstance(forbidden, dict)
-            and forbidden.get("required") == ["writerElevation"]
-        ):
-            raise ControlPlaneError(
-                f"{writer} conditional must forbid writerElevation via not.required"
-            )
-
-    never = {"cursor-cloud", "github-copilot", "chatgpt-github", "founder"}
-    writer_enum = set(schema_enum(task_schema, "properties", "writerTool", "enum"))
-    if writer_enum & never:
-        raise ControlPlaneError(
-            "task_manifest.writerTool enum must not include never-writer tools"
-        )
+    elevation = task_schema.get("properties", {}).get("writerElevation")
+    if not isinstance(elevation, dict) or elevation.get("type") != "null":
+        raise ControlPlaneError("task_manifest.writerElevation must be null when present")
+    if "writerElevation" in task_schema.get("required", []):
+        raise ControlPlaneError("task_manifest.writerElevation must remain optional")
 
 
 def is_legal_transition(source: str, target: str, machine: Mapping[str, Any] | None = None) -> bool:
@@ -642,6 +537,8 @@ def validate_task_manifest(
         skill_names,
     )
     scope = _require_string_array(obj["scope"], "scope")
+    for entry in scope:
+        _scope_path(entry.removesuffix("/"), "scope")
     _require_string_array(obj["nonGoals"], "nonGoals")
     _require_string_array(obj["securityBoundaries"], "securityBoundaries")
     _require_string_array(obj["migrationReservations"], "migrationReservations")
@@ -652,13 +549,12 @@ def validate_task_manifest(
     _require_string(obj["writerTool"], "writerTool")
     _require_string(obj["verifierTool"], "verifierTool")
     _require_string(obj["gatekeeper"], "gatekeeper")
-    writer_elevation = obj["writerElevation"] if "writerElevation" in obj else None
     assert_legal_tool_roles(
         writer_tool=str(obj["writerTool"]),
         verifier_tool=str(obj["verifierTool"]),
         gatekeeper=str(obj["gatekeeper"]),
         status=status,
-        writer_elevation=writer_elevation,
+        writer_elevation=obj.get("writerElevation"),
     )
     created_at = _require_iso_time(obj["createdAt"], "createdAt")
     updated_at = _require_iso_time(obj["updatedAt"], "updatedAt")
@@ -695,17 +591,49 @@ def validate_task_manifest(
     return dict(obj)
 
 
+def _scope_path(raw: str, label: str, worktree_root: Path | None = None) -> str:
+    """Validate a repository-relative path, optionally against an observed worktree."""
+    parts = raw.split("/")
+    if any(
+        not part
+        or part.endswith((".", " "))
+        or part.casefold() in {".git", "git~1"}
+        or any(char in part for char in "\\:\x00")
+        for part in parts
+    ):
+        raise ControlPlaneError(f"{label} must be a safe repository-relative path: {raw!r}")
+    if worktree_root is not None:
+        current = worktree_root
+        for part in parts:
+            current /= part
+            if current.is_symlink() or current.resolve() != current:
+                raise ControlPlaneError(f"{label} must not traverse a symlink: {raw!r}")
+            marker = current / ".git"
+            if marker.exists() or marker.is_symlink():
+                raise ControlPlaneError(f"{label} must not enter a nested Git worktree: {raw!r}")
+    return raw
+
+
 def assert_write_paths_in_scope(
     files_changed: list[str],
     scope: list[str],
     status: str,
+    *,
+    worktree_root: Path = REPO_ROOT,
 ) -> None:
-    """Reject silent scope expansion once IMPLEMENTATION has frozen the write surface."""
+    """Check changed paths within frozen scope using a caller-observed worktree root."""
     if status not in FROZEN_SCOPE_STATES:
         return
     if not scope:
         raise ControlPlaneError("frozen scope is empty; return through DIAGNOSIS/ROUTING")
-    illegal = [path for path in files_changed if not any(path == item or path.startswith(item.rstrip("/") + "/") for item in scope)]
+    if not worktree_root.is_dir() or worktree_root.absolute() != worktree_root.resolve():
+        raise ControlPlaneError("worktree root must be an existing canonical directory")
+    entries = [_scope_path(item.removesuffix("/"), "scope", worktree_root) for item in scope]
+    illegal = []
+    for path in files_changed:
+        _scope_path(path, "write path", worktree_root)
+        if not any(path == entry or path.startswith(entry + "/") for entry in entries):
+            illegal.append(path)
     if illegal:
         raise ControlPlaneError(
             "write path outside frozen scope; return through DIAGNOSIS/ROUTING to amend scope: "

@@ -54,33 +54,17 @@
     "stopConditions": {"type": "array", "items": {"type": "string"}},
     "writerTool": {
       "type": "string",
-      "enum": ["cursor-cli", "codex"],
-      "description": "Bounded product writer. Cursor CLI is the default; Codex is an authorized non-default writer. Both require one-writer-per-worktree isolation and cannot self-verify, self-certify or merge. Derived from project_agents/tool_authority.json."
+      "enum": ["cursor-cli", "codex", "antigravity", "github-copilot"],
+      "description": "Policy-eligible bounded writer. Cursor CLI is the default. Explicit scope and verified source are required for dispatch."
     },
     "writerElevation": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["authorizedBy", "reason", "isolatedWorkspace"],
-      "description": "Reserved for a future explicitly governed exceptional writer. No current writer uses elevation; it is forbidden for cursor-cli and codex, and cannot authorize Antigravity or never-writers.",
-      "properties": {
-        "authorizedBy": {
-          "type": "string",
-          "enum": ["chatgpt-github", "founder"]
-        },
-        "reason": {
-          "type": "string",
-          "minLength": 1
-        },
-        "isolatedWorkspace": {
-          "const": true,
-          "description": "Exceptional writers must use an isolated branch/worktree; must be true."
-        }
-      }
+      "type": "null",
+      "description": "Reserved field. Omit it or set it to null. A task manifest does not confer execution authority."
     },
     "verifierTool": {
       "type": "string",
-      "enum": ["chatgpt-github", "antigravity"],
-      "description": "Independent verifier/auditor. Must differ from writerTool. Codex and Cursor CLI cannot be selected. Derived from project_agents/tool_authority.json."
+      "enum": ["chatgpt-github", "antigravity", "cursor-cli", "codex", "github-copilot"],
+      "description": "Independent peer reviewer from a different tool family. Gate and certification authority are separate."
     },
     "gatekeeper": {
       "type": "string",
@@ -114,21 +98,27 @@
   },
   "allOf": [
     {
-      "if": {
-        "properties": {"writerTool": {"const": "cursor-cli"}},
-        "required": ["writerTool"]
-      },
-      "then": {
-        "not": {"required": ["writerElevation"]}
+      "not": {
+        "properties": {"writerTool": {"const": "cursor-cli"}, "verifierTool": {"const": "cursor-cli"}},
+        "required": ["writerTool", "verifierTool"]
       }
     },
     {
-      "if": {
-        "properties": {"writerTool": {"const": "codex"}},
-        "required": ["writerTool"]
-      },
-      "then": {
-        "not": {"required": ["writerElevation"]}
+      "not": {
+        "properties": {"writerTool": {"const": "codex"}, "verifierTool": {"const": "codex"}},
+        "required": ["writerTool", "verifierTool"]
+      }
+    },
+    {
+      "not": {
+        "properties": {"writerTool": {"const": "antigravity"}, "verifierTool": {"const": "antigravity"}},
+        "required": ["writerTool", "verifierTool"]
+      }
+    },
+    {
+      "not": {
+        "properties": {"writerTool": {"const": "github-copilot"}, "verifierTool": {"const": "github-copilot"}},
+        "required": ["writerTool", "verifierTool"]
       }
     }
   ]

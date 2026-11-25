@@ -98,9 +98,9 @@ Add only when the change actually carries that risk:
 
 | Role | Tools |
 |---|---|
-| writerTool | `cursor-cli` is the default bounded implementation writer; `codex` is an additional authorized bounded implementation, test and debugging writer. Neither requires `writerElevation`. Parallel writing requires separate assigned branches/worktrees and non-overlapping file ownership. `antigravity` is not a writer and has no writer-elevation path; `cursor-cloud` and `github-copilot` are prohibited writers |
-| verifierTool | `chatgpt-github`, `antigravity` only. Antigravity is the independent read-only verifier. Cursor CLI and Codex are not certification verifiers or gatekeepers. GitHub Copilot remains auxiliary PR review only and never sole certification evidence |
-| evidence gate | `exact_head_merge_gate` + `evidence_bundle`; writer cannot close it |
+| writerTool | `cursor-cli` (default), `codex`, `antigravity`, `github-copilot`. Use explicit assignment, verified current source and bounded scope. Omit `writerElevation` or set it to null |
+| verifierTool | `chatgpt-github` or an eligible writer tool from a different family. Both Codex interfaces use `codex` |
+| evidence gate | `exact_head_merge_gate` + `evidence_bundle`. Master retains final gate, merge and certification authority |
 
 This table summarizes current authority; it does not replace `project_agents/tool_authority.json`, canonical `AGENTS.md`, or `project_documentation/Platform_12_Decision_Source_Register.md` §18.1.
 
