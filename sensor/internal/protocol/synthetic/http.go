@@ -137,6 +137,11 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResu
 		userHeaders[http.CanonicalHeaderKey(k)] = struct{}{}
 	}
 	redirects := 0
+	// Sticky latch: once any redirect crosses scheme/host/effective-port, strip
+	// originally configured header names on that hop and every subsequent hop
+	// (including return to the initial origin). net/http re-copies initial
+	// headers on each redirect; immediate-only stripping is insufficient.
+	originBoundaryCrossed := false
 	client := &http.Client{Transport: transport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		redirects = len(via)
 		if !r.FollowRedirects {
@@ -145,9 +150,14 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResu
 		if len(via) > r.MaxRedirects {
 			return newError(CodeResourceLimit, "HTTP redirect count exceeds configured bound", nil, false)
 		}
-		if len(via) > 0 && !sameOrigin(via[len(via)-1].URL, next.URL) {
-			for k := range userHeaders {
-				next.Header.Del(k)
+		if len(via) > 0 {
+			if !sameOrigin(via[len(via)-1].URL, next.URL) {
+				originBoundaryCrossed = true
+			}
+			if originBoundaryCrossed {
+				for k := range userHeaders {
+					next.Header.Del(k)
+				}
 			}
 		}
 		return nil
