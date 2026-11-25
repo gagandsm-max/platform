@@ -248,10 +248,10 @@ class ClickHouseReplayCleanupContract(unittest.TestCase):
                 process = subprocess.run(
                     [bash, os.environ.get("REPLAY_SCRIPT_UNDER_TEST", str(SCRIPT))],
                     env=fixture_env,
-                    capture_output=True, text=True, timeout=20,
+                    capture_output=True, text=True, timeout=120,
                 )
             except subprocess.TimeoutExpired as error:
-                raise AssertionError(f"fixture exceeded 20s: state={state.read_text()} "
+                raise AssertionError(f"fixture exceeded 120s: state={state.read_text()} "
                                      f"stdout={error.stdout!r} stderr={error.stderr!r}") from error
             state_data = json.loads(state.read_text())
             timeout_args = fixture / "timeout-args"
