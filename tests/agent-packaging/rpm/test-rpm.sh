@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -48,6 +49,16 @@ def ok(args, **kwargs):
     if r.returncode:
         raise AssertionError(f'command exit={r.returncode}: {args}\n{r.stdout.decode()}\n{r.stderr.decode()}')
     return r.stdout
+
+def elf_header(kind=2, machine=62, entry=0x1000, phoff=64, phentsize=56, phnum=1, ehsize=64, version=1):
+    header = bytearray(64)
+    header[0:7] = b'\x7fELF\x02\x01\x01'
+    struct.pack_into('<HHIQQQIHHHHHH', header, 16, kind, machine, version, entry, phoff, 0, 0,
+                     ehsize, phentsize, phnum, 0, 0, 0)
+    return header
+
+def pt_load(flags=1, offset=0, vaddr=0x1000, filesz=0x100, memsz=0x100):
+    return struct.pack('<IIQQQQQQ', 1, flags, offset, vaddr, 0, filesz, memsz, 0)
 
 payload.append('agent/linux/systemd/ebpf/20-ebpf.conf')
 
@@ -142,7 +153,66 @@ with tempfile.TemporaryDirectory(prefix='rpm-fixture-') as tmp:
     check(r.returncode == 78 and b'fixture inputs are source-only' in r.stderr, 'fixture inputs cannot build an RPM')
     prod = [x for x in args if x != '--fixture-inputs']
     r = call(prod, cwd=repo)
-    check(r.returncode == 78 and b'not ELF64' in r.stderr, 'synthetic binary refused outside fixture mode')
+    check(r.returncode == 78 and b'ELF64 little-endian executable' in r.stderr, 'synthetic binary refused outside fixture mode')
+
+    # Master-reproduced defect: 20-byte ELF magic/machine prefix + matching SHA passed
+    # the legacy weak check. Failing-before / fixed-after regression (source-only).
+    truncated = b'\x7fELF\x02\x01' + bytes(12) + b'\x3e\x00'
+    check(len(truncated) == 20 and truncated[:5] == b'\x7fELF\x02' and truncated[5:6] == b'\x01'
+          and truncated[18:20] == b'\x3e\x00', 'legacy weak ELF magic/machine check would accept truncated prefix')
+    print('LEGACY_WEAK_ELF_CHECK_WOULD_PASS truncated_20', flush=True)
+    trunc_path = temp / 'truncated-elf'
+    trunc_path.write_bytes(truncated)
+    trunc_hash = hashlib.sha256(truncated).hexdigest()
+    trunc_out = temp / 'trunc-out'
+    trunc_out.mkdir()
+    trunc_args = change('--out', trunc_out, change('--binary-sha256', trunc_hash, change('--binary', trunc_path, prod)))
+    r = call(trunc_args, cwd=repo)
+    check(r.returncode == 78 and b'ELF64 little-endian executable' in r.stderr
+          and b'SOURCE_ONLY_GENERATED=' not in r.stdout, 'truncated ELF refused after integrity fix')
+
+    malformed_headers = bytes(elf_header(phnum=2)) + pt_load()
+    check(64 + 2 * 56 > len(malformed_headers), 'malformed program-header bound precondition')
+    bad_ph_path = temp / 'bad-ph'
+    bad_ph_path.write_bytes(malformed_headers)
+    bad_ph_out = temp / 'bad-ph-out'
+    bad_ph_out.mkdir()
+    r = call(change('--out', bad_ph_out, change('--binary-sha256', hashlib.sha256(malformed_headers).hexdigest(),
+                                                 change('--binary', bad_ph_path, prod))), cwd=repo)
+    check(r.returncode == 78 and b'valid program headers' in r.stderr, 'malformed program headers refused')
+
+    unbound_entry = bytes(elf_header(entry=0x400000)) + pt_load(vaddr=0x1000, filesz=0x100)
+    bad_entry_path = temp / 'bad-entry'
+    bad_entry_path.write_bytes(unbound_entry)
+    bad_entry_out = temp / 'bad-entry-out'
+    bad_entry_out.mkdir()
+    r = call(change('--out', bad_entry_out, change('--binary-sha256', hashlib.sha256(unbound_entry).hexdigest(),
+                                                   change('--binary', bad_entry_path, prod))), cwd=repo)
+    check(r.returncode == 78 and b'entry point is not backed' in r.stderr, 'unbacked ELF entry refused')
+
+    arch_mismatch = bytes(elf_header(machine=183)) + pt_load()
+    arch_path = temp / 'arch-mismatch'
+    arch_path.write_bytes(arch_mismatch)
+    arch_out = temp / 'arch-out'
+    arch_out.mkdir()
+    r = call(change('--out', arch_out, change('--binary-sha256', hashlib.sha256(arch_mismatch).hexdigest(),
+                                              change('--binary', arch_path, prod))), cwd=repo)
+    check(r.returncode == 78 and b'machine mismatch for x86_64' in r.stderr, 'architecture mismatch refused')
+
+    # Positive retained real ELF source-only control (never full RPM; never fixture-inputs).
+    host_elf = Path('/bin/true')
+    check(host_elf.is_file(), 'host /bin/true available for retained ELF control')
+    real_elf = temp / 'retained-real-elf'
+    real_elf.write_bytes(host_elf.read_bytes())
+    real_hash = hashlib.sha256(real_elf.read_bytes()).hexdigest()
+    real_out = temp / 'real-elf-out'
+    real_out.mkdir()
+    real_args = change('--out', real_out, change('--binary-sha256', real_hash, change('--binary', real_elf, prod)))
+    ok(real_args, cwd=repo)
+    real_stage = real_out / generated.name / 'SOURCES/payload/opt/platform/agent/platform-agent-linux'
+    check(real_stage.read_bytes() == real_elf.read_bytes(), 'retained real ELF source-only stage bytes')
+    print('REAL_ELF_SOURCE_ONLY_CONTROL_PASS sha256=' + real_hash, flush=True)
+
     toolpath = temp / 'no-rpm-tools'
     toolpath.mkdir()
     for name in ('python3', 'git', 'bash', 'cp'):
@@ -178,6 +248,16 @@ with tempfile.TemporaryDirectory(prefix='rpm-fixture-') as tmp:
         # Never source the helper, call inside a shell conditional, or mask errexit.
         return call(['/bin/bash', scriptdir / slot, *argv], env=env)
 
+    def seed_env(root, text='fixture secret reference\n'):
+        config = root / 'etc/platform/agent.env'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(text)
+        config.chmod(0o600)
+        return config
+
+    def no_activation(calls):
+        return not any(c[:2] in (['systemctl', 'enable'], ['systemctl', 'start'], ['systemctl', 'unmask']) for c in calls)
+
     def suite(scriptdir, label):
         for slot in ('pre', 'post', 'preun', 'postun'):
             for invalid in ([], [''], ['-1'], ['+1'], ['01'], ['1.0'], ['1 '], ['x'], ['1', '2']):
@@ -200,13 +280,142 @@ with tempfile.TemporaryDirectory(prefix='rpm-fixture-') as tmp:
         root, sf, env = fixture()
         ok(['/bin/bash', scriptdir / 'pre', '1'], env=env)
         r = invoke(scriptdir, 'post', ['1'], env)
-        check(r.returncode == 0 and b'STAGED_UNCONFIGURED' in r.stdout, label + ' staged install')
-        config = root / 'etc/platform/agent.env'
-        config.write_text('fixture secret reference\n')
-        config.chmod(0o600)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'STAGED_INACTIVE' in r.stdout and b'STAGED_UNCONFIGURED' not in r.stdout
+              and no_activation(state['calls']), label + ' staged install STAGED_INACTIVE never enables')
+
+        # disabled/inactive => STAGED_INACTIVE; no enable/restart
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'inactive', 'enabled': 'disabled'}
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['1'], env)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'STAGED_INACTIVE' in r.stdout and b'DISABLED_PRESERVED' not in r.stdout
+              and state['units']['platform-agent.service'] == {'active': 'inactive', 'enabled': 'disabled'}
+              and no_activation(state['calls'])
+              and not any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']),
+              label + ' disabled/inactive STAGED_INACTIVE')
+
+        # disabled/active => DISABLED_PRESERVED; no try-restart
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'active', 'enabled': 'disabled'}
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['2'], env)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'DISABLED_PRESERVED' in r.stdout and b'STAGED_INACTIVE' not in r.stdout
+              and state['units']['platform-agent.service']['enabled'] == 'disabled'
+              and state['units']['platform-agent.service']['active'] == 'active'
+              and no_activation(state['calls'])
+              and not any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']),
+              label + ' disabled/active DISABLED_PRESERVED')
+
+        # enabled/inactive => ENABLED_PRESERVED; no invented start/restart
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'inactive', 'enabled': 'enabled'}
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['1'], env)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'ENABLED_PRESERVED' in r.stdout
+              and state['units']['platform-agent.service'] == {'active': 'inactive', 'enabled': 'enabled'}
+              and no_activation(state['calls'])
+              and not any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']),
+              label + ' enabled/inactive ENABLED_PRESERVED no start')
+
+        # masked / runtime-only preserved without enable/restart
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'inactive', 'enabled': 'masked'}
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['1'], env)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'MASKED_PRESERVED' in r.stdout
+              and state['units']['platform-agent.service']['enabled'] == 'masked'
+              and no_activation(state['calls'])
+              and not any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']),
+              label + ' masked MASKED_PRESERVED')
+
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'active', 'enabled': 'enabled-runtime'}
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['2'], env)
+        state = json.loads(sf.read_text())
+        check(r.returncode == 0 and b'RUNTIME_ONLY_PRESERVED' in r.stdout
+              and state['units']['platform-agent.service']['enabled'] == 'enabled-runtime'
+              and no_activation(state['calls'])
+              and not any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']),
+              label + ' runtime-only RUNTIME_ONLY_PRESERVED')
+
+        # Contradictory is-enabled status/exit pairs fail closed
+        for name, unit, expect_absent in [
+            ('disabled exit0', {'active': 'inactive', 'enabled': 'disabled', 'enable_exit': 0}, b'STAGED_INACTIVE'),
+            ('masked exit0', {'active': 'inactive', 'enabled': 'masked', 'enable_exit': 0}, b'MASKED_PRESERVED'),
+            ('enabled-runtime exit1', {'active': 'active', 'enabled': 'enabled-runtime', 'enable_exit': 1}, b'RUNTIME_ONLY_PRESERVED'),
+        ]:
+            root, sf, env = fixture()
+            seed_env(root)
+            state = json.loads(sf.read_text())
+            state['units']['platform-agent.service'] = unit
+            sf.write_text(json.dumps(state))
+            r = invoke(scriptdir, 'post', ['1'], env)
+            state = json.loads(sf.read_text())
+            check(r.returncode == 78 and b'SERVICE_STATE_QUERY_FAILED' in r.stderr
+                  and expect_absent not in r.stdout and b'POSTINST_OK' not in r.stdout
+                  and no_activation(state['calls']),
+                  label + ' contradictory ' + name)
+
+        # disabled + active-state query failure: no STAGED_INACTIVE claim
+        root, sf, env = fixture()
+        seed_env(root)
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {
+            'active': 'inactive', 'enabled': 'disabled', 'query_error': True, 'query_error_exit': 1
+        }
+        sf.write_text(json.dumps(state))
+        r = invoke(scriptdir, 'post', ['1'], env)
+        check(r.returncode == 78 and b'SERVICE_STATE_QUERY_FAILED' in r.stderr
+              and b'STAGED_INACTIVE' not in r.stdout and b'POSTINST_OK' not in r.stdout,
+              label + ' disabled active-query failure no STAGED_INACTIVE')
+
+        # Repeat configure/upgrade preserves state bytes and never enables
+        root, sf, env = fixture()
+        config = seed_env(root, 'PLATFORM_AGENT_SENSOR_URL=https://sensor.example.invalid:8443\nSENTINEL_ENV\n')
         credential = root / 'etc/platform/agent/cert.pem'
+        credential.parent.mkdir(parents=True, exist_ok=True)
+        credential.write_text('SENTINEL_CERT\n')
+        credential.chmod(0o600)
+        spool = root / 'var/lib/platform/agent/spool'
+        spool.parent.mkdir(parents=True, exist_ok=True)
+        spool.write_bytes(b'SENTINEL_SPOOL\n')
+        original = {p: p.read_bytes() for p in (config, credential, spool)}
+        state = json.loads(sf.read_text())
+        state['units']['platform-agent.service'] = {'active': 'active', 'enabled': 'enabled'}
+        sf.write_text(json.dumps(state))
+        for n in ('1', '2', '1', '2'):
+            ok(['/bin/bash', scriptdir / 'post', n], env=env)
+        state = json.loads(sf.read_text())
+        check(state['units']['platform-agent.service']['enabled'] == 'enabled'
+              and state['units']['platform-agent.service']['active'] == 'active'
+              and all(p.read_bytes() == data for p, data in original.items())
+              and no_activation(state['calls'])
+              and sum(1 for c in state['calls'] if c[:2] == ['systemctl', 'try-restart']) >= 3,
+              label + ' repeat configure preserves state and controlled restart')
+
+        root, sf, env = fixture()
+        config = seed_env(root)
+        credential = root / 'etc/platform/agent/cert.pem'
+        credential.parent.mkdir(parents=True, exist_ok=True)
         credential.write_text('fixture certificate\n')
         spool = root / 'var/lib/platform/agent/spool'
+        spool.parent.mkdir(parents=True, exist_ok=True)
         spool.write_bytes(b'unacknowledged fixture\n')
         original = {p: p.read_bytes() for p in (config, credential, spool)}
         state = json.loads(sf.read_text())
@@ -219,27 +428,25 @@ with tempfile.TemporaryDirectory(prefix='rpm-fixture-') as tmp:
         check(state['units']['platform-agent.service'] == {'active': 'active', 'enabled': 'enabled'} and
               not any(c[:2] in (['systemctl', 'stop'], ['systemctl', 'disable']) for c in state['calls']), label + ' old package update removal leaves replacement active enabled')
         check(any(c[:2] == ['systemctl', 'try-restart'] for c in state['calls']), label + ' configured active upgrade restarts')
+        check(no_activation(state['calls']), label + ' upgrade path never enables')
         for slot in ('preun', 'postun'):
             ok(['/bin/bash', scriptdir / slot, '0'], env=env)
         state = json.loads(sf.read_text())
         check(state['units']['platform-agent.service'] == {'active': 'inactive', 'enabled': 'disabled'}, label + ' erase stop disable')
         check(all(p.read_bytes() == data for p, data in original.items()) and bool(state['users']) and bool(state['groups']), label + ' erase retains state credentials configuration accounts')
         # Errors run in their own interpreter; no false success from shell function contexts.
+        # Package hooks never call enable; do not assert SERVICE_ENABLE_FAILED.
         cases = [('groupadd', None, 'post', '1', 37, b'', b'POSTINST_OK'),
                  ('useradd', None, 'post', '1', 37, b'', b'POSTINST_OK'),
                  ('getent', 'group', 'post', '1', 78, b'IDENTITY_LOOKUP_FAILED', b'POSTINST_OK'),
                  ('systemctl', 'daemon-reload', 'post', '1', 78, b'SERVICE_DAEMON_RELOAD_FAILED', b'POSTINST_OK'),
-                 ('systemctl', 'enable', 'post', '2', 78, b'SERVICE_ENABLE_FAILED', b'POSTINST_OK'),
                  ('systemctl', 'is-active', 'post', '2', 78, b'SERVICE_STATE_QUERY_FAILED', b'POSTINST_OK'),
                  ('systemctl', 'try-restart', 'post', '2', 78, b'SERVICE_RESTART_FAILED', b'POSTINST_OK'),
                  ('systemctl', 'stop', 'preun', '0', 78, b'SERVICE_STOP_FAILED', b'PRERM_OK'),
                  ('systemctl', 'disable', 'preun', '0', 78, b'SERVICE_DISABLE_FAILED', b'PRERM_OK')]
         for tool, action, slot, n, exitcode, diagnostic, success in cases:
             root, sf, env = fixture()
-            config = root / 'etc/platform/agent.env'
-            config.parent.mkdir(parents=True)
-            config.write_text('fixture\n')
-            config.chmod(0o600)
+            seed_env(root, 'fixture\n')
             state = json.loads(sf.read_text())
             state.update(fail=[tool, action] if action else [tool], fail_exit=37,
                          units={'platform-agent.service': {'active': 'active', 'enabled': 'enabled'}})

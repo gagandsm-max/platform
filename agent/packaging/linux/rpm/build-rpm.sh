@@ -9,6 +9,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -59,6 +60,35 @@ def git_blob(commit, name):
     require(mode in (b'100644', b'100755'), 'non-regular or absent Git input: ' + name)
     return capture(['git', 'show', commit + ':' + name])
 
+def require_elf64_le_x86_64(data):
+    # Same bounded ELF64 LE executable / program-header / file-backed entry
+    # contract as the accepted DEB builder, adapted to retained bytes (x86_64=62).
+    size = len(data)
+    if size < 64 or data[:7] != b'\x7fELF\x02\x01\x01':
+        refuse('binary must be an ELF64 little-endian executable')
+    kind, machine, version, entry, phoff, _, _, ehsize, phentsize, phnum, *_ = (
+        struct.unpack_from('<HHIQQQIHHHHHH', data, 16)
+    )
+    if machine != 62:
+        refuse(f'binary ELF machine mismatch for x86_64: expected 62, found {machine}')
+    if (kind not in (2, 3) or version != 1 or ehsize != 64 or phentsize != 56
+            or not entry or not phnum or phoff < ehsize
+            or phoff + phnum * phentsize > size):
+        refuse('binary must be an ELF64 little-endian executable with valid program headers')
+    offset = phoff
+    for _ in range(phnum):
+        segment = data[offset:offset + phentsize]
+        if len(segment) != phentsize:
+            refuse('binary ELF program headers are truncated')
+        segment_type, flags, seg_offset, vaddr, _, filesz, memsz, _ = struct.unpack(
+            '<IIQQQQQQ', segment
+        )
+        if (segment_type == 1 and flags & 1 and filesz <= memsz
+                and seg_offset + filesz <= size and vaddr <= entry < vaddr + filesz):
+            return
+        offset += phentsize
+    refuse('binary ELF entry point is not backed by an executable load segment')
+
 def main():
     os.umask(0o022)
     p = argparse.ArgumentParser(description='Unsigned retained-payload RPM adapter; no install/sign/download.')
@@ -100,8 +130,7 @@ def main():
     binary_data = regular(binary)
     require(digest(binary_data) == a.binary_sha256, 'binary sha256 mismatch')
     if not a.fixture_inputs:
-        require(binary_data[:5] == b'\x7fELF\x02' and binary_data[5:6] == b'\x01'
-                and binary_data[18:20] == b'\x3e\x00', 'not ELF64 little-endian x86_64')
+        require_elf64_le_x86_64(binary_data)
     inputs = {name: regular(root / name) for name in [*PAYLOAD, MIRROR, LICENSE, *RECIPE]}
     for name in [*PAYLOAD, MIRROR]:
         require(inputs[name] == git_blob(a.source_commit, name), 'payload source mismatch: ' + name)
