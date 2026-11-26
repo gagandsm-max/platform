@@ -363,6 +363,8 @@ These remain unresolved until formally approved; no coding tool may invent them.
 
 ## 12. Deliberate change control (READ-MOSTLY)
 
+Founder directive 2026-11-26 (Platform_12 §§18.2, 31) governs coordinated multi-tool engineering and the sequence: develop and engineering-test Phase 1 → Founder acceptance → develop/test Phase 1.5 → Founder acceptance → develop/test Phase 2 → Founder acceptance → formal certification. This does not alter frozen phase/profile envelopes, historical maturity, engineering safety/CI gates or source precedence. Activation of expanded writer eligibility requires reconciled machine authority and independent acceptance. Mother Reference version and file count unchanged; DOC_P0_BLOCKED remains.
+
 Founder decisions dated 2026-11-26 (F-001–F-010/F-002A/TBD-08) use existing governing owners and stable IDs; see Platform_12 §30. No competing workbook authority, new Mother Reference, version advance or implementation/certification claim. Preserve DOC_P0_BLOCKED and independent exact-head review/CI.
 
 Mother documents are **READ-MOSTLY** and authoritative.

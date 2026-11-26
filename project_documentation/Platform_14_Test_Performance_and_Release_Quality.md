@@ -12,6 +12,8 @@ Defines all test layers and quality gates, mandatory negative/failure tests, fal
 package/reboot testing, Core/Sensor performance certification, UI/HA/DR benchmarks, regression controls and the
 Alpha/Beta/RC/GA acceptance criteria and evidence bundle.
 
+**Programme stage and acceptance (Founder directive, 2026-11-26; Platform_12 §31):** Engineering development/test/defect correction and independent technical acceptance precede Founder testing and acceptance of Phase 1, then Phase 1.5, then Phase 2. Formal product certification is deferred until all three Founder acceptances. Execute applicable build, unit, integration, API, security/tenant, native lifecycle, failure/recovery, load/benchmark, upgrade/rollback and UI tests during engineering; do not postpone them because their later reuse in certification is possible. Record exact revision, profile, command, result, limitations and unresolved defects. Internal evidence-scoped engineering qualification and safe merge readiness do not equal formal certification or GA. Do not treat passing mocks as live evidence or Founder acceptance as a waiver. Retain existing certification scenario definitions, threshold and profile applicability; formally certify eventual release revisions only after the programme gate, revalidating evidence invalidated by change. Preserve historical certificates without advancing maturity. All existing safety/release gates and Phase 2.5 governance remain.
+
 ## Source-document provenance
 
 - `Platform_15_Test_Strategy_and_Quality_Gates.md` (v3.1) — fully incorporated below.

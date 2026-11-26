@@ -1,10 +1,16 @@
 # Platform Master Build Sequence Register v1.0
 
 **Authority:** Master Chat / Platform CTO Control Plane
-**Execution model:** Contract-first, bottom-up implementation, end-to-end certification per slice.
+**Execution model:** Contract-first, bottom-up implementation and evidence-scoped engineering acceptance per slice; formal product certification after Founder acceptance of Phase 1, Phase 1.5 and Phase 2 (Platform_12 §31).
 **Purpose:** Stable module-by-module build sequence that survives future chat handoffs.
 
 **Product identity:** Platform is the internal engineering/build identifier. AmrudAi is the default commercial/customer-facing product identity. Licensed governed tenant/MSP white-label branding may override customer-facing branding. Internal BUILD IDs and technical identity remain Platform.
+
+## Governing execution sequence — Founder directive 2026-11-26
+
+**BUILDING PHASE 1.** Master directs architecture, bounded implementation, integration, engineering tests and defect correction. Phase 1 functioning product and applicable technical evidence precede Founder testing/acceptance; then Phase 1.5 development/testing and Founder acceptance; then Phase 2 development/testing and Founder acceptance. Formal product certification follows all three recorded Founder acceptances. Existing BUILD numbers, phase/OS/domain applicability, historical certificate records, safety dependencies and exact-head engineering gates remain. Where an earlier row makes certification a predecessor, require its applicable engineering evidence during development rather than a premature formal certificate; do not remove its underlying security, correctness, performance or recovery dependency. Final BUILD-134 production certification cannot begin before the three Founder acceptances. No maturity promotion or GA claim, no Phase 2.5 promotion, no spend.
+
+Parallel development under Platform_12 §18.2: coordinated Cursor CLI, Codex, Antigravity CLI and ChatGPT + GitHub assigned read/write/test lanes; current machine-authority admission remains in force until the governed activation revision passes independent validation. One writer per isolated worktree; independent acceptance from another author/tool family and Master-controlled integration. Existing admitted Agent, Sensor, Core, UI and licensing lanes proceed within accepted contracts. DOC_P0_BLOCKED remains; no dispatch of design-blocked slices. Keep dated checkpoints below as historical evidence, not live status; current source/evidence from GitHub and Issue #211.
 
 ## Current execution checkpoint — 2026-11-10
 
@@ -270,7 +276,7 @@ ARCHITECTURE/CAPABILITY CONTRACT CLOSED → IMPLEMENTED → UNIT TESTED → INTE
 | BUILD-131 | Failure/chaos certification | Partitions/DB/Kafka/CH/Valkey/disk/clock/loss/process faults; eBPF kernel fault injection, map exhaustion, ring-buffer drops, path failure degradation. AI/local inference degrades, unloads or suspends before protected collection/ingestion/storage/alert/RCA objectives are violated.; licence state/restart/recovery and DR recovery-profile evidence | Stack | Partial | Safe degradation/recovery |
 | BUILD-132 | Operability/support | Self-monitoring/support bundles/runbooks/housekeeping/health dashboards. AI/local inference degrades, unloads or suspends before protected collection/ingestion/storage/alert/RCA objectives are violated.; F-010 software-only/standard remote support; overage, transfer and retention runbooks | Stack | Partial | Operator diagnosis/recovery |
 | BUILD-133 | AWS validation | Fresh Ubuntu deployment/real networking/HA/upgrade/backup/scale | ≥90–95% readiness | Deferred | Cloud-host certification |
-| BUILD-134 | Final production certification | Full phase/profile-applicable traceability/security/tenancy/scale/recovery/DR/upgrade/support/UX evidence; full applicable NIOCP-P1-v1 verification including Phase-1 software inventory, selectable process/service monitoring, Criticality/Profile governance and Triggered Fast RCA/EDS cross-vantage scenarios. Phase-1.5 HA adds 120–124; optional 102/103 remain non-first-GA unless promoted.; F-003 readiness first, paid certification later; applicable policy acceptance gates remain open | Applicable 000–133 scope and mandatory 125–132 release gates; 133 remains deferred pending its governed readiness gate; 120–124 additionally for HA; no blanket all-roadmap dependency | Future | No applicable P0/P1 blockers |
+| BUILD-134 | Final production certification (only after recorded Founder acceptance of Phases 1, 1.5 and 2) | Full phase/profile-applicable traceability/security/tenancy/scale/recovery/DR/upgrade/support/UX evidence; full applicable NIOCP-P1-v1 verification including Phase-1 software inventory, selectable process/service monitoring, Criticality/Profile governance and Triggered Fast RCA/EDS cross-vantage scenarios. Phase-1.5 HA adds 120–124; optional 102/103 remain non-first-GA unless promoted.; F-003 readiness first, paid certification later; applicable policy acceptance gates remain open | Applicable 000–133 scope and mandatory 125–132 release gates; 133 remains deferred pending its governed readiness gate; 120–124 additionally for HA; no blanket all-roadmap dependency | Future | No applicable P0/P1 blockers |
 
 ## Commercial readiness execution lock — 2026-10-06
 

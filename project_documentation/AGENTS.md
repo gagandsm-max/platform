@@ -46,6 +46,8 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Tool authority model
 
+**Founder directive 2026-11-26 — coordinated read/write/test eligibility:** Platform_12 §18.2 authorizes Cursor CLI, Codex, Antigravity CLI and ChatGPT + GitHub to implement and test bounded assigned lanes; independent acceptance must come from a different author/tool family. The Master owns engineering decisions and guarded integration. The rules below describe the still-active executable policy until the authority file, schemas, router, generated adapters, validators and tests are atomically reconciled and independently accepted. Do not interpret the target policy as permission to bypass the current machine admission checks. One writer per worktree, runtime custody, least privilege, zero spend and protected-main rules remain mandatory. See Platform_12 for the scope of the transition.
+
 - **ChatGPT + GitHub is the Platform control plane and final technical gate/certification authority.** It owns source-truth rebaselining, architecture/technical decisions, task sequencing, PR integration, merge authority, progress accounting and final technical acceptance/certification. It does not write product code.
 - **Cursor CLI is the default bounded implementation writer.** It operates only on explicitly assigned branches/worktrees and bounded scope. A Cursor writer never self-certifies merge readiness and requires no `writerElevation`.
 - **Codex is an additional authorized bounded implementation, test and debugging writer** (Founder decision 2026-10-07). **Codex CLI and Codex Desktop (ChatGPT Desktop App in Codex mode) are one Codex authority family** — client interfaces to the same Codex authority, not independent writers or independent certification sources from each other. Codex cannot independently verify, act as gatekeeper, merge or self-certify. Plain ChatGPT Desktop conversation is not assumed to have repository filesystem/execution access unless Codex mode or explicitly connected local-computer access is active.
@@ -56,6 +58,8 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 - Every tool must re-fetch authoritative `main` and exact task/PR head before acting. Main/head drift invalidates stale review.
 - No writer may close `REALITY_GATE`, `MERGE_READY`, `POST_MERGE_VERIFY` or `COMPLETE` for its own work.
 - Authoritative machine-readable source: `project_agents/tool_authority.json`.
+
+**Development sequence (Founder, 2026-11-26):** Complete and engineering-test Phase 1, followed by Founder testing/acceptance; repeat for Phase 1.5 and Phase 2 in order. Formal product certification is deferred until all three Founder acceptances. Existing safety and integration gates remain mandatory; historical certification evidence is preserved. See Platform_12 §31 and Platform_14. Do not claim certified/GA based on a development test.
 
 ## Mother-document change control (READ-MOSTLY)
 
