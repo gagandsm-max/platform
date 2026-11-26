@@ -6,14 +6,34 @@ Run only while holding the admitted Issue #211 runtime allocation. The harness i
 optional and does not confer BUILD/module/native certification.
 
 ```bash
-PLATFORM_E2E_RUN_DIR=/absolute/durable/evidence/new-run make test-agent-runtime-e2e
+PLATFORM_E2E_RUN_DIR=/absolute/durable/evidence/new-run bash tests/agent-runtime-e2e/run-isolated.sh
 ```
 
-The directory must be new. `run-isolated.sh` renders the existing Compose contract
-into a fresh `agent-e2e-*` project: unique container/image/volume/network names,
-ephemeral loopback receiver port, and private test PKI. It verifies isolation
-before any mutation and uses the existing guarded Kafka fresh-volume procedure.
-`run.sh` rejects invocation without the verified isolated configuration.
+Use the isolated entry point directly. In this checkout, the Make target calls
+the inner workload script and does not establish custody. Choose a new canonical
+evidence directory outside the checkout. The runner uses the local Unix Docker
+endpoint and a private CLI configuration. Compose 5.5.0 must be available to
+that configuration through a system plugin location.
+
+The runner checks the rendered Compose model against the fixture's service,
+network, named-volume, image, build-context and read-only bind allowlists. Only
+the Sensor receiver publishes an ephemeral loopback port. Source mounts are
+limited to the specific fixture and product paths. Private PKI is generated in
+the evidence directory. The dedicated keytool helper can write only to that PKI
+mount. Kafka keeps its guarded fresh-volume provisioning and storage checks.
+
+A successful inventory of containers, volumes, networks and image tags must
+show a collision-free project before the runner creates its private reservation.
+Subsequent mutations require the same reservation ID and exact project and
+ownership evidence. Docker helpers and one-off containers carry the run owner
+label. The runner retains run-owned logs in `stack.log` and container inspect
+receipts under `container-state/`.
+
+The PATH shim checks the Docker command forms used by the pinned fixture.
+Container reads use verified full IDs, volume reads use verified exact names,
+and lists emit only owned entries. Health polling returns a retryable status
+while the expected service is absent. The shim assumes trusted local fixture
+code with access to the same host environment.
 
 The run builds current Core, Sensor and Agent sources, then exercises the existing
 scalar path. Enrollment is explicitly **SQL-seeded test authority**, not proof of
@@ -22,10 +42,43 @@ is not carried by this scalar harness. The canonical ClickHouse readback checks
 stored identity, time, value and replay count; Agent observation provenance is
 currently Kafka-only and must not be claimed as persisted in ClickHouse.
 
-No old shared Agent volume, Sensor acceptance receipt or shared PKI is reset.
-Cleanup captures logs and removes only this fresh project and its provenance-
-checked Kafka volume. Interrupted cleanup is a HOLD requiring resource inspection.
+Work has one aggregate deadline including preparation, builds and fixture execution
+(`PLATFORM_E2E_WORK_SECONDS`, default 3600, maximum 7200). Teardown has its own
+aggregate deadline (`PLATFORM_E2E_CLEANUP_SECONDS`, default 180, maximum 600).
+TERM and INT stop the workload process group before teardown. The recorded
+workload exit is 124 for a work timeout, 143 for TERM or 130 for INT. See
+`exits.txt` for both workload and teardown results. A workload failure takes
+exit-status precedence. A teardown failure makes a successful workload exit
+nonzero.
+
+Teardown checks exact ownership before removal, uses object IDs where Docker
+exposes them, and verifies absence with fresh successful inventories. Docker
+addresses volumes by name, so the runner re-inspects their provenance immediately
+before removal. This assumes an admitted local daemon where other actors do not
+concurrently replace the private run's resources or edit its source and evidence
+files. Shared base images and builder cache follow daemon policy.
+
+A failed or interrupted Docker client can leave a daemon operation in flight.
+The runner atomically records a private pending receipt before submission. It
+contains the admitted operation category, verb and applicable fixture service
+names. A positive client exit status is recorded as `returned-nonzero` with its
+exit code. A signal result is `uncertain`. A receipt still marked `submitted`
+means no outcome was recorded. All three states and legacy receipts require
+completion evidence for clearance. For the expected invalid-config exit, the
+runner verifies exit 1 on the created container ID, removes that container, and
+confirms its absence.
+Unresolved receipts retain the reservation and make teardown fail even when
+owned-resource cleanup succeeds. Retain the evidence directory and use
+`cleanup.log`, the pending and custody receipts, and a fresh inventory for
+operator reconciliation under the admitted runtime allocation. An empty
+inventory alone cannot resolve an in-flight request.
 Native installation, systemd, physical reboot and power-loss are separate gates.
+
+The isolation and custody tests can run without contacting a Docker daemon.
+
+```bash
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/agent-runtime-e2e
+```
 
 Kafka assertions consume **all partitions** from a saved end-offset snapshot.
 `telemetry.numeric.v1` is partitioned; a single `--from-beginning` consumer
