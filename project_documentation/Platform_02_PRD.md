@@ -1856,7 +1856,7 @@ Complex settings and diagnostics shall expose `What is this?`, contextual docume
 
 F-001/F-008 (2026-11-26): annual subscription and perpetual usage rights are supported. Annual subscriptions include support and upgrades during the valid term; additional capacity requires additional subscription entitlement. Perpetual rights continue for the entitled software/version; renewable annual maintenance governs support and upgrade eligibility; additional capacity requires additional perpetual entitlement. Perpetual maintenance expiry MUST NOT stop entitled monitoring or revoke perpetual usage rights. The 30-day expiry warning, T-7 dashboard banner and **15-day post-expiry grace** (`EXPIRED_GRACE_15D`) followed by polling suspension apply to expiring software usage rights (annual subscription), not maintenance expiry. Historical data and authorized licence administration remain available. Exact fees, version-right details and support contracts remain Founder-reserved.
 
-F-002/F-002A (2026-11-26): up to **10%** temporary over-entitlement for **30 calendar days**; warn immediately on exceeding entitlement. Additional licensed activation during an authorized allowance must stay within cap and entitlement, authorization, capacity and safety checks. Above cap, or after allowance expiry while unregularized, block additional licensed activation. Preserve existing monitoring; do not remove existing resources or delete data to enforce commercial overage. Extension only through authorized commercial approval and audit; no automatic extension. This policy is independent of the existing 15-day grace for expiring software usage rights and does not override actual usage-right expiry, revocation, security or capacity. Counting, rounding, day/window, allowance reset and volume-meter enforcement semantics remain gated; no invented quantities or silent dropping of telemetry.
+F-002/F-002A (2026-11-26): up to **10%** temporary over-entitlement for **30 calendar days**; warn immediately on exceeding entitlement. Additional licensed activation during an authorized allowance must stay within cap and entitlement, authorization, capacity and safety checks. Above cap, or after allowance expiry while unregularized, block additional licensed activation. Preserve existing monitoring; do not remove existing resources or delete data to enforce commercial overage. Extension only through authorized commercial approval and audit; no automatic extension. This policy is independent of the existing 15-day grace for expiring software usage rights and does not override actual usage-right expiry, revocation, security or capacity. Master count design: checked L+floor(L/10), first committed excess in trusted UTC, 30 UTC calendar days, canonical membership, no automatic rearm, atomic admission/recovery per Platform_05 §40 and Platform_17 Licensing. Exact billable byte boundary and continuous-volume enforcement require Founder decision; no commercial drops or guessed quantities.
 
 F-005 — approved commercial measurement basis (not exact SKU quantities):
 
@@ -1888,7 +1888,7 @@ Entitlement is evaluated server-side, separately from RBAC and certification. UI
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
-- **`REQ-LIC-001`**: Platform SHALL enforce: Commercial license supports annual/perpetual/device/element/module models.
+- **`REQ-LIC-001`**: Platform SHALL enforce: Commercial licensing supports annual subscription and perpetual software usage rights, approved resource/ingestion-volume measurement and optional module/deployment entitlements; no independent element charge where F-005 includes it.
 - **`REQ-LIC-002`**: Platform SHALL enforce: 30-day expiry warning.
 - **`REQ-LIC-003`**: Platform SHALL enforce: 7-day dashboard banner before expiry.
 - **`REQ-LIC-004`**: Platform SHALL enforce: Post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30); polling stops after the 15-day grace expires unless manually extended/renewed. T-7 pre-expiry banner remains distinct..
@@ -2216,7 +2216,7 @@ Provider, Gemini configuration, Data Policy, Tool Controls, Usage, Audit and Fut
 
 ### 37.18 Licensing
 
-Customer, licence type, modules, device/element consumption, expiry, support, HA entitlement and offline licence import/extension.
+Customer, usage-right type, approved module/resource/volume consumption, finite expiry only where applicable, separate maintenance/version eligibility, allowance state, HA entitlement and signed offline import/transfer/extension.
 
 ### 37.19 Security
 

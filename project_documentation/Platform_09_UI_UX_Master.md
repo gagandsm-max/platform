@@ -7097,7 +7097,7 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 ### UI-094 — Usage & Licensing
 
-**F-001/F-002/F-002A/F-005–F-009:** show annual/perpetual usage rights separately from maintenance/upgrade eligibility, module/deployment entitlements, measurement unit, licensed/used/forecast, 10% cap, 30-day allowance start/end/remaining, immediate warning, blocked-new-activation reason and authorized regularization/extension. Never display maintenance/overage expiry as polling suspension. Show transfer/DR/offline activation status and audit via authorized workflows; technical contract and maturity gates open. Existing UI IDs/route unchanged.
+**F-001/F-002/F-002A/F-005–F-009:** consume planned LicenceStateV2 (Platform_17 Licensing); show annual/perpetual usage rights separately from maintenance/upgrade eligibility, module/deployment entitlements, measurement unit, licensed/used/forecast, 10% cap, 30-day allowance start/end/remaining, immediate warning, blocked-new-activation reason and authorized regularization/extension. Never display maintenance/overage expiry as polling suspension. Show transfer/DR/offline activation status and audit via authorized workflows; technical contract and maturity gates open. Existing UI IDs/route unchanged.
 
 **Domain:** Cross-cutting Operations
 **Primary roles:** Role determined by RBAC and domain ownership
@@ -7109,7 +7109,9 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 - Licensed vs used
 - module usage
 - growth
-- expiry/grace state
+- finite expiry/grace state
+- independent maintenance and version eligibility
+- allowance history, admission decision and authorized regularization/transfer
 
 **Default filters:**
 - Time range

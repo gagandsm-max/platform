@@ -1909,11 +1909,11 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 
 ## 40. Licence engine LLD
 
-**2026-11-26 applicability and pending implementation contract.** Existing expiry enum and §83 timer apply to finite usage rights, not maintenance. Represent perpetual usage rights and maintenance/upgrade eligibility independently; do not fabricate distant expiry. Temporary overage state belongs to same Core entitlement authority, not a licence-expiry extension. Persist allowance identity, scope, start/end, policy and approval provenance; atomically enforce activation against current usage/cap, handle concurrent/replayed requests and preserve state across restart/restore. Above the 10% cap or after 30 calendar days while unregularized, block new activation, not existing valid monitoring. Immediate warning; no silent timer reset or auto-extension; authorized commercial extension only. Independent usage-right, security and capacity decisions always apply. Volume-meter window/basis/applicability, rounding, identity/dedup, allowance reset rules, deployment-bound signed artefact and transfer design, exact schema/API changes require BUILD-096/117/127 review/tests. Existing state names remain stable; do not treat new concepts as deployed enums. See Platform_02 §33 and Platform_17 licensing contract.
+**2026-11-26 Master design reconciliation; planned, not implemented.** Platform_17 §15.2 Licensing owns logical persistence, admission, V2 projection, event compatibility and MIG-PLAN-011. One Core authority; independent usage-right, maintenance, overage and transfer axes. Finite usage grace stays 15 days; perpetual usage VALID/INVALID without expiry, maintenance lapse affects support/upgrade only. MANUAL_EXTENSION and INVALID retain existing finite transition/status semantics, not overage approval. Overage ACTIVE/EXPIRED/REGULARIZED with persisted lineage; no automatic rearm. Scope-lock, canonical membership, checked L+floor(L/10), UTC first excess+30 days and stale-state/clock safety follow Platform_17. Existing valid monitoring never stops merely for maintenance/overage expiry. BUILD-068 licensed activation requires tested BUILD-096 transactional admission; provisional enrollment/review separate. Volume commercial enforcement held pending Founder decision; no silent dropping or ACK change. Physical schema, signing and integration remain open.
 
 ### 40.1 States
 
-Canonical lifecycle (Founder decision 2026-09-30; `Platform_01` §34.2 / `Platform_02` §33 / `Platform_12` §22):
+Finite usage-right canonical lifecycle (Founder decision 2026-09-30; `Platform_01` §34.2 / `Platform_02` §33 / `Platform_12` §22):
 
 `VALID → EXPIRING_30D → EXPIRING_7D_BANNER → EXPIRED_GRACE_15D → POLLING_SUSPENDED`
 
