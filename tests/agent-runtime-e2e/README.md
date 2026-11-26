@@ -22,6 +22,12 @@ limited to the specific fixture and product paths. Private PKI is generated in
 the evidence directory. The dedicated keytool helper can write only to that PKI
 mount. Kafka keeps its guarded fresh-volume provisioning and storage checks.
 
+The PostgreSQL bootstrap bind uses `postgres-init.sql` inside the mode
+`0700` evidence directory. The runner copies the public checkout SQL as-is,
+sets the copy to mode `0644`, and verifies the exact read-only bind, file mode
+and byte equality before workload operations. This gives the container's
+PostgreSQL user read access even when the checkout uses a private umask.
+
 A successful inventory of containers, volumes, networks and image tags must
 show a collision-free project before the runner creates its private reservation.
 Subsequent mutations require the same reservation ID and exact project and

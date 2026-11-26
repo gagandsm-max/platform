@@ -44,6 +44,9 @@ VOLUMES = {
 }
 VOLUME_KEYS = {source for source, _ in VOLUMES.values()} | {"platform_sensor_infra_spool"}
 PKI = "pki/deploy/docker/certs"
+POSTGRES_INIT_SOURCE = "deploy/docker/postgres/init.sql"
+POSTGRES_INIT_FIXTURE = "postgres-init.sql"
+POSTGRES_INIT_TARGET = "/docker-entrypoint-initdb.d/01-init.sql"
 HELPERS = {"pki", "parser", "kafka-helper", "invalid-config"}
 ID = re.compile(r"[a-f0-9]{64}")
 REAP_GRACE = 0.1
@@ -79,7 +82,7 @@ def require(condition, reason):
 
 def bind_paths(service, root, evidence, gap):
     paths = {
-        "postgres": {"deploy/docker/postgres/init.sql": "/docker-entrypoint-initdb.d/01-init.sql"},
+        "postgres": {evidence / POSTGRES_INIT_FIXTURE: POSTGRES_INIT_TARGET},
         "clickhouse": {"deploy/docker/clickhouse/init.sql": "/docker-entrypoint-initdb.d/01-init.sql"},
         "clickhouse-migrate": {"deploy/docker/clickhouse/migrations": "/migrations"},
         "kafka": {"deploy/docker/kafka": "/platform-kafka"},
@@ -129,6 +132,17 @@ def audit_tree(path, private=False):
             with entry.open("rb") as stream:
                 require(not re.search(rb"(?m)^\s*-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----\s*$", stream.read()),
                         f"private key in source bind: {entry}")
+
+
+def stage_postgres_init(root, evidence):
+    source = root / POSTGRES_INIT_SOURCE
+    audit_tree(source)
+    require(source.is_file(), "PostgreSQL bootstrap source must be a regular file")
+    with (evidence / POSTGRES_INIT_FIXTURE).open("xb") as stream:
+        stream.write(source.read_bytes())
+        stream.flush()
+        # The container's postgres user reads the file through a file bind.
+        os.fchmod(stream.fileno(), 0o644)
 
 
 def verify(config, prefix, root=None, evidence=None, *, ready=False, owner=None):
@@ -206,7 +220,12 @@ def verify(config, prefix, root=None, evidence=None, *, ready=False, owner=None)
                 source = Path(pair[0])
                 canonical(source, exists=ready)
                 if ready:
-                    audit_tree(source, private=source.is_relative_to(evidence))
+                    audit_tree(source, private=source.is_relative_to(evidence) and name != "postgres")
+                    if name == "postgres":
+                        require(source.is_file() and stat.S_IMODE(source.stat().st_mode) == 0o644,
+                                "invalid staged PostgreSQL bootstrap file or mode")
+                        require(source.read_bytes() == (root / POSTGRES_INIT_SOURCE).read_bytes(),
+                                "staged PostgreSQL bootstrap bytes differ from source")
                 binds.remove(pair)
             else:
                 require(mount["type"] == "volume" and pair in volumes
@@ -271,6 +290,11 @@ def isolate(config, prefix, root, evidence, owner=None):
                     "unexpected input bind options")
             mount["bind"] = {"create_host_path": False}
             source = Path(mount["source"])
+            if name == "postgres" and mount["target"] == POSTGRES_INIT_TARGET:
+                require(mount["source"] == str(root / POSTGRES_INIT_SOURCE),
+                        "unexpected PostgreSQL bootstrap source")
+                mount["source"] = str(evidence / POSTGRES_INIT_FIXTURE)
+                continue
             for old, new in ((root / "deploy/docker/certs", evidence / PKI),
                              (root / "tests/agent-runtime-e2e/certs", evidence / "agent-certs")):
                 if source.is_relative_to(old):
@@ -960,6 +984,7 @@ def workload(custody):
         "compose", "--env-file", ".env.example", "-f", "compose.yaml", "-f", "compose.kafka-guarded.yaml",
         "-f", str(HERE / "compose.override.yaml"), "config", "--no-env-resolution", "--format", "json"))
     config = isolate(read_config(original), custody.prefix, ROOT, evidence, custody.owner)
+    stage_postgres_init(ROOT, evidence)
     # Compose 5.5.0 config JSON already escapes literal dollars for reparse.
     execution.write_text(json.dumps(config, indent=2))
     dc = ["compose", "-p", custody.prefix, "-f", str(execution), "--env-file", str(evidence / "empty.env")]

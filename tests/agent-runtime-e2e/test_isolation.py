@@ -1,11 +1,14 @@
 import copy
 import json
+import os
 from pathlib import Path
+import stat
 import tempfile
 import unittest
 from unittest.mock import patch
 
 from isolation import BUILDS, IMAGES, OWNER, PKI, ROOT, VOLUME_KEYS, VOLUMES, audit_tree, bind_paths, isolate, read_config, verify
+from isolation import POSTGRES_INIT_FIXTURE, POSTGRES_INIT_SOURCE, POSTGRES_INIT_TARGET, stage_postgres_init
 
 PREFIX = "agent-e2e-fixture-12345"
 TOKEN = "1" * 32
@@ -21,6 +24,8 @@ def rendered(root, evidence):
         mounts = []
         for source, target in bind_paths(name, root, evidence, False):
             source = Path(source)
+            if source == evidence / POSTGRES_INIT_FIXTURE:
+                source = root / POSTGRES_INIT_SOURCE
             for private, shared in ((evidence / PKI, root / "deploy/docker/certs"),
                                     (evidence / "agent-certs", root / "tests/agent-runtime-e2e/certs")):
                 if source.is_relative_to(private):
@@ -83,6 +88,58 @@ class IsolationTest(unittest.TestCase):
             self.verify(c)
         self.assertIn(str(self.evidence / "timesync-marker"),
                       {m["source"] for m in c["services"]["sensor-infra"]["volumes"]})
+
+    def test_postgres_bootstrap_under_restrictive_umask(self):
+        config = self.isolate()
+        source = self.root / POSTGRES_INIT_SOURCE
+        staged = self.evidence / POSTGRES_INIT_FIXTURE
+        original = b"-- fixture\r\nSELECT 1;\r\n"
+        previous_umask = os.umask(0o077)
+        try:
+            source.parent.mkdir(parents=True)
+            source.write_bytes(original)
+            self.evidence.mkdir(mode=0o700)
+            stage_postgres_init(self.root, self.evidence)
+            directories = [self.root / path for path in (*BUILDS.values(), "deploy/docker/kafka",
+                                                           "deploy/docker/clickhouse/migrations")]
+            for path in (*directories, self.evidence / PKI):
+                path.mkdir(parents=True, exist_ok=True)
+            for path in BUILDS.values():
+                (self.root / path / "Dockerfile").touch()
+            for service in config["services"].values():
+                for mount in service.get("volumes", []):
+                    if mount["type"] == "bind":
+                        path = Path(mount["source"])
+                        if not path.exists():
+                            path.parent.mkdir(parents=True, exist_ok=True)
+                            path.touch()
+        finally:
+            os.umask(previous_umask)
+
+        self.assertEqual(stat.S_IMODE(self.evidence.stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE(source.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(staged.stat().st_mode), 0o644)
+        self.assertEqual(staged.read_bytes(), original)
+        self.assertEqual(source.read_bytes(), original)
+        self.assertEqual(stat.S_IMODE((self.evidence / "agent-certs/agent-e2e.key").stat().st_mode), 0o600)
+        bind, = [m for m in config["services"]["postgres"]["volumes"] if m["type"] == "bind"]
+        self.assertEqual(bind, {"type": "bind", "source": str(staged), "target": POSTGRES_INIT_TARGET,
+                                "read_only": True, "bind": {"create_host_path": False}})
+
+        def verify_ready():
+            verify(config, PREFIX, self.root, self.evidence, ready=True, owner=TOKEN)
+
+        verify_ready()
+        staged.chmod(0o600)
+        with self.assertRaisesRegex(ValueError, "bootstrap file or mode"):
+            verify_ready()
+        staged.chmod(0o644)
+        staged.write_bytes(b"SELECT 2;")
+        with self.assertRaisesRegex(ValueError, "bootstrap bytes differ"):
+            verify_ready()
+        bind["source"] = str(source)
+        with self.assertRaisesRegex(ValueError, "unexpected bind: postgres"):
+            self.verify(config)
 
     def test_unexpected_rendered_service_rejected(self):
         self.raw["services"]["unexpected"] = {}
