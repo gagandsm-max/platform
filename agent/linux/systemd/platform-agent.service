@@ -1,6 +1,6 @@
 [Unit]
 Description=Platform Linux Agent
-Documentation=file:///usr/share/doc/platform-agent/README.md
+Documentation=file:///usr/share/doc/platform-agent/README.packaging.md
 After=network-online.target
 Wants=network-online.target
 StartLimitIntervalSec=60
@@ -13,7 +13,7 @@ User=platform-agent
 Group=platform-agent
 # Missing env file fails the unit (fail-closed). Do not restore the '-' prefix.
 EnvironmentFile=/etc/platform/agent.env
-ExecStart=/usr/local/bin/platform-agent-linux
+ExecStart=/opt/platform/agent/platform-agent-linux
 WorkingDirectory=/var/lib/platform/agent
 StateDirectory=platform/agent
 Restart=on-failure

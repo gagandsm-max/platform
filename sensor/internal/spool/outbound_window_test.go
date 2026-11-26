@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -450,5 +451,295 @@ func TestRebatchOutboundWindowDisabledPreservesIdentity(t *testing.T) {
 	}
 	if err := s.CompleteOutboundBatch(one.LastSequence); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestUnsafeOutboundRangeCapacityBaselineDocumentsMakeslicePanic isolates the
+// Issue #351 defect class: deriving []Record capacity from an untrusted
+// last-first span equal to MaxSafeSequence panics with makeslice before any
+// record I/O. Production readExactRangeLocked must never take this path.
+func TestUnsafeOutboundRangeCapacityBaselineDocumentsMakeslicePanic(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected makeslice panic from untrusted MaxSafeSequence capacity")
+		}
+		msg := fmt.Sprint(r)
+		if !strings.Contains(msg, "makeslice") && !strings.Contains(msg, "cap out of range") {
+			t.Fatalf("unexpected panic: %v", r)
+		}
+	}()
+	count := int(MaxSafeSequence)
+	if count <= 0 || uint64(count) != MaxSafeSequence {
+		// 32-bit int cannot hold MaxSafeSequence; the historical overflow guard
+		// would reject before make. Force the 64-bit failure mode explicitly.
+		panic("makeslice: cap out of range")
+	}
+	_ = make([]Record, 0, count)
+	t.Fatal("make with MaxSafeSequence capacity must not return")
+}
+
+func TestReadExactRangeRejectsUntrustedSpanBeforeAllocation(t *testing.T) {
+	for _, kind := range []SpoolKind{KindTelemetry, KindAgentIngress} {
+		t.Run(string(kind), func(t *testing.T) {
+			s := openTestKind(t, 1024, kind)
+			add(t, s, "only")
+			st := snapshotSpoolDurable(t, s)
+			if st.nextSequence != 2 || st.ackedThrough != 0 {
+				t.Fatalf("tiny state precondition: %#v", st)
+			}
+			writeOutboundSidecar(t, s, 1, MaxSafeSequence)
+			before := snapshotSpoolDurable(t, s)
+			batch, err := s.ReadOrReserveOutboundBatch(10, 1024)
+			if CodeOf(err) != CodeOutboundWindow {
+				t.Fatalf("want SPOOL_OUTBOUND_WINDOW, got batch=%#v err=%v", batch, err)
+			}
+			if len(batch.Records) != 0 || batch.FirstSequence != 0 || batch.LastSequence != 0 || batch.PayloadBytes != 0 {
+				t.Fatalf("reject must return empty batch, got %#v", batch)
+			}
+			assertSpoolDurableUnchanged(t, s, before)
+		})
+	}
+}
+
+func TestReadExactRangeRejectsImpossibleAndGappedActiveRanges(t *testing.T) {
+	for _, kind := range []SpoolKind{KindTelemetry, KindAgentIngress} {
+		t.Run(string(kind), func(t *testing.T) {
+			s := openTestKind(t, 1024, kind)
+			for i := 0; i < 3; i++ {
+				add(t, s, fmt.Sprintf("r%d", i))
+			}
+			if _, err := s.ReadOrReserveOutboundBatch(2, 1024); err != nil {
+				t.Fatal(err)
+			}
+			cases := []struct {
+				name       string
+				first, last uint64
+			}{
+				{name: "inverted", first: 2, last: 1},
+				{name: "ahead_of_issued", first: 1, last: 99},
+				{name: "gapped_active", first: 2, last: 2},
+				{name: "zero_first", first: 0, last: 1},
+			}
+			for _, tc := range cases {
+				t.Run(tc.name, func(t *testing.T) {
+					writeOutboundSidecar(t, s, tc.first, tc.last)
+					before := snapshotSpoolDurable(t, s)
+					batch, err := s.ReadOrReserveOutboundBatch(10, 1024)
+					if CodeOf(err) != CodeOutboundWindow {
+						t.Fatalf("want SPOOL_OUTBOUND_WINDOW, got %#v err=%v", batch, err)
+					}
+					if len(batch.Records) != 0 {
+						t.Fatalf("empty batch required, got %#v", batch)
+					}
+					assertSpoolDurableUnchanged(t, s, before)
+				})
+			}
+		})
+	}
+}
+
+func TestReadExactRangeRejectsAlreadyAckedActiveOverlap(t *testing.T) {
+	s := openTest(t, 1024)
+	add(t, s, "a")
+	add(t, s, "b")
+	if _, err := s.ReadOrReserveOutboundBatch(2, 1024); err != nil {
+		t.Fatal(err)
+	}
+	// Advance watermark into the frozen range without clearing the sidecar
+	// (crash/partial path). Reconstruction must fail closed; stale full-ACK
+	// cleanup remains the LastSequence <= AckedThrough reconcile path.
+	if err := s.AcknowledgeThrough(1); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotSpoolDurable(t, s)
+	batch, err := s.ReadOrReserveOutboundBatch(10, 1024)
+	if CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("partially ACKed active window must fail closed: %#v err=%v", batch, err)
+	}
+	if len(batch.Records) != 0 {
+		t.Fatalf("empty batch required, got %#v", batch)
+	}
+	assertSpoolDurableUnchanged(t, s, before)
+}
+
+func TestReadExactRangeNormalExactReplayAndMissingRecords(t *testing.T) {
+	s := openTest(t, 1024)
+	for i := 0; i < 3; i++ {
+		add(t, s, fmt.Sprintf("body-%d", i))
+	}
+	first, err := s.ReadOrReserveOutboundBatch(3, 1024)
+	if err != nil || first.FirstSequence != 1 || first.LastSequence != 3 || len(first.Records) != 3 {
+		t.Fatalf("reserve: %#v err=%v", first, err)
+	}
+	sum := checksumRecords(first.Records)
+	replay, err := s.ReadOrReserveOutboundBatch(1, 1)
+	if err != nil || replay.FirstSequence != 1 || replay.LastSequence != 3 || len(replay.Records) != 3 {
+		t.Fatalf("exact replay under tiny caps: %#v err=%v", replay, err)
+	}
+	if checksumRecords(replay.Records) != sum {
+		t.Fatal("replay checksum drift")
+	}
+
+	if err := os.Remove(filepath.Join(s.dir, recordFileName(2))); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotSpoolDurable(t, s)
+	batch, err := s.ReadOrReserveOutboundBatch(10, 1024)
+	if CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("missing middle must fail closed: %#v err=%v", batch, err)
+	}
+	assertSpoolDurableUnchanged(t, s, before)
+
+	sEnd := openTest(t, 1024)
+	for i := 0; i < 3; i++ {
+		add(t, sEnd, fmt.Sprintf("e%d", i))
+	}
+	if _, err := sEnd.ReadOrReserveOutboundBatch(3, 1024); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(sEnd.dir, recordFileName(3))); err != nil {
+		t.Fatal(err)
+	}
+	beforeEnd := snapshotSpoolDurable(t, sEnd)
+	batch, err = sEnd.ReadOrReserveOutboundBatch(10, 1024)
+	if CodeOf(err) != CodeOutboundWindow {
+		t.Fatalf("missing end must fail closed: %#v err=%v", batch, err)
+	}
+	assertSpoolDurableUnchanged(t, sEnd, beforeEnd)
+}
+
+func TestReadExactRangeStalePostAckCleanupPreserved(t *testing.T) {
+	for _, kind := range []SpoolKind{KindTelemetry, KindAgentIngress} {
+		t.Run(string(kind), func(t *testing.T) {
+			s := openTestKind(t, 1024, kind)
+			add(t, s, "a")
+			add(t, s, "b")
+			if _, err := s.ReadOrReserveOutboundBatch(1, 1024); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.AcknowledgeThrough(1); err != nil {
+				t.Fatal(err)
+			}
+			next, err := s.ReadOrReserveOutboundBatch(10, 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if next.FirstSequence != 2 || next.LastSequence != 2 || len(next.Records) != 1 {
+				t.Fatalf("stale fully-ACKed sidecar must reconcile; got %#v", next)
+			}
+		})
+	}
+}
+
+func TestFrozenReplayAcrossSmallerConfigBothKinds(t *testing.T) {
+	for _, kind := range []SpoolKind{KindTelemetry, KindAgentIngress} {
+		t.Run(string(kind), func(t *testing.T) {
+			s := openTestKind(t, 1024, kind)
+			for i := 0; i < 5; i++ {
+				add(t, s, fmt.Sprintf("p%d", i))
+			}
+			original, err := s.ReadOrReserveOutboundBatch(5, 1024)
+			if err != nil {
+				t.Fatal(err)
+			}
+			got, err := s.ReadOrReserveOutboundBatch(1, 1)
+			if err != nil || got.FirstSequence != 1 || got.LastSequence != 5 || len(got.Records) != 5 {
+				t.Fatalf("frozen replay under (1,1) caps: %#v err=%v", got, err)
+			}
+			if checksumRecords(got.Records) != checksumRecords(original.Records) {
+				t.Fatal("frozen identity drift under smaller caps")
+			}
+		})
+	}
+}
+
+func openTestKind(t *testing.T, max int, kind SpoolKind) *DiskSpool {
+	t.Helper()
+	s, err := Open(Config{Dir: t.TempDir(), MaxRecordBytes: max, Kind: kind})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.space = func(extra int64) (spaceStatus, error) {
+		return spaceStatus{totalBytes: 1000000, usedBytes: 1000, usedPct: .1}, nil
+	}
+	return s
+}
+
+func writeOutboundSidecar(t *testing.T, s *DiskSpool, first, last uint64) {
+	t.Helper()
+	raw, err := json.Marshal(outboundWindow{
+		SchemaVersion: outboundWindowSchema,
+		StreamID:      s.StreamID(),
+		FirstSequence: first,
+		LastSequence:  last,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(s.dir, outboundWindowFileName), raw, 0640); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type durableSnap struct {
+	ackedThrough  uint64
+	nextSequence  uint64
+	sidecar       string
+	sidecarExists bool
+	recordNames   []string
+	unresolved    bool
+	degraded      bool
+}
+
+func snapshotSpoolDurable(t *testing.T, s *DiskSpool) durableSnap {
+	t.Helper()
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	snap := durableSnap{
+		ackedThrough: s.state.AckedThrough,
+		nextSequence: s.state.NextSequence,
+		unresolved:   s.cleanupUnresolved,
+		degraded:     s.degraded,
+	}
+	path := filepath.Join(s.dir, outboundWindowFileName)
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		snap.sidecarExists = true
+		snap.sidecar = string(raw)
+	} else if !os.IsNotExist(err) {
+		t.Fatalf("sidecar read: %v", err)
+	}
+	entries, err := os.ReadDir(s.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), "record-") {
+			snap.recordNames = append(snap.recordNames, e.Name())
+		}
+	}
+	return snap
+}
+
+func assertSpoolDurableUnchanged(t *testing.T, s *DiskSpool, before durableSnap) {
+	t.Helper()
+	after := snapshotSpoolDurable(t, s)
+	if after.ackedThrough != before.ackedThrough || after.nextSequence != before.nextSequence {
+		t.Fatalf("watermark mutated: before=%#v after=%#v", before, after)
+	}
+	if after.sidecarExists != before.sidecarExists || after.sidecar != before.sidecar {
+		t.Fatalf("sidecar mutated: before=%#v after=%#v", before, after)
+	}
+	if after.unresolved != before.unresolved || after.degraded != before.degraded {
+		t.Fatalf("latches mutated: before=%#v after=%#v", before, after)
+	}
+	if len(after.recordNames) != len(before.recordNames) {
+		t.Fatalf("record files mutated: before=%v after=%v", before.recordNames, after.recordNames)
+	}
+	for i := range before.recordNames {
+		if after.recordNames[i] != before.recordNames[i] {
+			t.Fatalf("record files mutated: before=%v after=%v", before.recordNames, after.recordNames)
+		}
 	}
 }

@@ -7,6 +7,7 @@ import org.springframework.jdbc.core.namedparam.MapSqlParameterSource;
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate;
 import org.springframework.stereotype.Repository;
 
+import java.sql.Types;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -95,6 +96,40 @@ public class EntityRepository {
                 """,
                 Map.of("tenantId", tenantId, "limit", limit, "offset", offset),
                 MAPPER);
+    }
+
+    public List<Entity> listByTenantAfter(UUID tenantId, int fetchLimit, Instant afterCreatedAt, UUID afterEntityId) {
+        if (tenantId == null) {
+            throw new IllegalArgumentException("tenantId is required");
+        }
+        if (fetchLimit < 1 || fetchLimit > 201) {
+            throw new IllegalArgumentException("fetchLimit must be between 1 and 201");
+        }
+        if ((afterCreatedAt == null) != (afterEntityId == null)) {
+            throw new IllegalArgumentException("afterCreatedAt and afterEntityId must be supplied together");
+        }
+
+        MapSqlParameterSource parameters = new MapSqlParameterSource()
+                .addValue("tenantId", tenantId, Types.OTHER)
+                .addValue("fetchLimit", fetchLimit, Types.INTEGER);
+        if (afterCreatedAt == null) {
+            return jdbc.query("""
+                    SELECT * FROM platform.entity
+                     WHERE tenant_id = :tenantId
+                     ORDER BY created_at ASC, entity_id ASC
+                     LIMIT :fetchLimit
+                    """, parameters, MAPPER);
+        }
+
+        return jdbc.query("""
+                SELECT * FROM platform.entity
+                 WHERE tenant_id = :tenantId
+                   AND (created_at, entity_id) > (:afterCreatedAt, :afterEntityId)
+                 ORDER BY created_at ASC, entity_id ASC
+                 LIMIT :fetchLimit
+                """, parameters
+                .addValue("afterCreatedAt", JdbcTime.ts(afterCreatedAt), Types.TIMESTAMP)
+                .addValue("afterEntityId", afterEntityId, Types.OTHER), MAPPER);
     }
 
     public long countByTenant(UUID tenantId) {

@@ -4,15 +4,19 @@ package collector
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"platform/agent/common/telemetry"
 )
@@ -34,9 +38,13 @@ func NewDefaultCollectors(maxFilesystems int) []HostCollector {
 // -----------------------------------------------------------------------------
 
 type CPUCollector struct {
-	mu        sync.Mutex
+	procRoot string // Empty uses the host procfs.
+	mu       sync.Mutex
+	previous cpuTimes
+	// prevTotal/prevIdle back the fail-closed quality Collect path (readFile set).
 	prevTotal uint64
 	prevIdle  uint64
+	readFile  func(string) ([]byte, error)
 }
 
 func NewCPUCollector() *CPUCollector {
@@ -45,7 +53,120 @@ func NewCPUCollector() *CPUCollector {
 
 func (c *CPUCollector) Name() string { return "cpu" }
 
+// /proc/stat includes guest and guest_nice in user and nice. Account only
+// user, nice, system, idle, iowait, irq, softirq, and steal when present.
+type cpuTimes struct {
+	ticks [8]uint64
+	count int
+}
+
+func parseCPUTimes(fields []string) cpuTimes {
+	var times cpuTimes
+	times.count = min(len(fields), len(times.ticks))
+	if times.count < 4 { // The oldest supported layout ends with idle.
+		return cpuTimes{}
+	}
+	for i := 0; i < times.count; i++ {
+		v, err := strconv.ParseUint(fields[i], 10, 64)
+		if err != nil {
+			return cpuTimes{}
+		}
+		times.ticks[i] = v
+	}
+	return times
+}
+
+func cpuIntervalUtilization(previous, current cpuTimes) (float64, bool) {
+	if current.count == 0 || current.count != previous.count {
+		return 0, false
+	}
+	var total, idle uint64
+	for i := 0; i < current.count; i++ {
+		// In particular Linux iowait can decrease. Summing counters first
+		// can hide a regression behind an increase in a different field.
+		if current.ticks[i] < previous.ticks[i] {
+			return 0, false
+		}
+		delta := current.ticks[i] - previous.ticks[i]
+		if delta > ^uint64(0)-total {
+			return 0, false
+		}
+		total += delta
+		if i == 3 || i == 4 {
+			idle += delta
+		}
+	}
+	if total == 0 {
+		return 0, false
+	}
+	return 100 * (float64(total-idle) / float64(total)), true
+}
+
+// Enough for 8,192 CPU rows with ten full-width uint64 counters and labels.
+// Stream the CPU section with a small buffer. A larger topology is allowed
+// when its rows fit; an incomplete count must never masquerade as an exact one.
+const cpuStatReadLimit = 2 << 20
+
+func readCPUStat(r io.Reader) (current cpuTimes, count int) {
+	// One lookahead byte distinguishes true EOF exactly at the budget.
+	br := bufio.NewReader(io.LimitReader(r, cpuStatReadLimit+1))
+	remaining := cpuStatReadLimit
+	seenAggregate := false
+	for {
+		line, err := br.ReadSlice('\n')
+		if len(line) == 0 && err == io.EOF {
+			return current, count
+		}
+		if len(line) > remaining {
+			line = line[:remaining]
+			err = io.ErrUnexpectedEOF
+		}
+		remaining -= len(line)
+		// Linux emits the interrupt row immediately after the online CPU rows.
+		// Its counters can fill an entire buffer; the label alone ends our read.
+		if bytes.HasPrefix(line, []byte("intr ")) || bytes.HasPrefix(line, []byte("intr\t")) {
+			return current, count
+		}
+		if err != nil {
+			return current, 0
+		}
+		line = bytes.TrimSpace(line)
+		keyEnd := bytes.IndexAny(line, " \t")
+		if keyEnd < 0 {
+			keyEnd = len(line)
+		}
+		key := line[:keyEnd]
+		switch {
+		case bytes.Equal(key, []byte("cpu")):
+			if seenAggregate {
+				current = cpuTimes{}
+			} else {
+				current = parseCPUTimes(strings.Fields(string(line[keyEnd:])))
+			}
+			seenAggregate = true
+		case len(key) > 3 && bytes.HasPrefix(key, []byte("cpu")) && keyEnd < len(line):
+			if _, err := strconv.Atoi(string(key[3:])); err == nil {
+				count++
+			}
+		}
+	}
+}
+
 func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	// Injected readers exercise the packaging fail-closed quality contract.
+	if c.readFile != nil {
+		return c.collectStrict(ctx)
+	}
+	return c.collectProc(ctx)
+}
+
+// collectProc streams /proc/stat so large CPU topologies are counted exactly
+// when complete and withheld when truncated; utilization uses per-field
+// discontinuity detection from the CPU leaf.
+func (c *CPUCollector) collectProc(ctx context.Context) ([]telemetry.Sample, error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()
@@ -53,139 +174,227 @@ func (c *CPUCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) 
 	}
 
 	var samples []telemetry.Sample
-
-	// 1. Read /proc/stat
-	statFile, err := os.Open("/proc/stat")
+	procRoot := c.procRoot
+	if procRoot == "" {
+		procRoot = "/proc"
+	}
+	var current cpuTimes
+	cpuCount := 0
+	statFile, err := os.Open(filepath.Join(procRoot, "stat"))
 	if err == nil {
 		defer statFile.Close()
-		scanner := bufio.NewScanner(io.LimitReader(statFile, 64*1024))
-		cpuCount := 0
-		var curTotal, curIdle uint64
+		current, cpuCount = readCPUStat(statFile)
+	}
 
-		for scanner.Scan() {
-			line := scanner.Text()
-			fields := strings.Fields(line)
-			if len(fields) < 2 {
-				continue
-			}
+	c.mu.Lock()
+	previous := c.previous
+	c.previous = current
+	c.mu.Unlock()
 
-			if fields[0] == "cpu" {
-				// cpu user nice system idle iowait irq softirq steal [guest guest_nice]
-				// guest/guest_nice are already included in user/nice; do not double-count.
-				var vals []uint64
-				limit := len(fields) - 1
-				if limit > 8 {
-					limit = 8
-				}
-				for i := 1; i <= limit; i++ {
-					v, err := strconv.ParseUint(fields[i], 10, 64)
-					if err != nil {
-						vals = nil
-						curTotal = 0
-						break
-					}
-					vals = append(vals, v)
-					curTotal += v
-				}
-				if len(vals) >= 4 {
-					curIdle = vals[3] // idle
-					if len(vals) >= 5 {
-						curIdle += vals[4] // iowait (idle for utilization purposes)
-					}
-				}
-			} else if strings.HasPrefix(fields[0], "cpu") && len(fields[0]) > 3 {
-				if _, err := strconv.Atoi(fields[0][3:]); err == nil {
-					cpuCount++
-				}
-			}
-		}
-
-		if curTotal > 0 {
-			c.mu.Lock()
-			prevTotal := c.prevTotal
-			prevIdle := c.prevIdle
-			c.prevTotal = curTotal
-			c.prevIdle = curIdle
-			c.mu.Unlock()
-
-			// First sample only seeds counters; since-boot ratio is not interval utilization.
-			if prevTotal > 0 && curTotal >= prevTotal {
-				deltaTotal := curTotal - prevTotal
-				var deltaIdle uint64
-				if curIdle >= prevIdle {
-					deltaIdle = curIdle - prevIdle
-				}
-				if deltaTotal > 0 {
-					util := 100.0 * (1.0 - (float64(deltaIdle) / float64(deltaTotal)))
-					if util < 0 {
-						util = 0
-					}
-					if util > 100 {
-						util = 100
-					}
-					samples = append(samples, telemetry.Sample{
-						MetricKey: "system.cpu.utilization",
-						Value:     util,
-						Unit:      "%",
-					})
-				}
-			}
-		}
-
-		if cpuCount > 0 {
+	available, reason := 0.0, "warmup"
+	if previous.count != 0 {
+		reason = "counter_reset"
+		if util, ok := cpuIntervalUtilization(previous, current); ok {
+			available, reason = 1, "available"
 			samples = append(samples, telemetry.Sample{
-				MetricKey: "system.cpu.count",
-				Value:     float64(cpuCount),
-				Unit:      "count",
+				MetricKey: "system.cpu.utilization",
+				Value:     util,
+				Unit:      "%",
 			})
+		} else if current.count == previous.count && current.count > 0 {
+			var total uint64
+			monotonic := true
+			for i := 0; i < current.count; i++ {
+				if current.ticks[i] < previous.ticks[i] {
+					monotonic = false
+					break
+				}
+				delta := current.ticks[i] - previous.ticks[i]
+				if delta > ^uint64(0)-total {
+					monotonic = false
+					break
+				}
+				total += delta
+			}
+			if monotonic {
+				reason = "no_interval"
+			}
 		}
 	}
 
-	// 2. Read /proc/loadavg
-	loadBytes, err := os.ReadFile("/proc/loadavg")
-	if err == nil {
+	if cpuCount > 0 {
+		samples = append(samples, telemetry.Sample{
+			MetricKey: "system.cpu.count",
+			Value:     float64(cpuCount),
+			Unit:      "count",
+		})
+	}
+
+	if loadBytes, err := os.ReadFile(filepath.Join(procRoot, "loadavg")); err == nil {
 		fields := strings.Fields(string(loadBytes))
 		if len(fields) >= 3 {
 			if l1, err := strconv.ParseFloat(fields[0], 64); err == nil {
-				samples = append(samples, telemetry.Sample{
-					MetricKey: "system.load.1m",
-					Value:     l1,
-					Unit:      "load",
-				})
+				samples = append(samples, telemetry.Sample{MetricKey: "system.load.1m", Value: l1, Unit: "load"})
 			}
 			if l5, err := strconv.ParseFloat(fields[1], 64); err == nil {
-				samples = append(samples, telemetry.Sample{
-					MetricKey: "system.load.5m",
-					Value:     l5,
-					Unit:      "load",
-				})
+				samples = append(samples, telemetry.Sample{MetricKey: "system.load.5m", Value: l5, Unit: "load"})
 			}
 			if l15, err := strconv.ParseFloat(fields[2], 64); err == nil {
-				samples = append(samples, telemetry.Sample{
-					MetricKey: "system.load.15m",
-					Value:     l15,
-					Unit:      "load",
-				})
+				samples = append(samples, telemetry.Sample{MetricKey: "system.load.15m", Value: l15, Unit: "load"})
 			}
 		}
 	}
 
-	// 3. Read /proc/uptime
-	upBytes, err := os.ReadFile("/proc/uptime")
-	if err == nil {
+	if upBytes, err := os.ReadFile(filepath.Join(procRoot, "uptime")); err == nil {
 		fields := strings.Fields(string(upBytes))
 		if len(fields) >= 1 {
 			if uptime, err := strconv.ParseFloat(fields[0], 64); err == nil {
-				samples = append(samples, telemetry.Sample{
-					MetricKey: "system.uptime",
-					Value:     uptime,
-					Unit:      "s",
-				})
+				samples = append(samples, telemetry.Sample{MetricKey: "system.uptime", Value: uptime, Unit: "s"})
 			}
 		}
 	}
 
+	samples = append(samples, telemetry.Sample{
+		MetricKey: "system.cpu.utilization.available",
+		Value:     available,
+		Unit:      "bool",
+		Labels:    map[string]string{"reason": reason},
+	})
 	return samples, nil
+}
+
+// collectStrict preserves packaging evidence-quality semantics: explicit source
+// failures, no invented utilization across resets, and availability labels.
+func (c *CPUCollector) collectStrict(ctx context.Context) ([]telemetry.Sample, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	read := c.readFile
+	stat, err := read("/proc/stat")
+	if err != nil {
+		return nil, errors.New("CPU_STAT_READ_FAILED")
+	}
+	total, idle, count, err := parseCPUStat(stat)
+	if err != nil {
+		return nil, err
+	}
+	load, err := read("/proc/loadavg")
+	if err != nil {
+		return nil, errors.New("CPU_LOAD_READ_FAILED")
+	}
+	loads, err := parseNonnegativeFloats(load, 3)
+	if err != nil {
+		return nil, errors.New("CPU_LOAD_PARSE_FAILED")
+	}
+	uptime, err := read("/proc/uptime")
+	if err != nil {
+		return nil, errors.New("CPU_UPTIME_READ_FAILED")
+	}
+	up, err := parseNonnegativeFloats(uptime, 1)
+	if err != nil {
+		return nil, errors.New("CPU_UPTIME_PARSE_FAILED")
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	c.mu.Lock()
+	prevTotal, prevIdle := c.prevTotal, c.prevIdle
+	c.prevTotal, c.prevIdle = total, idle
+	c.mu.Unlock()
+	samples := []telemetry.Sample{
+		{MetricKey: "system.cpu.count", Value: float64(count), Unit: "count"},
+		{MetricKey: "system.load.1m", Value: loads[0], Unit: "load"},
+		{MetricKey: "system.load.5m", Value: loads[1], Unit: "load"},
+		{MetricKey: "system.load.15m", Value: loads[2], Unit: "load"},
+		{MetricKey: "system.uptime", Value: up[0], Unit: "s"},
+	}
+	// A reset (including Linux iowait regression) is missing interval evidence,
+	// not 100% utilization. Rebase once; the next monotonic interval can recover.
+	available, reason := 0.0, "warmup"
+	if prevTotal != 0 {
+		reason = "counter_reset"
+		if total >= prevTotal && idle >= prevIdle {
+			dt, di := total-prevTotal, idle-prevIdle
+			reason = "no_interval"
+			if dt > 0 && di <= dt {
+				available, reason = 1, "available"
+				samples = append(samples, telemetry.Sample{MetricKey: "system.cpu.utilization", Value: 100 * (1 - float64(di)/float64(dt)), Unit: "%"})
+			} else if di > dt {
+				reason = "counter_reset"
+			}
+		}
+	}
+	samples = append(samples, telemetry.Sample{MetricKey: "system.cpu.utilization.available", Value: available, Unit: "bool", Labels: map[string]string{"reason": reason}})
+	return samples, nil
+}
+
+func readCPUFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	data, err := io.ReadAll(io.LimitReader(f, procReadLimit+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > procReadLimit {
+		return nil, errors.New("CPU_SOURCE_LIMIT")
+	}
+	return data, nil
+}
+
+func parseNonnegativeFloats(data []byte, n int) ([]float64, error) {
+	fields := strings.Fields(string(data))
+	if len(fields) < n {
+		return nil, errors.New("missing fields")
+	}
+	out := make([]float64, n)
+	for i := range out {
+		v, err := strconv.ParseFloat(fields[i], 64)
+		if err != nil || math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return nil, errors.New("invalid value")
+		}
+		out[i] = v
+	}
+	return out, nil
+}
+
+func parseCPUStat(data []byte) (total, idle uint64, count int, err error) {
+	bad := errors.New("CPU_STAT_PARSE_FAILED")
+	found := false
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 0 {
+			continue
+		}
+		if f[0] == "cpu" {
+			if found || len(f) < 5 {
+				return 0, 0, 0, bad
+			}
+			found = true
+			// guest and guest_nice are already included in user/nice.
+			for i := 1; i < len(f) && i <= 8; i++ {
+				v, e := strconv.ParseUint(f[i], 10, 64)
+				if e != nil || v > ^uint64(0)-total {
+					return 0, 0, 0, bad
+				}
+				total += v
+				if i == 4 || i == 5 {
+					idle += v
+				}
+			}
+		} else if strings.HasPrefix(f[0], "cpu") {
+			if id, e := strconv.ParseUint(strings.TrimPrefix(f[0], "cpu"), 10, 32); e == nil && id < 1<<20 {
+				count++
+			}
+		}
+	}
+	if !found || total == 0 || count == 0 {
+		return 0, 0, 0, bad
+	}
+	return total, idle, count, nil
 }
 
 // -----------------------------------------------------------------------------
@@ -239,16 +448,18 @@ func (c *MemoryCollector) Collect(ctx context.Context) ([]telemetry.Sample, erro
 }
 
 type meminfoValues struct {
-	totalKB  uint64
-	availKB  uint64
-	swapTot  uint64
-	swapFree uint64
+	totalKB   uint64
+	availKB   uint64
+	swapTot   uint64
+	swapFree  uint64
+	swapValid bool
 }
 
 func parseMeminfo(r io.Reader) (meminfoValues, error) {
 	scanner := bufio.NewScanner(r)
 	var totalKB, availKB, freeKB, buffersKB, cachedKB, swapTot, swapFree uint64
 	var hasAvail bool
+	seen := make(map[string]bool, 8)
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -257,15 +468,23 @@ func parseMeminfo(r io.Reader) (meminfoValues, error) {
 			continue
 		}
 		key := strings.TrimSpace(parts[0])
-		valFields := strings.Fields(parts[1])
-		if len(valFields) == 0 {
+		switch key {
+		case "MemTotal", "MemAvailable", "MemFree", "Buffers", "Cached", "SwapTotal", "SwapFree":
+		default:
 			continue
+		}
+		if seen[key] {
+			return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: duplicate field")
+		}
+		valFields := strings.Fields(parts[1])
+		if len(valFields) != 2 || valFields[1] != "kB" {
+			return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: missing field or unit")
 		}
 		val, err := strconv.ParseUint(valFields[0], 10, 64)
 		if err != nil {
-			continue
+			return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: invalid field")
 		}
-
+		seen[key] = true
 		switch key {
 		case "MemTotal":
 			totalKB = val
@@ -285,25 +504,32 @@ func parseMeminfo(r io.Reader) (meminfoValues, error) {
 		}
 	}
 
+	if scanner.Err() != nil {
+		return meminfoValues{}, errors.New("MEMINFO_READ_FAILED: incomplete source")
+	}
 	if totalKB == 0 {
 		return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: MemTotal was 0 or unreadable")
 	}
 
 	if !hasAvail {
+		if !seen["MemFree"] || !seen["Buffers"] || !seen["Cached"] {
+			return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: availability missing")
+		}
+		if buffersKB > ^uint64(0)-freeKB || cachedKB > ^uint64(0)-freeKB-buffersKB {
+			return meminfoValues{}, errors.New("MEMINFO_OVERFLOW: fallback availability")
+		}
 		availKB = freeKB + buffersKB + cachedKB
 	}
-	if availKB > totalKB {
-		availKB = totalKB
-	}
-	if swapFree > swapTot {
-		swapFree = swapTot
+	if availKB > totalKB || (seen["SwapTotal"] && seen["SwapFree"] && swapFree > swapTot) {
+		return meminfoValues{}, errors.New("MEMINFO_PARSE_FAILED: inconsistent capacity")
 	}
 
 	return meminfoValues{
-		totalKB:  totalKB,
-		availKB:  availKB,
-		swapTot:  swapTot,
-		swapFree: swapFree,
+		totalKB:   totalKB,
+		availKB:   availKB,
+		swapTot:   swapTot,
+		swapFree:  swapFree,
+		swapValid: seen["SwapTotal"] && seen["SwapFree"],
 	}, nil
 }
 
@@ -336,7 +562,7 @@ func meminfoSamples(info meminfoValues) ([]telemetry.Sample, error) {
 	swapTotal, okTot := kbToBytes(info.swapTot)
 	swapAvail, okAvail := kbToBytes(info.swapFree)
 	swapUsed, okUsed := kbToBytes(info.swapTot - info.swapFree)
-	if okTot && okAvail && okUsed {
+	if info.swapValid && okTot && okAvail && okUsed {
 		swapUtil := 0.0
 		if swapTotal > 0 {
 			swapUtil = (swapUsed / swapTotal) * 100.0
@@ -348,6 +574,11 @@ func meminfoSamples(info meminfoValues) ([]telemetry.Sample, error) {
 			telemetry.Sample{MetricKey: "system.memory.swap.utilization", Value: swapUtil, Unit: "%"},
 		)
 	}
+	available := 0.0
+	if info.swapValid && okTot && okAvail && okUsed {
+		available = 1
+	}
+	samples = append(samples, telemetry.Sample{MetricKey: "system.memory.swap.available_evidence", Value: available, Unit: "bool"})
 	return samples, nil
 }
 
@@ -412,14 +643,21 @@ func vmstatMetric(key string) (metric string, unit string, ok bool) {
 // -----------------------------------------------------------------------------
 
 type FilesystemCollector struct {
-	maxMounts int
+	maxMounts  int
+	mu         sync.Mutex
+	inflight   map[string]bool
+	statfs     func(string, *syscall.Statfs_t) error
+	openMounts func() (io.ReadCloser, error)
 }
 
 func NewFilesystemCollector(maxMounts int) *FilesystemCollector {
 	if maxMounts <= 0 {
 		maxMounts = 32
 	}
-	return &FilesystemCollector{maxMounts: maxMounts}
+	if maxMounts > 256 {
+		maxMounts = 256
+	}
+	return &FilesystemCollector{maxMounts: maxMounts, inflight: make(map[string]bool)}
 }
 
 func (c *FilesystemCollector) Name() string { return "filesystem" }
@@ -444,7 +682,9 @@ var ignoredFSTypes = map[string]bool{
 	"rpc_pipefs":  true,
 	"binfmt_misc": true,
 	"nsfs":        true,
-	"squashfs":    true,
+	"nfs":         true, "nfs4": true, "cifs": true, "smb3": true, "9p": true, "ceph": true, "afs": true,
+	"fuse.sshfs": true, "fuse.glusterfs": true,
+	"squashfs": true,
 }
 
 func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, error) {
@@ -454,7 +694,11 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 	default:
 	}
 
-	mountsFile, err := os.Open("/proc/mounts")
+	openMounts := c.openMounts
+	if openMounts == nil {
+		openMounts = func() (io.ReadCloser, error) { return os.Open("/proc/mounts") }
+	}
+	mountsFile, err := openMounts()
 	if err != nil {
 		return nil, fmt.Errorf("MOUNTS_READ_FAILED: %w", err)
 	}
@@ -485,24 +729,24 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 		mountPoint := unescapeMountField(fields[1])
 		fsType := unescapeMountField(fields[2])
 
-		if ignoredFSTypes[fsType] || seenMounts[mountPoint] {
+		if ignoredFSTypes[fsType] || strings.HasPrefix(fsType, "fuse.") || fsType == "fuse" || seenMounts[mountPoint] {
 			continue
 		}
 		if len(mountPoint) > 128 || len(fsType) > 64 {
 			continue
 		}
 		seenMounts[mountPoint] = true
-
-		var stat syscall.Statfs_t
-		if err := syscall.Statfs(mountPoint, &stat); err != nil {
+		mountCount++ // Failed and blocked mounts consume the same cardinality budget.
+		stat, reason := c.statMount(ctx, mountPoint)
+		labels := map[string]string{"mount": mountPoint, "fstype": fsType}
+		if reason != "available" {
+			samples = append(samples, filesystemAvailability(labels, reason))
 			continue
 		}
 
 		blockSize := uint64(stat.Bsize)
-		if blockSize == 0 || stat.Blocks == 0 {
-			continue
-		}
-		if stat.Blocks > ^uint64(0)/blockSize {
+		if stat.Bsize <= 0 || stat.Blocks == 0 || stat.Blocks > ^uint64(0)/blockSize || stat.Bfree > stat.Blocks || stat.Bavail > stat.Blocks {
+			samples = append(samples, filesystemAvailability(labels, "invalid_stats"))
 			continue
 		}
 
@@ -520,11 +764,7 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 		}
 		util := (usedBytes / totalBytes) * 100.0
 
-		labels := map[string]string{
-			"mount":  mountPoint,
-			"fstype": fsType,
-		}
-
+		samples = append(samples, filesystemAvailability(labels, "available"))
 		samples = append(samples,
 			telemetry.Sample{MetricKey: "system.filesystem.total", Value: totalBytes, Unit: "bytes", Labels: labels},
 			telemetry.Sample{MetricKey: "system.filesystem.available", Value: availBytes, Unit: "bytes", Labels: labels},
@@ -532,10 +772,72 @@ func (c *FilesystemCollector) Collect(ctx context.Context) ([]telemetry.Sample, 
 			telemetry.Sample{MetricKey: "system.filesystem.utilization", Value: util, Unit: "%", Labels: labels},
 		)
 		samples = append(samples, inodeSamples(stat.Files, stat.Ffree, labels)...)
-		mountCount++
 	}
 
 	return samples, nil
+}
+
+// statfs is not cancellable in the kernel. Keep ownership until it really returns:
+// never spawn replacements for a stuck mount, and cap stuck workers process-wide.
+var filesystemWorkers = make(chan struct{}, 2)
+
+func (c *FilesystemCollector) statMount(ctx context.Context, mount string) (syscall.Statfs_t, string) {
+	if ctx.Err() != nil {
+		return syscall.Statfs_t{}, "cancelled"
+	}
+	c.mu.Lock()
+	if c.inflight[mount] {
+		c.mu.Unlock()
+		return syscall.Statfs_t{}, "outstanding"
+	}
+	select {
+	case filesystemWorkers <- struct{}{}:
+	default:
+		c.mu.Unlock()
+		return syscall.Statfs_t{}, "resource_guarded"
+	}
+	if c.inflight == nil {
+		c.inflight = make(map[string]bool)
+	}
+	c.inflight[mount] = true
+	c.mu.Unlock()
+	type result struct {
+		stat syscall.Statfs_t
+		err  error
+	}
+	ch := make(chan result, 1)
+	statfs := c.statfs
+	if statfs == nil {
+		statfs = syscall.Statfs
+	}
+	go func() {
+		defer func() { c.mu.Lock(); delete(c.inflight, mount); c.mu.Unlock(); <-filesystemWorkers }()
+		var stat syscall.Statfs_t
+		err := statfs(mount, &stat)
+		ch <- result{stat, err}
+	}()
+	timer := time.NewTimer(100 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case r := <-ch:
+		if r.err != nil {
+			return syscall.Statfs_t{}, "read_failed"
+		}
+		return r.stat, "available"
+	case <-ctx.Done():
+		return syscall.Statfs_t{}, "cancelled"
+	case <-timer.C:
+		return syscall.Statfs_t{}, "timeout"
+	}
+}
+
+func filesystemAvailability(labels map[string]string, reason string) telemetry.Sample {
+	quality := map[string]string{"mount": labels["mount"], "fstype": labels["fstype"], "reason": reason}
+	value := 0.0
+	if reason == "available" {
+		value = 1
+	}
+	return telemetry.Sample{MetricKey: "system.filesystem.available_evidence", Value: value, Unit: "bool", Labels: quality}
 }
 
 func inodeSamples(files, ffree uint64, labels map[string]string) []telemetry.Sample {

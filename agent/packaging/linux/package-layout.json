@@ -1,0 +1,72 @@
+{
+  "schema": "PLATFORM_AGENT_NATIVE_LAYOUT_V1",
+  "component": "agent",
+  "package": "platform-agent",
+  "signing": "UNSIGNED_INTERNAL_ONLY",
+  "first_validation_profile": {
+    "os": "Ubuntu",
+    "os_version": "24.x",
+    "architecture": "amd64",
+    "format": "deb",
+    "rhel_rpm": "FOLLOW_ON_NOT_CLAIMED_BY_THIS_SLICE"
+  },
+  "paths": {
+    "binary": "/opt/platform/agent/platform-agent-linux",
+    "payload_prefix": "/opt/platform/agent",
+    "unit": "/usr/lib/systemd/system/platform-agent.service",
+    "unit_source": "agent/linux/systemd/platform-agent.service",
+    "unit_mirror_source": "deploy/systemd/platform-agent.service",
+    "env_example_source": "agent/linux/systemd/platform-agent.env.example",
+    "operational_env": "/etc/platform/agent.env",
+    "credential_dir": "/etc/platform/agent",
+    "state_dir": "/var/lib/platform/agent",
+    "doc_prefix": "/usr/share/doc/platform-agent",
+    "helpers_prefix": "/usr/lib/platform/agent/packaging"
+  },
+  "service_identity": {
+    "user": "platform-agent",
+    "group": "platform-agent",
+    "shell": "/usr/sbin/nologin",
+    "home": "/var/lib/platform/agent"
+  },
+  "forbidden_payload_prefixes": [
+    "/usr/local",
+    "/usr/local/bin"
+  ],
+  "preserve_on_remove": [
+    "/etc/platform/agent.env",
+    "/etc/platform/agent",
+    "/var/lib/platform/agent"
+  ],
+  "purge_customer_state": "UNSUPPORTED_REFUSE",
+  "staged_unconfigured_install": "PERMITTED_REQUIRED_FRESH_AND_DISABLED",
+  "activation": "explicit_systemd_enable_only_env_never_authority",
+  "activation_authority": "systemctl_is_enabled",
+  "is_enabled_contract": {
+    "enabled": {"exit": 0, "package_state": "ENABLED_PRESERVED"},
+    "disabled": {"exit": "non_zero", "package_state_when_inactive": "STAGED_INACTIVE", "package_state_otherwise": "DISABLED_PRESERVED"},
+    "masked": {"exit": "non_zero", "package_state": "MASKED_PRESERVED"},
+    "masked-runtime": {"exit": "non_zero", "package_state": "MASKED_PRESERVED"},
+    "enabled-runtime": {"exit": 0, "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "linked": {"exit": "non_zero", "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "linked-runtime": {"exit": "non_zero", "package_state": "RUNTIME_ONLY_PRESERVED"},
+    "inconsistent_status_exit": "SERVICE_STATE_QUERY_FAILED"
+  },
+  "configure_must_not": [
+    "enable",
+    "start",
+    "unmask",
+    "disable",
+    "re-enable"
+  ],
+  "try_restart_requires": [
+    "boot_enabled",
+    "active",
+    "mode_safe_operational_env"
+  ],
+  "ebpf_default": "disabled_never_enabled_by_package",
+  "limits": {
+    "max_binary_bytes": 268435456,
+    "version_pattern": "^[0-9][A-Za-z0-9.+~-]{0,63}$"
+  }
+}

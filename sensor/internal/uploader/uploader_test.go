@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -333,5 +334,604 @@ func TestUploaderAckStatusExactAccepted(t *testing.T) {
 	_, err := u.RunOnce(context.Background())
 	if !isCode(err, CodeAckInvalid) || len(sp.acks) != 0 {
 		t.Fatalf("Equal-fold ACCEPTED must be rejected: err=%v acks=%v", err, sp.acks)
+	}
+}
+
+func TestOuterLoopPermanentFailurePacedAtMaxBackoff(t *testing.T) {
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	var seen []coreclient.Batch
+	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
+		seen = append(seen, b)
+		return coreclient.UploadAck{}, &coreclient.Error{Code: coreclient.CodeAuthentication}
+	}}
+	c := cfg()
+	c.IdleInterval = time.Second
+	c.MaxBackoff = 5 * time.Second
+	c.MaxAttempts = 3
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var waits []time.Duration
+	var nextAttempts []time.Time
+	finished := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		snap, snapErr := u.Snapshot()
+		if snapErr != nil {
+			t.Fatalf("snapshot: %v", snapErr)
+		}
+		nextAttempts = append(nextAttempts, snap.NextAttempt)
+		if len(waits) >= 3 {
+			cancel()
+			select {
+			case <-finished:
+			default:
+				close(finished)
+			}
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for 3 permanent failure outer cycles")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 3 {
+		t.Fatalf("want 3 outer waits, got %d (%v)", len(waits), waits)
+	}
+	for i, d := range waits {
+		if d != c.MaxBackoff {
+			t.Fatalf("wait[%d]=%s want MaxBackoff %s (not IdleInterval %s)", i, d, c.MaxBackoff, c.IdleInterval)
+		}
+		if nextAttempts[i].IsZero() {
+			t.Fatalf("NextAttempt[%d] must be set for truthful failure pacing", i)
+		}
+	}
+	if tr.calls != 3 {
+		t.Fatalf("want 3 outer transport calls (no inner permanent retry), got %d", tr.calls)
+	}
+	if len(sp.acks) != 0 {
+		t.Fatalf("permanent rejection must not ACK/delete: %v", sp.acks)
+	}
+	snap, err := u.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.LastSuccessfulUpload.IsZero() {
+		t.Fatalf("last-success must not promote on permanent failure: %v", snap.LastSuccessfulUpload)
+	}
+	if snap.Uploads != 3 || snap.Retries != 0 {
+		t.Fatalf("Uploads/Retries semantics: uploads=%d retries=%d want 3/0", snap.Uploads, snap.Retries)
+	}
+	if snap.State != StateStopped && snap.State != StateDegraded {
+		t.Fatalf("state=%s", snap.State)
+	}
+	if len(seen) != 3 {
+		t.Fatalf("seen batches=%d", len(seen))
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i].BatchID != seen[0].BatchID || seen[i].Checksum != seen[0].Checksum ||
+			seen[i].FirstSequence != seen[0].FirstSequence || seen[i].LastSequence != seen[0].LastSequence ||
+			seen[i].CorrelationID != seen[0].CorrelationID {
+			t.Fatalf("frozen replay diverged\n first=%+v\n later=%+v", seen[0], seen[i])
+		}
+	}
+}
+
+func TestOuterLoopIdleIntervalGreaterThanMaxBackoffPolicy(t *testing.T) {
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{}, &coreclient.Error{Code: coreclient.CodeAuthentication}
+	}}
+	c := cfg()
+	c.IdleInterval = 10 * time.Second
+	c.MaxBackoff = 2 * time.Second
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := u.outerCycleDelay(errors.New("fail")); got != c.MaxBackoff {
+		t.Fatalf("IdleInterval>MaxBackoff policy: failure delay=%s want MaxBackoff %s", got, c.MaxBackoff)
+	}
+	if got := u.outerCycleDelay(nil); got != c.IdleInterval {
+		t.Fatalf("success/empty delay=%s want IdleInterval %s", got, c.IdleInterval)
+	}
+}
+
+func TestOuterLoopSuccessThenIdleThenPermanentFailurePacing(t *testing.T) {
+	v := uint64(1)
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	phase := 0
+	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
+		phase++
+		if phase == 1 {
+			return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+		}
+		return coreclient.UploadAck{}, &coreclient.Error{Code: coreclient.CodeAuthentication}
+	}}
+	c := cfg()
+	c.IdleInterval = 100 * time.Millisecond
+	c.MaxBackoff = 500 * time.Millisecond
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var waits []time.Duration
+	finished := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		if len(waits) == 1 {
+			sp.acks = nil
+		}
+		if len(waits) >= 3 {
+			cancel()
+			select {
+			case <-finished:
+			default:
+				close(finished)
+			}
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for success+failure pacing cycles")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) < 3 {
+		t.Fatalf("waits=%v", waits)
+	}
+	if waits[0] != c.IdleInterval {
+		t.Fatalf("after success want IdleInterval %s, got %s", c.IdleInterval, waits[0])
+	}
+	if waits[1] != c.MaxBackoff || waits[2] != c.MaxBackoff {
+		t.Fatalf("after permanent failure want MaxBackoff pacing, got %v", waits)
+	}
+	snap, err := u.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.LastSuccessfulUpload.IsZero() {
+		t.Fatal("successful ACK must record last-success before later permanent failures")
+	}
+	if snap.AcknowledgedThrough != 1 {
+		t.Fatalf("acked=%d", snap.AcknowledgedThrough)
+	}
+}
+
+func TestOuterLoopEmptyIdleCadence(t *testing.T) {
+	sp := &fakeSpool{}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		t.Fatal("empty spool must not call transport")
+		return coreclient.UploadAck{}, nil
+	}}
+	c := cfg()
+	c.IdleInterval = 250 * time.Millisecond
+	c.MaxBackoff = time.Second
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var waits []time.Duration
+	finished := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		if len(waits) >= 2 {
+			cancel()
+			select {
+			case <-finished:
+			default:
+				close(finished)
+			}
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for empty idle cycles")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	for i, d := range waits {
+		if d != c.IdleInterval {
+			t.Fatalf("empty idle wait[%d]=%s want %s", i, d, c.IdleInterval)
+		}
+	}
+	if tr.calls != 0 {
+		t.Fatalf("transport calls=%d", tr.calls)
+	}
+}
+
+func TestOuterLoopTransientExhaustionThenSuccessResumesIdle(t *testing.T) {
+	v := uint64(1)
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	c := cfg()
+	c.MaxAttempts = 2
+	c.InitialBackoff = time.Millisecond
+	c.MaxBackoff = 40 * time.Millisecond
+	c.IdleInterval = 15 * time.Millisecond
+	c.JitterFraction = 0
+	phase := 0
+	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
+		phase++
+		if phase <= c.MaxAttempts {
+			return coreclient.UploadAck{}, transientErr{}
+		}
+		return coreclient.UploadAck{Status: "ACCEPTED", SensorIdentity: "s1", AcceptedThroughSequence: &v}, nil
+	}}
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	var outerWaits []time.Duration
+	var innerWaits []time.Duration
+	finished := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		if d == c.InitialBackoff {
+			innerWaits = append(innerWaits, d)
+			return nil
+		}
+		outerWaits = append(outerWaits, d)
+		if len(outerWaits) >= 2 {
+			cancel()
+			select {
+			case <-finished:
+			default:
+				close(finished)
+			}
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for transient exhaustion then success")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	if len(innerWaits) != 1 || innerWaits[0] != c.InitialBackoff {
+		t.Fatalf("inner backoff waits=%v", innerWaits)
+	}
+	if len(outerWaits) < 2 {
+		t.Fatalf("outer waits=%v", outerWaits)
+	}
+	if outerWaits[0] != c.MaxBackoff {
+		t.Fatalf("after transient exhaustion want MaxBackoff %s, got %s", c.MaxBackoff, outerWaits[0])
+	}
+	if outerWaits[1] != c.IdleInterval {
+		t.Fatalf("after success want IdleInterval %s, got %s", c.IdleInterval, outerWaits[1])
+	}
+	snap, err := u.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snap.LastSuccessfulUpload.IsZero() || snap.AcknowledgedThrough != 1 {
+		t.Fatalf("success recovery snapshot=%+v", snap)
+	}
+	if snap.Retries != 1 {
+		t.Fatalf("Retries must count inner transient retries only, got %d", snap.Retries)
+	}
+	if len(sp.acks) != 1 || sp.acks[0] != 1 {
+		t.Fatalf("acks=%v", sp.acks)
+	}
+}
+
+func TestOuterLoopCancelDuringFailureWaitStopsWithoutNextUpload(t *testing.T) {
+	sp := &fakeSpool{batch: spool.Batch{FirstSequence: 1, LastSequence: 1, Records: []spool.Record{rec(1)}, PayloadBytes: 1}}
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{}, &coreclient.Error{Code: coreclient.CodeAuthentication}
+	}}
+	c := cfg()
+	c.MaxBackoff = 5 * time.Second
+	c.IdleInterval = time.Second
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	sawWait := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		if d != c.MaxBackoff {
+			t.Fatalf("cancel-during-failure wait=%s want MaxBackoff %s", d, c.MaxBackoff)
+		}
+		cancel()
+		select {
+		case <-sawWait:
+		default:
+			close(sawWait)
+		}
+		return context.Canceled
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-sawWait:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for outer failure wait")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	if tr.calls != 1 {
+		t.Fatalf("cancel during outer wait must not start next upload, calls=%d", tr.calls)
+	}
+	if len(sp.acks) != 0 {
+		t.Fatalf("acks=%v", sp.acks)
+	}
+}
+
+func TestOuterLoopPermanentFailureReplaysFrozenBatchWhileBacklogGrows(t *testing.T) {
+	dir := t.TempDir()
+	sp, err := spool.Open(spool.Config{Dir: dir, MaxRecordBytes: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = sp.Close() })
+	for i := 1; i <= 3; i++ {
+		payload := []byte(fmt.Sprintf(`{"n":%d}`, i))
+		if _, err := sp.Append(spool.AppendRequest{Class: spool.ClassMetric, Type: "m", Payload: payload, CreatedAt: time.Now()}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var seen []coreclient.Batch
+	tr := &fakeTransport{fn: func(_ int, b coreclient.Batch) (coreclient.UploadAck, error) {
+		seen = append(seen, b)
+		return coreclient.UploadAck{}, &coreclient.Error{Code: coreclient.CodeAuthentication}
+	}}
+	c := cfg()
+	c.StreamID = sp.StreamID()
+	c.MaxAttempts = 1
+	c.IdleInterval = time.Second
+	c.MaxBackoff = 5 * time.Second
+	u, err := New(c, sp, tr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	growSeq := 4
+	var waits []time.Duration
+	finished := make(chan struct{})
+	u.wait = func(_ context.Context, d time.Duration) error {
+		waits = append(waits, d)
+		payload := []byte(fmt.Sprintf(`{"n":%d}`, growSeq))
+		growSeq++
+		if _, err := sp.Append(spool.AppendRequest{Class: spool.ClassMetric, Type: "m", Payload: payload, CreatedAt: time.Now()}); err != nil {
+			t.Fatalf("append during failure pacing: %v", err)
+		}
+		if len(waits) >= 3 {
+			cancel()
+			select {
+			case <-finished:
+			default:
+				close(finished)
+			}
+			return context.Canceled
+		}
+		return nil
+	}
+	if err := u.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-finished:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for frozen replay cycles with growth")
+	}
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), time.Second)
+	defer shutCancel()
+	if err := u.Shutdown(shutCtx); err != nil {
+		t.Fatal(err)
+	}
+	if len(waits) != 3 {
+		t.Fatalf("waits=%v", waits)
+	}
+	for i, d := range waits {
+		if d != c.MaxBackoff {
+			t.Fatalf("wait[%d]=%s want MaxBackoff", i, d)
+		}
+	}
+	if len(seen) != 3 {
+		t.Fatalf("uploads=%d", len(seen))
+	}
+	for i := 1; i < len(seen); i++ {
+		if seen[i].BatchID != seen[0].BatchID || seen[i].Checksum != seen[0].Checksum ||
+			seen[i].FirstSequence != seen[0].FirstSequence || seen[i].LastSequence != seen[0].LastSequence {
+			t.Fatalf("frozen window expanded under growth\n first=%+v\n later=%+v", seen[0], seen[i])
+		}
+	}
+	if seen[0].FirstSequence != 1 || seen[0].LastSequence != 3 {
+		t.Fatalf("frozen range=%d..%d", seen[0].FirstSequence, seen[0].LastSequence)
+	}
+	st, err := sp.Stats()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.RecordCount < 6 {
+		t.Fatalf("backlog must grow while frozen window retained, records=%d", st.RecordCount)
+	}
+	snap, err := u.Snapshot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !snap.LastSuccessfulUpload.IsZero() {
+		t.Fatal("no last-success on permanent reject path")
+	}
+	pending, err := sp.ReadOrReserveOutboundBatch(10, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.FirstSequence != 1 || pending.LastSequence != 3 {
+		t.Fatalf("durable custody must retain frozen 1..3, got %#v", pending)
+	}
+}
+
+func TestBackoffClampsJitterAboveMaxAndNonPositive(t *testing.T) {
+	max := 5 * time.Second
+	initial := 500 * time.Millisecond
+	over := backoff(initial, max, 5, func(time.Duration, float64) time.Duration {
+		return max + time.Second
+	}, 1)
+	if over != max {
+		t.Fatalf("jitter above max: got %s want %s", over, max)
+	}
+	zero := backoff(initial, max, 1, func(time.Duration, float64) time.Duration {
+		return 0
+	}, 1)
+	if zero <= 0 {
+		t.Fatalf("jitter zero must become positive, got %s", zero)
+	}
+	if zero > max {
+		t.Fatalf("positive clamp escaped max: %s", zero)
+	}
+	neg := backoff(initial, max, 1, func(time.Duration, float64) time.Duration {
+		return -time.Second
+	}, 1)
+	if neg <= 0 || neg > max {
+		t.Fatalf("jitter negative clamp out of bounds: %s", neg)
+	}
+	atCap := backoff(initial, max, 5, func(d time.Duration, _ float64) time.Duration {
+		if d != max {
+			t.Fatalf("pre-jitter base at attempt 5 want max %s got %s", max, d)
+		}
+		return d
+	}, 0)
+	if atCap != max {
+		t.Fatalf("cap reached got %s", atCap)
+	}
+}
+
+func TestClampBackoffDelayEdgeArithmetic(t *testing.T) {
+	if got := clampBackoffDelay(0, time.Second); got <= 0 || got > time.Second {
+		t.Fatalf("zero input: %s", got)
+	}
+	if got := clampBackoffDelay(-5, time.Second); got <= 0 || got > time.Second {
+		t.Fatalf("negative input: %s", got)
+	}
+	if got := clampBackoffDelay(2*time.Second, time.Second); got != time.Second {
+		t.Fatalf("above max: %s", got)
+	}
+	if got := clampBackoffDelay(time.Millisecond, 0); got <= 0 {
+		t.Fatalf("non-positive max floor: %s", got)
+	}
+	if got := clampBackoffDelay(time.Second, time.Second); got != time.Second {
+		t.Fatalf("exact max: %s", got)
+	}
+}
+
+func TestJitterFractionNaNAndInfRejected(t *testing.T) {
+	tr := &fakeTransport{fn: func(int, coreclient.Batch) (coreclient.UploadAck, error) {
+		return coreclient.UploadAck{}, nil
+	}}
+	sp := &fakeSpool{}
+	for _, f := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		c := cfg()
+		c.JitterFraction = f
+		u, err := New(c, sp, tr)
+		if err == nil || u != nil {
+			t.Fatalf("JitterFraction=%v must be rejected by New (got u=%v err=%v); NaN must not pass range predicate", f, u, err)
+		}
+		if !isCode(err, CodeInvalidConfig) {
+			t.Fatalf("JitterFraction=%v want CodeInvalidConfig, got %v", f, err)
+		}
+	}
+	c := cfg()
+	c.JitterFraction = 0.5
+	if _, err := New(c, sp, tr); err != nil {
+		t.Fatalf("finite in-range JitterFraction must remain accepted: %v", err)
+	}
+}
+
+func TestJitterDurationSaturatesMaxInt64TinyFraction(t *testing.T) {
+	// float64(MaxInt64) rounds to 2^63. With math.SmallestNonzeroFloat64 the
+	// jitter band cannot move v off that boundary for any rand draw, so the
+	// cast must saturate to MaxInt64 — never overflow into a 1ns tight retry.
+	d := time.Duration(math.MaxInt64)
+	f := math.SmallestNonzeroFloat64
+	bound := float64(math.MaxInt64)
+	if bound != math.Ldexp(1, 63) {
+		t.Fatalf("diagnostic: float64(MaxInt64)=%v want 2^63=%v (rounded boundary)", bound, math.Ldexp(1, 63))
+	}
+	for i := 0; i < 64; i++ {
+		delta := float64(d) * f
+		// Pre-image of the conversion: independent of the consumed rand draw,
+		// v remains at the 2^63 boundary for this (d,f) pair.
+		vProbe := float64(d) - delta + 0*2*delta
+		if !(vProbe >= bound) {
+			t.Fatalf("draw-prep %d: expected v>=float64(MaxInt64) independent of rand; v=%v delta=%v", i, vProbe, delta)
+		}
+		got := jitterDuration(d, f)
+		if got == time.Nanosecond || got <= 0 {
+			t.Fatalf("draw %d: saturated jitter must not collapse to tight retry; got %d (%s)", i, got, got)
+		}
+		if got != time.Duration(math.MaxInt64) {
+			t.Fatalf("draw %d: jitter=%d (%s) want MaxInt64 saturate %d", i, got, got, int64(math.MaxInt64))
+		}
+		clamped := clampBackoffDelay(got, d)
+		if clamped != d {
+			t.Fatalf("draw %d: positive max clamp must preserve MaxInt64, got %d", i, clamped)
+		}
+	}
+}
+
+func TestJitterDurationOrdinaryPositive(t *testing.T) {
+	d := time.Second
+	f := 0.5
+	lo := time.Duration(float64(d) * (1 - f))
+	hi := time.Duration(float64(d) * (1 + f))
+	for i := 0; i < 64; i++ {
+		got := jitterDuration(d, f)
+		if got <= 0 {
+			t.Fatalf("ordinary jitter draw %d non-positive: %s", i, got)
+		}
+		if got < lo || got > hi {
+			t.Fatalf("ordinary jitter draw %d out of [%s,%s]: %s", i, lo, hi, got)
+		}
 	}
 }

@@ -1,0 +1,30 @@
+services:
+  rpm-tests:
+    image: ${RPM_TEST_IMAGE:?Supply an explicitly admitted immutable local image ID}
+    pull_policy: never
+    network_mode: none
+    read_only: true
+    user: "${RPM_TEST_UID:?Supply caller uid}:${RPM_TEST_GID:?Supply caller gid}"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    cpus: 1.0
+    mem_limit: 768m
+    pids_limit: 128
+    restart: "no"
+    working_dir: /source
+    environment:
+      HOME: /tmp
+      TMPDIR: /tmp
+      RPM_TEST_IMAGE: ${RPM_TEST_IMAGE:?Supply admitted image ID}
+      RPM_LANE_ADMISSION: ${RPM_LANE_ADMISSION:?Supply fresh shared-lane admission evidence reference}
+    volumes:
+      - type: bind
+        source: ../../..
+        target: /source
+        read_only: true
+        bind:
+          create_host_path: false
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=536870912,mode=1777
+    entrypoint: [/bin/bash, tests/agent-packaging/rpm/test-rpm.sh]
+    command: [--full]

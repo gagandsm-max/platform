@@ -27,7 +27,9 @@ func TestSystemdUnitMatchesLLDContract(t *testing.T) {
 	assertDirective(t, dirs, "User", "platform-agent")
 	assertDirective(t, dirs, "Group", "platform-agent")
 	assertDirective(t, dirs, "EnvironmentFile", "/etc/platform/agent.env")
-	assertDirective(t, dirs, "ExecStart", "/usr/local/bin/platform-agent-linux")
+	// Native package-layout.json publishes this binary under /opt. The
+	// container image's /usr/local path is not the installed systemd contract.
+	assertDirective(t, dirs, "ExecStart", "/opt/platform/agent/platform-agent-linux")
 	assertDirective(t, dirs, "WorkingDirectory", "/var/lib/platform/agent")
 	assertDirective(t, dirs, "StateDirectory", "platform/agent")
 	assertDirective(t, dirs, "Restart", "on-failure")

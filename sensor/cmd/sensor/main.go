@@ -13,13 +13,11 @@ import (
 
 	"platform/sensor/internal/agentdrain"
 	"platform/sensor/internal/agentreceiver"
-	"platform/sensor/internal/collector"
 	"platform/sensor/internal/config"
 	"platform/sensor/internal/control"
 	"platform/sensor/internal/coreclient"
 	"platform/sensor/internal/discovery"
 	"platform/sensor/internal/health"
-	"platform/sensor/internal/observation"
 	"platform/sensor/internal/packsync"
 	sensorruntime "platform/sensor/internal/runtime"
 	"platform/sensor/internal/scheduler"
@@ -139,14 +137,6 @@ func main() {
 
 	runtimeState := newRuntimeConfigState(rt, levelVar)
 
-	sink, err := observation.NewDiskSink(diskSpool, 1024*1024)
-	if err != nil {
-		logger.Error("Failed to initialize observation sink",
-			"error_code", "SENSOR_OBSERVATION_SINK_INIT_FAILED",
-			"safe_context", map[string]any{"reason_class": "initialization_failed"})
-		os.Exit(1)
-	}
-
 	client, err := coreclient.New(coreClientConfigFromRuntime(rt, logger))
 	if err != nil {
 		logger.Error("Failed to initialize Core client",
@@ -198,9 +188,6 @@ func main() {
 			"safe_context", map[string]any{"reason_class": "startup_failed"})
 		os.Exit(1)
 	}
-
-	engine := collector.NewCollectorEngine(rt.SensorID, string(rt.Role), sink, cfg.PollInterval, logger)
-	engine.Start(ctx)
 
 	discoveryExecutor := discovery.NewExecutor(rt.SensorID, discovery.DefaultMaxConcurrent, logger)
 	discoveryService := discovery.NewService(rt.SensorID, client, discoveryExecutor, cfg.PollInterval, logger)
@@ -333,7 +320,6 @@ func main() {
 		}
 	}
 	discoveryService.Stop()
-	engine.Stop()
 	if packSyncer != nil {
 		packCtx, packCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer packCancel()

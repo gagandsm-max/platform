@@ -1,0 +1,67 @@
+# Retained-payload adapter. No compiler, strip, debug split, compression or BRP rewrite.
+%global debug_package %{nil}
+%global __os_install_post %{nil}
+%global __spec_install_post %{nil}
+%global _build_id_links none
+%global _binary_payload w9.gzdio
+%global source_date_epoch_from_changelog 0
+%global use_source_date_epoch_as_buildtime 1
+%global clamp_mtime_to_source_date_epoch 1
+
+Name: platform-agent
+Epoch: 0
+Version: @VERSION@
+Release: @RELEASE@
+Summary: Platform (AmrudAi) Linux Agent - unsigned internal payload
+# Classification from Platform_07 section 1; does not grant redistribution rights.
+License: Proprietary
+URL: https://github.com/gagandsm-max/platform
+BuildArch: x86_64
+AutoReqProv: no
+Requires: bash, coreutils, glibc, shadow-utils, systemd
+Requires(pre): bash, coreutils
+Requires(post): bash, coreutils, glibc, shadow-utils, systemd
+Requires(preun): bash, systemd
+Requires(postun): bash, systemd
+
+%description
+UNSIGNED_INTERNAL_ONLY retained Linux Agent payload for RHEL 9.8 x86_64.
+No enrollment, credentials or runtime readiness are fabricated. Configuration,
+identity and spool remain outside removable payload ownership. eBPF is not
+enabled by this package. Native lifecycle certification is a separate gate.
+
+%prep
+# Sources were verified and staged by build-rpm.sh; no source downloads.
+
+%build
+# Retain the supplied executable byte-for-byte. Never rebuild here.
+
+%install
+mkdir -p "%{buildroot}"
+cp -a "%{_sourcedir}/payload/." "%{buildroot}/"
+
+%pre -p /bin/bash
+@PRE@
+%post -p /bin/bash
+@POST@
+%preun -p /bin/bash
+@PREUN@
+%postun -p /bin/bash
+@POSTUN@
+%files
+%defattr(-,root,root,-)
+%dir /opt/platform/agent
+%attr(0755,root,root) /opt/platform/agent/platform-agent-linux
+%attr(0644,root,root) /usr/lib/systemd/system/platform-agent.service
+%dir /usr/lib/platform/agent/packaging
+%attr(0755,root,root) /usr/lib/platform/agent/packaging/platform-agent-lifecycle.sh
+%attr(0644,root,root) /usr/lib/platform/agent/packaging/package-layout.json
+%attr(0644,root,root) /usr/lib/platform/agent/packaging/rpm-provenance.json
+%dir /usr/share/doc/platform-agent
+%attr(0644,root,root) /usr/share/doc/platform-agent/platform-agent.env.example
+%attr(0644,root,root) /usr/share/doc/platform-agent/README.packaging.md
+%attr(0644,root,root) /usr/share/doc/platform-agent/README.rpm.md
+
+%dir /usr/share/platform-agent
+%dir /usr/share/platform-agent/systemd
+%attr(0644,root,root) /usr/share/platform-agent/systemd/20-ebpf.conf
