@@ -30,7 +30,7 @@ Platform is a clean-room product independent of ThoughtData/Enterprise360 and Ne
 | Provisioning | USER-FIXED | UI-driven individual, CSV/XLSX bulk and network auto-discovery; actionable failure/remediation; optional name/description with auto-derived name when blank. |
 | Security protocols | USER-FIXED | Network provisioning exposes and supports configurable enterprise protocol/security options through Platform. |
 | Storage protection | USER-FIXED; Issue #292 safety clarification | Core and Sensors enforce the non-disableable 80% protection watermark. Protect primary monitoring/control and reclaim only eligible data under policy while capacity permits. If protected evidence/legal hold leaves no safe reclaim path, expose CRITICAL and governed admission/degradation/escalation; do not silently purge protected evidence or promise unlimited collection/zero loss (§29.3; Platform_05/11). |
-| Retention | USER-FIXED | Admin controls raw retention, DB retention, rollup interval/resolution and retention. |
+| Retention | USER-FIXED | Admin controls raw retention, DB retention, rollup interval/resolution and retention. Founder 2026-11-26: 90d raw metrics, 365d hourly rollups, 7d logs, 7d Flow; configurable; workload and protected-retention gates preserved. |
 | DR | USER-FIXED | DR architecture is mandatory in v1.0 and remains mandatory for the Phase 1 certification envelope (backup/restore plus site-loss recovery for the declared Phase-1 DR profile). HA is distinct from DR. Contractual/external RPO/RTO remain TBD; internal technical RPO/RTO targets are Master technical authority. |
 | AI | USER-FIXED | Gemini initially through AI Gateway; meaningful AI only; deterministic/causal RCA independent; local/private/offline later. |
 | Data stack | USER-FIXED | Kafka + ClickHouse + PostgreSQL + Valkey. |
@@ -104,12 +104,13 @@ The following must remain visibly unresolved until engineering evidence exists:
 - exact two-Core ClickHouse replication/promotion/fencing design;
 - exact PostgreSQL two-Core failover/fencing/rewind mechanics;
 - exact Core service fencing/VIP implementation and failure matrix;
-- final contractual DR RPO/RTO and data-loss objectives;
+- measured DR recovery/data-loss objectives and activation; F-004 customer-specific contractual values reserved and only after applicable certification;
 - final SNWP-2500-v1 metric/interface/event mix and certified performance results;
 - Streaming Sensor certified Flow records/sec and Syslog EPS;
 - exact GNN model architecture, training labels, inference latency, CPU/GPU footprint and production enablement threshold;
-- final compliance certification program/scope and achieved certifications;
-- exact product SKUs/licensing quantities beyond the agreed behavioral rules.
+- formal external compliance certification program/scope, schedule/funding and attained certifications; F-003 fixes readiness first, paid certification later;
+- exact product SKUs/licensing quantities, pricing, discounts, maintenance fees and contracts remain Founder-reserved; approved F-001–F-010/F-002A policy does not close technical counting/rounding/metering, migrations, transfer/offline security and certification;
+- actual retention footprint and protected-class/archival profiles for TBD-08 remain open.
 
 Any implementation document that fills one of these with a guessed value is non-conformant until the decision is formally approved and this register updated.
 
@@ -811,3 +812,23 @@ Starting candidate `09ede46dfca9353305c98f355b9ee393d6ac1edb` on base `92f0fb378
 | Implementation maturity honesty | ARCH-DELEGATED | `AUTHORITY_CHECKPOINT_RECOVERY = SPECIFIED / PENDING_IMPLEMENTATION / NOT_CERTIFIED` with subordinates `SENSOR_ACCEPTANCE_EVIDENCE_V1 = SPECIFIED / PENDING_IMPLEMENTATION` and `PENDING_CANONICAL_BINDING_V1 = SPECIFIED / PENDING_IMPLEMENTATION` until runtime candidate merges. Do not claim current `main` implements them. Acceptance matrix U1–U7 (U5A/U5B) + J7 + J8 + security/qualification negatives owned across BUILD-062/BUILD-127 (`Platform_17` §7.1.10–§7.1.15). |
 
 Owners: `Platform_17` (state machine/data/replay), `Platform_16` (upgrade/migration ops), `Platform_06` §119.21 (operational flow), `Platform_05` (LLD binding), Build Register BUILD-062/BUILD-127, `Platform_14` test obligations. Prior closures preserved: self-hosted runtime-lock REQUIRED/PENDING maturity; global cutover protocol; sFlow typed result; BUILD-042 PARTIAL; BUILD-051 NOT_IMPLEMENTED; policy contracts; phase architecture; CC-CURSOR; CC-ASYNC; No Data != Device Down.
+
+## 30. Founder-approved commercial policy and retention defaults — 2026-11-26
+
+**Source:** explicit Founder approvals of F-001–F-010, F-002A and TBD-08 on 26 November 2026, reconciled against the Decisions and Open Issues and Commercial Policy worksheets of the comprehensive engineering master. Workbook is a derivative, not a competing authority.
+
+| Decision | Classification | Approved decision and remaining limitation |
+|---|---|---|
+| F-001 | USER-FIXED | Annual and perpetual licensing; exact SKU quantities/prices reserved. |
+| F-002 / F-002A | USER-FIXED | 10% temporary overage for 30 calendar days; immediate warning; preserve existing monitoring; block additional activation above cap/after expiry until regularized; authorized extension/audit only. Distinct from 15-day finite usage-right expiry grace. |
+| F-003 | USER-FIXED | Technical readiness first; paid formal certification later; scope/budget/timing/attained certificates open. |
+| F-004 | USER-FIXED | Customer-specific contractual DR RPO/RTO only after certification and Founder approval; no universal commitment; technical targets/activation open. |
+| F-005 | USER-FIXED | Approved resource and daily ingestion-volume units, Agent inclusion and no per-interface/OID/metric/core/user/dashboard/Sensor fee; detailed Platform_02 §33. Technical metering open. |
+| F-006 | USER-FIXED | Common base plus independent optional entitlements as detailed in Platform_02 §33; no phase promotion. |
+| F-007 | USER-FIXED | Standalone Core, Sensors, Sensor redundancy and DR included; two-Core HA and MSP separately entitled. Certification unchanged. |
+| F-008 | USER-FIXED | Annual subscription rights/support/upgrades during term; perpetual usage for entitled version continues after maintenance expiry; renewable annual maintenance governs support/upgrades; separately entitled extra capacity. |
+| F-009 | USER-FIXED | Deployment identity binding; authorized hardware/VM transfer; no HA double count; secure DR reactivation; anti-clone controls; offline activation. Mechanisms and evidence open. |
+| F-010 | USER-FIXED | Software only; customer/partner hardware/VMs; implementation and onsite support separately chargeable; remote standard support; custom integration/development separately scoped/evaluated; approved MSP partner delivery. |
+| TBD-08 | USER-FIXED | Raw metrics 90d, hourly rollups 365d, logs 7d, Flow 7d, all configurable; sizing, protected retention/holds, 80% safety and benchmarking preserved. |
+
+**Adjudication:** ACCEPT approved policy. ACCEPT WITH CHANGES to reconcile obsolete overage TBD and generic expiry and planned contract assumptions. HOLD FOR EVIDENCE all implementation, migration, security, compatibility, HA/DR, performance, code-signing and release gates. Exact SKU/quantity/price/maintenance/service/partner terms and formal certification budget remain Founder-reserved. Proposed workbook phase/BUILD remappings are not approved merely by this reconciliation. Preserve v3.3.0/25-file set, stable IDs, phase envelopes and DOC_P0_BLOCKED. No numeric RPO/RTO, throughput, UI SLO or model claims. Canonical only after governed review/merge.

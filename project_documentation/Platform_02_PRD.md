@@ -1852,6 +1852,39 @@ Complex settings and diagnostics shall expose `What is this?`, contextual docume
 
 ## 33. Licensing and usage forecast
 
+**Founder decision reconciliation — 2026-11-26**
+
+F-001/F-008 (2026-11-26): annual subscription and perpetual usage rights are supported. Annual subscriptions include support and upgrades during the valid term; additional capacity requires additional subscription entitlement. Perpetual rights continue for the entitled software/version; renewable annual maintenance governs support and upgrade eligibility; additional capacity requires additional perpetual entitlement. Perpetual maintenance expiry MUST NOT stop entitled monitoring or revoke perpetual usage rights. The 30-day expiry warning, T-7 dashboard banner and **15-day post-expiry grace** (`EXPIRED_GRACE_15D`) followed by polling suspension apply to expiring software usage rights (annual subscription), not maintenance expiry. Historical data and authorized licence administration remain available. Exact fees, version-right details and support contracts remain Founder-reserved.
+
+F-002/F-002A (2026-11-26): up to **10%** temporary over-entitlement for **30 calendar days**; warn immediately on exceeding entitlement. Additional licensed activation during an authorized allowance must stay within cap and entitlement, authorization, capacity and safety checks. Above cap, or after allowance expiry while unregularized, block additional licensed activation. Preserve existing monitoring; do not remove existing resources or delete data to enforce commercial overage. Extension only through authorized commercial approval and audit; no automatic extension. This policy is independent of the existing 15-day grace for expiring software usage rights and does not override actual usage-right expiry, revocation, security or capacity. Counting, rounding, day/window, allowance reset and volume-meter enforcement semantics remain gated; no invented quantities or silent dropping of telemetry.
+
+F-005 — approved commercial measurement basis (not exact SKU quantities):
+
+| Capability | Measurement basis |
+|---|---|
+| Network | Per monitored network device |
+| Infrastructure | Per monitored physical server or VM; Windows/Linux Agents included; no double charge for agent and agentless views of same entity |
+| ICMP-only | Per independently monitored device; no extra count for attached reachability on already monitored device |
+| Interfaces/ports, SNMP metrics/OIDs, CPU cores | Included; no separate commercial charge |
+| Databases | Per database instance |
+| Flow | Ingested data volume per day |
+| Syslog/logs | Ingested GB per day |
+| NCM | Per managed network device |
+| IPAM | Managed IP address capacity |
+| Kubernetes | Per worker node |
+| Cloud | Per eligible monitored cloud resource |
+| Synthetics | Per configured synthetic test |
+| RCA/AIOps | Deterministic RCA included; advanced AIOps separately entitled |
+| Users, dashboards and Sensor software deployments | Unlimited commercially; security, quotas, workload sizing and capacity apply |
+
+Define canonical identity/dedup, unit/window and byte-accounting (sampling, compression, duplicate/rejected input), IPv4/IPv6/VRF namespace, resource/node churn, module overlap, disabled-test/multi-vantage treatment, rounding, atomic admission and volume-meter applicability before implementation/certification. No per-element pricing contradicting approved units.
+
+F-006: common base platform includes network and infrastructure monitoring, discovery/inventory, topology, dashboards/reporting, alert/incident management, deterministic RCA, security/administration and basic integrations. Independently configurable optional entitlements: Network Traffic Analytics; Syslog/Log Analytics; Database Monitoring; Cloud/Kubernetes Monitoring; Advanced AIOps; Advanced Synthetic Monitoring; NCM; IPAM; native APM/DPI (Phase 2.5). F-007: standalone Core, additional Sensor software deployments, Sensor redundancy and DR included; two-Core HA and MSP separately entitled. Entitlements do not alter implementation/certification phases, permit a third Core, or imply certified support or unlimited compute. Exact SKU dependencies, quantities, prices and contractual terms remain Founder-reserved.
+
+F-009: deployment identity binding, not IP/MAC or individual hardware; authorized hardware replacement/VM migration and secure DR reactivation; no additional monitored-device count on HA failover (separate HA entitlement applies); prevent unauthorized cloning and simultaneous independent deployments within the certified threat model; offline activation for air-gapped deployments without mandatory runtime Internet. Artifact/trust/transfer/revocation mechanisms and offline limitations remain security/compatibility evidence gates.
+
+Entitlement is evaluated server-side, separately from RBAC and certification. UI shows applicable units, licensed/used counts or volume, module/deployment scope, allowance start/end/remaining and warning, maintenance vs usage expiry, authorized regularization/transfer and audit. Core owns admission. All related data/API/migration and acceptance gates remain open.
+
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
@@ -1863,6 +1896,8 @@ Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
 <!-- END P0-1 NORMATIVE BINDINGS -->
 ### Licensing grace — Founder-approved 15-day post-expiry grace
+
+This machine governs expiring software usage rights only. Perpetual maintenance and overage have separate lifecycles.
 
 **Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).
 
@@ -1894,6 +1929,8 @@ Normative non-grace continuity (unchanged):
 - All licence/entitlement state changes are audited and visible in Usage & Licensing.
 
 ### Licence expiry behavior
+
+Finite usage-right expiry only; not maintenance or temporary overage expiry.
 
 - T-30 days: warning begins.
 - T-7 days: persistent dashboard banner with exact days remaining.
@@ -2354,13 +2391,13 @@ Two gates remain distinct. An essential unselected query, mutation, state, field
 | ID | Open item |
 |---|---|
 | PRD-TBD-01 | Exact final brand/product name beyond working name Platform: Resolved — **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
-| PRD-TBD-02 | Exact DR RPO/RTO and failover automation policy |
-| PRD-TBD-03 | Final compliance certification schedule |
+| PRD-TBD-02 | F-004 approved: customer-specific contractual RPO/RTO only after certification; technical targets/activation open |
+| PRD-TBD-03 | F-003 readiness first; paid certification later; scope/budget/schedule reserved |
 | PRD-TBD-04 | Exact GNN framework/model architecture/GPU optional profile |
 | PRD-TBD-05 | Final SNWP-2500-v1 metric/interface/event composition after lab characterization |
 | PRD-TBD-06 | Exact numeric UI/API SLO values after benchmark |
-| PRD-TBD-07 | Final default retention/rollup values and minimum emergency-recent window |
-| PRD-TBD-08 | Final commercial over-entitlement behavior |
+| PRD-TBD-07 | Approved configurable raw metrics 90d / hourly rollups 365d / logs 7d / Flow 7d; minimum emergency-recent window and capacity evidence open |
+| PRD-TBD-08 | F-002/F-002A approved: 10% temporary overage for 30 calendar days, warning, block new activation above cap or after expiry until regularized, preserve existing monitoring. Technical metering and certification open |
 | PRD-TBD-09 | Exact trigger/load threshold for moving flow/syslog to dedicated Streaming Sensor |
 | PRD-TBD-10 | Future Master Core/Regional Core release scope |
 

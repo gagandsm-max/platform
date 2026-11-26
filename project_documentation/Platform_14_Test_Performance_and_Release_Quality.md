@@ -705,3 +705,16 @@ The exact owner contracts are Platform_11 §§9.1–9.4 (per-volume sizing and u
 | Notification custody and authorization | BUILD-086 and tenant/RBAC/audit prerequisites; authorized recipient/resource and tested connector; one deterministic deduplicated case, durable retry/poison custody, observable actual delivery, reopen/close/ack/maintenance policy. Cover 429/5xx/outage, duplicate delivery, unconfigured connector, stale/wrong tenant authorization, secret leakage, rate limit and inconsistent ticket closure. Procurement lead times are configurable; 60/30/14/7 days are examples only. |
 
 Implementation progression remains contract/owner mapping → inert pure calculator → reliable measured input/forecast → authorized existing notification delivery → retention/hold certification. This document defines tests and safe sequencing; it does not authorize code, infer current measurements, assert customer tender compliance or override ingestion/replay blockers.
+
+### Founder decision acceptance supplement — licensing, retention and DR (2026-11-26)
+
+Existing BUILD-096/117/125/127/128/129/130/131/132/134 gates are strengthened, not passed. Before applicable release, prove:
+
+- Subscription T-30/T-7/15-day post-expiry continuity and suspension, renewal and historical/admin access; perpetual maintenance lapse/restart/upgrade eligibility without polling suspension.
+- Approved 10%/30-calendar-day temporary overage: immediate warning, exact boundary/rounding for approved counting contract, concurrent activation, expiry, replay/restart, authorized extension and regularization. Above cap or expired unregularized allowance denies additional activation, never randomly removes existing monitoring. Independent usage-right and security/capacity decisions remain effective; do not silently drop volume telemetry under an undefined commercial rule.
+- Canonical identity/dedup and measurement across Agent/agentless, ICMP attached/independent, HA, resource churn, overlapping namespaces/modules and daily Flow/log volume accounting. No double charge or commercial bypass. Optional module entitlement, separately entitled HA/MSP and no per-Sensor fee behave correctly while technical limits apply.
+- Deployment-bound signed artefact verification, authorized transfer and hardware/VM replacement, DR reactivation, offline activation/recovery, replay/rollback/clone and clock tampering. Explicit offline threat-model limitations; no absolute anti-cloning promise.
+- Storage feasibility of configurable 90d raw metrics/365d hourly rollups/7d logs/7d Flow against measured workload, correct verified rollups before normal expiry, protected classes/legal hold, 80% watermark, visible rejection/reclamation and no silent loss/shortening.
+- F-003 technical compliance readiness evidence remains mandatory; paid certification later is not a technical gate waiver. F-004 customer-specific contractual recovery objectives require measured recovery profile and Founder approval; preserve Phase 1 DR and Phase 1.5 HA deletion-ACK RPO=0 envelope.
+
+Preserve existing release blockers and source-evidence separation; these requirements are not test results.

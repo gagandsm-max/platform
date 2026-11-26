@@ -1330,6 +1330,10 @@ Large/global environments may later use autonomous regional Cores with a Master 
 
 ## 34. Backup, restore, DR and upgrades
 
+F-004 (2026-11-26): customer-specific contractual DR RPO/RTO may be agreed only after applicable recovery-profile certification and Founder approval; no universal commercial guarantee. Internal technical recovery objectives, activation policy, measured recovery and data-integrity evidence remain open under BUILD-125/131. Mandatory Phase 1 site-loss DR and Phase 1.5 certified HA deletion-ACK RPO=0 remain distinct.
+
+Licence authority remains in the existing modular Core and PostgreSQL transactional state. F-009 deployment binding/authorized transfer, HA deduplication and offline activation follow Platform_02 §33, Platform_05 §40 and Platform_17 existing licensing contracts. No new service/database or second entitlement writer; preserve fencing.
+
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
@@ -1342,7 +1346,7 @@ Architecture must separate:
 - Backup/restore: recover data/configuration (mandatory in Phase 1).
 - DR: recover from site-level loss, including redeploy/endpoint redirection for the declared Phase-1 DR profile (mandatory in Phase 1; HA ≠ DR).
 
-DR is mandatory v1.0 / Phase 1. Exact contractual/external RPO/RTO is TBD; internal technical RPO/RTO engineering targets are Master technical authority.
+DR is mandatory v1.0 / Phase 1. F-004: customer-specific contractual/external objectives require applicable recovery certification and Founder approval; internal technical RPO/RTO targets remain Master technical authority and unverified.
 
 Upgrade architecture uses preflight, backup, compatibility checks, Sensor drains, component migration, validation and rollback. Device Packs/Agents/Sensors support staged/canary rollout.
 

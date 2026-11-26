@@ -13,14 +13,14 @@
 | Label | Meaning |
 |---|---|
 | **AUTHORITATIVE FIXED REQUIREMENT** | Already fixed licensing behaviour |
-| **TBD — DECISION REQUIRED** | SKU quantities / overage policy details |
+| **TBD — DECISION REQUIRED** | Exact SKU quantities/prices and detailed technical metering/implementation evidence |
 | **PROPOSED TEST POINT — NON-AUTHORITATIVE** | Exploratory entitlement scenarios |
 
 ---
 
 ## 1. Exact unresolved question
 
-**TBD — DECISION REQUIRED:** Exact product SKUs/licensing quantities and commercial tiers beyond already-fixed behavioural rules; exact over-entitlement policy beyond the fixed “slight overage should warn rather than randomly drop devices” guidance.
+**TBD — DECISION REQUIRED:** Exact SKU quantities, prices, maintenance fees and contracts remain Founder-reserved. F-001–F-010/F-002A fix commercial policy; technical counting, measurement units/window, rounding, volume applicability, durable allowance/admission, maintenance separation, signed deployment identity/transfer/offline activation and certification remain OPEN.
 
 ---
 
@@ -30,20 +30,20 @@ Preserve these rules (**AUTHORITATIVE FIXED REQUIREMENT**):
 
 * **30-day** advance expiry warning;
 * from **7 days** before expiry, prominent dashboard banner;
-* default **7-day grace** after expiry;
+* **15-day post-expiry grace** for finite software usage rights (`EXPIRED_GRACE_15D`); perpetual maintenance expiry does not suspend entitled monitoring;
 * **polling continues during grace**;
 * **after grace, polling stops** unless licence is renewed/extended;
 * **historical data remains accessible**;
 * licence administration remains available.
 
-Over-entitlement behaviour is **separate** and remains **TBD — DECISION REQUIRED** beyond: slight overage should generate clear commercial warnings rather than randomly dropping devices.
+F-002/F-002A approved: up to 10% temporary overage for 30 calendar days, immediate warning, preserve existing monitoring, block additional activation above cap/after expiry until regularized; authorized commercial extension/audit only. Separate from usage-right expiry grace and security/capacity; volume/window and other metering details remain open.
 
 ---
 
 ## 3. Explicitly incorrect statements to avoid
 
-* Invented **110%** threshold as acceptance.
-* Claims that over-capacity can **never** stop monitoring (expiry-after-grace **does** stop polling; overage policy is TBD and must not contradict expiry rules).
+* Treating approved 10%/30-day overage as implemented/certified or inventing SKU quantities/volume-meter semantics.
+* Confusing commercial overage or perpetual maintenance expiry with expiring usage rights; preserve independent security/capacity and finite usage-right expiry grace.
 * Freezing SKU quantities in this spike without commercial approval.
 
 ---
@@ -52,13 +52,14 @@ Over-entitlement behaviour is **separate** and remains **TBD — DECISION REQUIR
 
 1. Licence key format/verification tests (mechanism **TBD** / candidate).
 2. Expiry timeline tests proving: warning → banner → grace (polling on) → post-grace (polling off) → historical data + admin still available.
-3. Slight-overage warning behaviour (**PROPOSED TEST POINT — NON-AUTHORITATIVE** numeric thresholds until policy freezes).
+3. Boundary/rounding/concurrency, warning, expiry and restart/replay tests for approved 10%/30-day overage; preserve existing monitoring, authorized extension and block new activation when required.
+4. Annual/perpetual maintenance separation, approved measurement/packaging, secure deployment-bound transfer/DR/offline activation, no HA double count and compatibility/migration/security evidence.
 
 ---
 
 ## 5. Closure criteria
 
-Approved SKU/quantity matrix + overage policy recorded in mother docs; implementation matches fixed expiry/grace rules above.
+Approved exact SKU/quantity matrix where required; approved policy recorded in existing Mother References; independently verified implementation, migration, security, failure/recovery and release evidence. **OPEN** until evidence, not closed by this policy amendment.
 
 ---
 

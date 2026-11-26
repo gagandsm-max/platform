@@ -797,6 +797,8 @@ Correlation output preserves references to all child evidence and raw events.
 
 ## 19. Data retention HLD
 
+Founder-approved default profile (2026-11-26; TBD-08): raw performance metrics 90 days, hourly metric rollups 365 days, raw Syslog/logs 7 days, raw Flow 7 days. All configurable; validate workload/storage feasibility before activation. Protected audit/security, incident/RCA, NCM/configuration and legal-hold evidence retain separate governed policies; preserve verified rollups before normal expiry, eligible-only reclamation and the mandatory Core/Sensor 80% watermark. See Platform_11 §10. No contractual capacity/retention claim or silent shortening.
+
 ### 19.1 Retention policy resolution
 
 Policy Service computes effective retention by tenant/site/group/device/data class.
@@ -1255,6 +1257,8 @@ Sensor local-spool protection uses the same principle but prioritizes unshipped 
 
 ## 40. Licensing expiry state machine
 
+This existing machine applies only to finite software usage-right expiry. Core Licensing owns independent maintenance eligibility and temporary-overage admission state; neither may enter `POLLING_SUSPENDED` merely on maintenance/overage expiry. Existing Scheduler/Provisioning authorities consume the Core decision; no second authority. F-002/F-002A, F-005–F-009 govern admission, metering, UI and transfer via Platform_02 §33. Existing monitoring continues after overage expiry subject to valid usage rights and safety; block only new activation while unregularized.
+
 `VALID -> EXPIRING_30D -> EXPIRING_7D_BANNER -> EXPIRED_GRACE_15D -> POLLING_SUSPENDED`.
 
 **FOUNDER-LIC-GRACE (RESOLVED 2026-09-30):** Founder-approved post-expiry grace is **15 days**. This supersedes prior seven-day post-expiry authority and historical `FOUNDER-LIC-GRACE UNRESOLVED` / 7-vs-15 conflict. Polling continues during the 15-day grace; polling stops when that grace expires unless the licence is renewed/extended.
@@ -1267,6 +1271,8 @@ Normative non-grace continuity (unchanged):
 - Manual administrative license extension can move the deployment back to `VALID` without reinstalling Core/Sensors.
 
 ## 41. Disaster-recovery design requirement
+
+F-004 (2026-11-26): customer-specific contractual DR RPO/RTO may be agreed only after applicable recovery-profile certification and Founder approval; no universal commercial guarantee. Internal technical recovery objectives, activation policy, measured recovery and data-integrity evidence remain open under BUILD-125/131. Mandatory Phase 1 site-loss DR and Phase 1.5 certified HA deletion-ACK RPO=0 remain distinct.
 
 A DR deployment shall be installable from the same signed Core/Sensor builds. The HLD requires backup/replication of authoritative configuration, licensing, Device Packs, secrets/cert material per recovery procedure, and recoverable telemetry according to the eventual RPO. Exact RPO/RTO are TBD, but the software must provide preflight, backup, restore, integrity verification and DR activation/runbook hooks from V1.
 

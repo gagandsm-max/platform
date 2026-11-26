@@ -451,6 +451,8 @@ Support native functionality and governed third-party integration. IP/MAC remain
 
 ## 18. Retention profiles
 
+Founder-approved TBD-08 product defaults (2026-11-26): raw metrics 90d, hourly rollups 365d, raw logs 7d, raw Flow 7d, all configurable. Sizing/preview before activation, separate protected policies/legal holds, verified rollups and mandatory 80% protection per Platform_11 §10–11. No universal contractual retention promise or silent reduction.
+
 Do not hard-code customer contractual retention values into universal product behavior.
 
 Named configurable profiles such as `Enterprise-180`, `Enterprise-365` and `Regulated-Custom` may be offered. Sizing/capacity validation is required before activation. Exact days remain profile/policy values.

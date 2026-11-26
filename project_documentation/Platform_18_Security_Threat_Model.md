@@ -247,3 +247,7 @@ The architecture audit identified preventive controls, not reproducible producti
 - **Counter-rate evidence poisoning:** Restart, alternate Sensor ownership, counter discontinuity, replay or precision truncation must not generate fabricated high rates, false threshold alerts or misleading RCA. Exact raw counters and uncertainty markers remain authoritative until valid rate derivation is proven.
 
 These are Phase-1 preventive and correctness tests where applicable; shared-customer/MSP and two-Core HA negative certification remain Phase 1.5. No cryptographic tenant-isolation certification, new dependency or production readiness is claimed by this clarification.
+
+### Licensing, retention and recovery threat clarification (2026-11-26)
+
+Under F-002/F-002A and F-005–F-009, threat-model forged/replayed entitlement artifacts, unauthorized allowance extension/reset or clock rollback, concurrent over-cap activation, identity churn/double counting, cross-tenant or cross-module bypass, invalid upgrade/maintenance claims, unauthorized deployment cloning/transfer and restoration of stale licence state. Core authoritative; least privilege, verified signed artifacts, atomic admission, replay-resistant authorized recovery and auditable transitions. Detailed mechanisms/offline limitations require independent evidence; no absolute offline anti-clone claim. Overage and maintenance expiry must not create unapproved monitoring blindness. Retention defaults never authorize unauthorized purge, legal-hold bypass or disabling the 80% safety control.

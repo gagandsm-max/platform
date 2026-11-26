@@ -59,6 +59,8 @@ If documents conflict, stop and resolve through the precedence defined in `Platf
 
 ## Mother-document change control (READ-MOSTLY)
 
+Founder policy reconciliation 2026-11-26: Platform_12 §30, Platform_01 §34, Platform_02 §33 and Platform_11 §10 govern approved annual/perpetual, commercial measurement/packaging, deployment transfer/HA/MSP/DR, 10%/30-day overage and 90/365/7/7 retention. Distinguish finite usage expiry, maintenance and overage. No new scope/phase/maturity, spending or release authorization inferred. Preserve all evidence gates.
+
 Mother documents under `project_documentation/` are **READ-MOSTLY** and authoritative.
 
 Do **not casually** modify them while implementing features.
