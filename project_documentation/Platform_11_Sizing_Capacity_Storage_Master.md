@@ -287,6 +287,8 @@ Existing BUILD-061/064/074/086/094/097/130 gates own this bounded specification;
 
 ## 10. Retention and rollups
 
+Founder-approved default profile (2026-11-26; TBD-08): raw performance metrics **90 days**, hourly metric rollups **365 days**, raw Syslog/logs **7 days**, raw Flow (NetFlow/IPFIX/sFlow and compatible variants) **7 days**. All configurable by authorized policy and scope; validate workload/storage feasibility before activation. These are product defaults, not contractual retention or capacity guarantees. Protected audit/security, incident/RCA, NCM/configuration and legal-hold evidence retain separate governed policies. The non-disableable Core/Sensor 80% watermark, eligible-only reclamation, verified rollup generation before normal expiry, correct metric semantics and explicit loss/audit evidence remain mandatory. No silent retention shortening; infeasible profiles require visible correction or authorized policy disposition.
+
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 

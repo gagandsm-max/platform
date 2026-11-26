@@ -951,6 +951,8 @@ flowchart LR
 
 ## 35. Flow DF-032 — Retention rollup
 
+Default profile and validation: Platform_11 §10 (90d raw metrics, 365d hourly rollups, 7d logs, 7d Flow); preserve complete verified rollups before normal expiry and separate protected retention.
+
 ```mermaid
 flowchart LR
   RAW[Raw telemetry] --> R1[Configured rollup 1]
@@ -1128,6 +1130,8 @@ sequenceDiagram
 
 ## 43. Flow DF-040 — Licence expiration lifecycle
 
+DF-040 applies only to finite usage-right expiry, not perpetual maintenance or temporary overage. The 15-day grace remains unchanged.
+
 ```mermaid
 sequenceDiagram
   participant L as Licence Service
@@ -1148,6 +1152,8 @@ sequenceDiagram
 ---
 
 ## 44. Flow DF-041 — Licence renewed after polling stop
+
+DF-041 resumes polling after finite usage-right expiry; overage or maintenance expiry does not invoke polling suspension.
 
 ```mermaid
 sequenceDiagram
@@ -1960,6 +1966,8 @@ Per-volume Storage Lifecycle monitor detects managed volume >=80% -> marks emerg
 Sensor local volume reaches protection watermark -> clean disposable logs/cache/temp first -> evaluate spool age/priority -> preserve recent/critical unsent records first -> discard only oldest eligible lower-priority buffered data when unavoidable -> continue polling -> increment `sensor_data_dropped_due_to_storage` counters -> report exact loss to Core when connectivity resumes.
 
 ## 90. Flow DF-081 — License expiry
+
+Finite usage-right expiry only; do not map maintenance/overage expiry onto this lifecycle.
 
 T-30 warning event -> T-7 persistent dashboard banner (pre-expiry) -> expiry enters `EXPIRED_GRACE_15D` (Founder-approved 15-day post-expiry grace; supersedes historical seven-day post-expiry / `FOUNDER-LIC-GRACE UNRESOLVED`) while Scheduler continues -> grace expiry transitions deployment to `POLLING_SUSPENDED` -> Scheduler stops new/renewed poll jobs -> Sensors receive suspension desired state -> historical query/UI/admin/license import remain available -> renewal returns state to VALID and polling resumes.
 
@@ -3087,6 +3095,8 @@ At the source checkpoint above, the Discovery request APIs, entity APIs and boun
 - **Observable UI/API outcome:** `/platform-operations` and UI-095 show the step state, the versions, the compatibility, and `ROLLBACK_UNSUPPORTED` where applicable; active Agent-ingress publisher/writer upgrade blockers, cutover-fence waits, and stream-local legacy reconciliation states surface as actionable preflight/ops failures.
 
 ### 119.22 Licence expiry / grace (`EXPIRED_GRACE_15D`) — `DF-040/041`, BUILD-096, Platform_01 §34 · Phase 1
+
+**F-002/F-002A and F-005–F-009 extension to existing journey (not a new DF ID):** authorized activation -> resolve canonical identity and module/deployment entitlement -> atomically evaluate valid rights, current usage, cap and persisted allowance -> approve within entitlement/capacity or return actionable denial without changing existing assignments -> warning, audit and UI state -> authorized regularization/extension. Above cap or after allowance expiry while unregularized block additional activation; prior active monitoring continues subject to independent valid usage-right/security/safety policy. Restart/retry/replay cannot silently reset allowance or double count. Perpetual maintenance expiry changes support/upgrade eligibility only. Authorized transfer/DR restore preserves deployment-bound entitlement authority and prevents duplicate independent authority within certified threat model. Physical metering, event and migration contracts remain BUILD-096/117/127 gates; expiry flow below applies only to finite expiry.
 - **Actor:** the licence state evaluator (system, UTC clock); a licence admin (`licence.manage`) for load/renew/extend.
 - **Authorization/preconditions:** a signed licence artifact with a valid signature; the evaluation uses the absolute signed expiry in UTC (deployment-timezone-independent); the display uses the user's timezone. `FOUNDER-RESERVED`: commercial quantities, SKUs, pricing — not stated or invented here.
 - **Request/input:** `LicenceLoad{artifact}`; `LicenceExtend{until, reason}` (a manual extension, `licence.extend`).

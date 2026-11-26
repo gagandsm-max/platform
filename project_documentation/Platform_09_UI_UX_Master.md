@@ -7035,6 +7035,8 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 
 ### UI-093 — Storage & Retention
 
+**Founder default profile:** raw metrics 90d, hourly rollups 365d, raw logs 7d, raw Flow 7d. Show requested/effective policy, sizing preview, protected classes/holds, projected headroom and infeasible state. Activation remains gated; never silently reduce retention or disable 80% watermark.
+
 **Domain:** Cross-cutting Operations
 **Primary roles:** Role determined by RBAC and domain ownership
 **Purpose:** Capacity, growth, retention, rollups, archive and 80% protection
@@ -7094,6 +7096,8 @@ The 98 out-of-box screens below are mandatory. Customers may clone/customize the
 ---
 
 ### UI-094 — Usage & Licensing
+
+**F-001/F-002/F-002A/F-005–F-009:** show annual/perpetual usage rights separately from maintenance/upgrade eligibility, module/deployment entitlements, measurement unit, licensed/used/forecast, 10% cap, 30-day allowance start/end/remaining, immediate warning, blocked-new-activation reason and authorized regularization/extension. Never display maintenance/overage expiry as polling suspension. Show transfer/DR/offline activation status and audit via authorized workflows; technical contract and maturity gates open. Existing UI IDs/route unchanged.
 
 **Domain:** Cross-cutting Operations
 **Primary roles:** Role determined by RBAC and domain ownership
@@ -7810,7 +7814,7 @@ Each row inherits §16.1 and its class from §16.2. **Panels** are the required 
 | UI-091 | Alert Policy Effectiveness | ANALYTICAL_DASHBOARD | 1 | false-alert/noise by policy; backtest/shadow; recommendation queue | DAF-POL | OP-POLICY-LIST/GET, OP-POLICY-VERSION-LIST/GET, OP-POLICY-LIFECYCLE (version_no-bound) | policy, window | UI-059 |
 | UI-092 | Data Pipeline Integrity | PLATFORM_OPERATIONS | 1 | produced/accepted/normalized/inserted reconciliation per interval/stream | DAF-PIPE, DAF-QLT | — | stream, interval | UI-078 |
 | UI-093 | Storage & Retention | PLATFORM_OPERATIONS | 1 | volume/data-class measurements; headroom/shortfall; retention preview; protected data | DAF-STG | OP-STO-RETENTION-PREVIEW, OP-STO-RETENTION-ACTIVATE, OP-STO-ACTION | volume, data class | UI-079 |
-| UI-094 | Usage & Licensing | GOVERNANCE | 1 | licensed vs used; state (T-7/EXPIRED_GRACE_15D); forecast | DAF-LIC | OP-LIC-LOAD, OP-LIC-EXTEND | module | UI-093 |
+| UI-094 | Usage & Licensing | GOVERNANCE | 1 | licensed vs used by measurement; finite usage-right state (T-7/EXPIRED_GRACE_15D); separate maintenance and 10%/30d overage admission; forecast | DAF-LIC | OP-LIC-LOAD, OP-LIC-EXTEND | module | UI-093 |
 | UI-095 | Housekeeping & Lifecycle Jobs | PLATFORM_OPERATIONS | 1 | job list; backup/restore/upgrade operations; verification | DAF-STG, DAF-PIPE | OP-BKP-RUN, OP-BKP-RESTORE, OP-UPG-RUN, OP-UPG-ROLLBACK | operation kind, state | UI-093 |
 | UI-096 | Post-Incident Review | INVESTIGATION | 1.5† | incident evidence; timeline; findings; actions | DAF-KNW, DAF-INC, DAF-RCA | OP-PIR-CREATE | incident | UI-057 |
 | UI-097 | Runbook Library | GOVERNANCE | 1.5† | runbook list/versions; applicability; usage | DAF-KNW | OP-RUNBOOK-UPSERT | domain, version | UI-058 |

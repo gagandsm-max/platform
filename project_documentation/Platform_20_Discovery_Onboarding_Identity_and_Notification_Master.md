@@ -926,3 +926,7 @@ Phase-2 closure SHALL require exact discovery/onboarding identity for vendor pac
 Phase 2.5 planning SHALL extend canonical identity to instrumented applications/services/instances/runtimes, browser/mobile application identities where governed, capture sources/interfaces/TAPs/packet brokers and decoded conversations/transactions linked back to canonical services/entities.
 
 Deep-observability sources must reconcile to existing identity authority; they may not create a parallel CMDB or service graph.
+
+### Commercial entitlement preview and admission clarification (2026-11-26)
+
+Existing onboarding/approval workflow uses Core's approved F-005 measurement and F-006/F-007 entitlement policy. Preview is not a grant: activation atomically rechecks canonical identity, module/deployment entitlement, valid usage rights, authorized temporary 10%/30-day allowance, security and capacity. Above cap or after allowance expiry while unregularized, reject only additional licensed activation with actionable warning; do not delete/suspend existing valid monitoring. Provisional enrollment, review, permanent exclusions, assignment fencing and authorization unchanged. Counting/rounding, volume applicability and concurrent/replayed admission tests remain BUILD-068/096/117 dependencies.

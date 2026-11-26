@@ -1742,6 +1742,8 @@ Webhook/polling adapter maps external ack/assignment/state/work notes/change ref
 
 ## 36. Storage retention LLD
 
+Founder-approved default profile (2026-11-26; TBD-08): raw performance metrics 90 days, hourly metric rollups 365 days, raw Syslog/logs 7 days, raw Flow 7 days. All configurable; validate workload/storage feasibility before activation. Protected audit/security, incident/RCA, NCM/configuration and legal-hold evidence retain separate governed policies; preserve verified rollups before normal expiry, eligible-only reclamation and the mandatory Core/Sensor 80% watermark. See Platform_11 §10. No contractual capacity/retention claim or silent shortening.
+
 ### 36.1 Policy object
 
 ```json
@@ -1907,6 +1909,8 @@ Discovery absence does not automatically transition to DECOMMISSIONED. Reconcili
 
 ## 40. Licence engine LLD
 
+**2026-11-26 applicability and pending implementation contract.** Existing expiry enum and §83 timer apply to finite usage rights, not maintenance. Represent perpetual usage rights and maintenance/upgrade eligibility independently; do not fabricate distant expiry. Temporary overage state belongs to same Core entitlement authority, not a licence-expiry extension. Persist allowance identity, scope, start/end, policy and approval provenance; atomically enforce activation against current usage/cap, handle concurrent/replayed requests and preserve state across restart/restore. Above the 10% cap or after 30 calendar days while unregularized, block new activation, not existing valid monitoring. Immediate warning; no silent timer reset or auto-extension; authorized commercial extension only. Independent usage-right, security and capacity decisions always apply. Volume-meter window/basis/applicability, rounding, identity/dedup, allowance reset rules, deployment-bound signed artefact and transfer design, exact schema/API changes require BUILD-096/117/127 review/tests. Existing state names remain stable; do not treat new concepts as deployed enums. See Platform_02 §33 and Platform_17 licensing contract.
+
 ### 40.1 States
 
 Canonical lifecycle (Founder decision 2026-09-30; `Platform_01` §34.2 / `Platform_02` §33 / `Platform_12` §22):
@@ -1935,7 +1939,7 @@ Specification aliases only (non-normative synonyms; do not invent additional com
 - licence admin endpoint remains available.
 - licence extension (`MANUAL_EXTENSION` → return to `VALID`) re-enables polling through normal assignment/policy synchronization.
 
-Do not delete telemetry due to licence state. Commercial quantities, packaging, pricing and SKUs remain Founder-reserved.
+Do not delete telemetry due to licence state. Approved measurement/high-level packaging: Platform_02 §33; exact quantities, SKU detail, pricing and contracts remain Founder-reserved.
 
 ---
 
@@ -2797,6 +2801,8 @@ The exact internal replication technology is P0 spike, but code must satisfy the
 - Phase 1.5 deletion-ACK certified matrix target remains `ACKED-FOR-DELETION TELEMETRY RPO = 0` (distinct from Phase 1 standalone deletion-ACK durability and from site/DR RPO).
 
 ## 83. License timer implementation
+
+Evaluate only finite usage-right expiry using signed UTC expiry. Maintenance and overage expiry are independent; never apply suspension timer to them. Preserve expiry/allowance truth across restart and clock anomalies. See §40.
 
 Use absolute signed license expiry timestamp, deployment timezone-independent UTC evaluation and auditable state transitions. Dashboard banner derives remaining days from Core UTC and user display timezone. A manually signed extension/renewal must be accepted without Core/Sensor reinstall. Post-expiry grace duration is **15 days** (`EXPIRED_GRACE_15D`; Founder decision 2026-09-30; supersedes historical seven-day post-expiry and `FOUNDER-LIC-GRACE UNRESOLVED`). T-7 pre-expiry banner remains distinct (`EXPIRING_7D_BANNER`). At post-grace suspension (`POLLING_SUSPENDED`), Scheduler stops issuing/renewing monitoring jobs; historical query, admin, license import and audit remain available. Canonical state names and alias mapping are owned by §40.1.
 

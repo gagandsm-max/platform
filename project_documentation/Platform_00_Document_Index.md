@@ -292,7 +292,7 @@ The 2026-11-06 Founder directive makes complete, reviewed coverage across the si
 - Agent-backed endpoint identity is anchored to canonical `entity_id` plus unique `agent_id`/mTLS identity; system/host name is human-readable technical identity and dynamic IP/MAC values are mutable observations.
 - Platform exposes one global per-user Notification Center/bell with server-side tenant/RBAC/resource scoping; operational Alerts/Incidents remain distinct from platform/workflow notifications.
 - Enterprise integrations normalize vendor-specific evidence into Platform-owned canonical contracts; vendor identifiers do not override tenant/entity authority.
-- Founder-approved post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`). The T-7 pre-expiry dashboard banner remains governed and is distinct from post-expiry grace. Commercial quantities, packaging and pricing remain Founder-reserved.
+- Founder-approved post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`) for expiring usage rights; T-7 pre-expiry banner distinct. Perpetual maintenance expiry does not suspend entitled monitoring. F-002/F-002A approve separate 10%/30-calendar-day overage with warning, block additional activation above cap/after expiry until regularized, preserve existing monitoring and authorize extension only with audit. F-001–F-010 and TBD-08 reconciled in Platform_12 §30, Platform_01 §34, Platform_02 §33 and Platform_11 §10; exact SKU quantities, pricing and contracts reserved. No phase/maturity/gate change.
 - Declarative policy/configuration inputs cannot bypass Platform RBAC, validation, approvals, audit or runtime safety.
 - Endpoint DEX is bounded operational-experience monitoring, not employee surveillance.
 - Future regional federation does not reopen the v1 exactly-two-Core Active/Standby topology by implication.
@@ -362,6 +362,8 @@ Authoritative list is `Platform_12_Decision_Source_Register.md` §5 and the 2026
 These remain unresolved until formally approved; no coding tool may invent them. Specialized-master additions do not resolve these P0/TBD items by declaration.
 
 ## 12. Deliberate change control (READ-MOSTLY)
+
+Founder decisions dated 2026-11-26 (F-001–F-010/F-002A/TBD-08) use existing governing owners and stable IDs; see Platform_12 §30. No competing workbook authority, new Mother Reference, version advance or implementation/certification claim. Preserve DOC_P0_BLOCKED and independent exact-head review/CI.
 
 Mother documents are **READ-MOSTLY** and authoritative.
 Coding agents must **not casually** modify them while implementing features.

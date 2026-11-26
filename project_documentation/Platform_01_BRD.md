@@ -433,6 +433,8 @@ Business outcome: day-2 administration is UI-complete for tenants, sites/groups,
 
 ## 26. IAM and security (business)
 
+F-003 (2026-11-26): technical compliance readiness first; paid formal certification later. Applicable technical security, regulated-profile and control testing remain mandatory; no achieved certification, external audit scope, schedule, budget or expenditure authorization is implied.
+
 <!-- P0-1 NORMATIVE BINDINGS -->
 Primary normative bindings for this section (P0-1; not an RTM catalogue):
 
@@ -449,6 +451,8 @@ Target includes durable/tamper-evident audit. Common emitter logging alone is no
 ---
 
 ## 28. Data retention and protection (business)
+
+Founder-approved default profile (2026-11-26; TBD-08): raw performance metrics **90 days**, hourly metric rollups **365 days**, raw Syslog/logs **7 days**, raw Flow (NetFlow/IPFIX/sFlow and compatible variants) **7 days**. All configurable by authorized policy and scope; validate workload/storage feasibility before activation. These are product defaults, not contractual retention or capacity guarantees. Protected audit/security, incident/RCA, NCM/configuration and legal-hold evidence retain separate governed policies. The non-disableable Core/Sensor 80% watermark, eligible-only reclamation, verified rollup generation before normal expiry, correct metric semantics and explicit loss/audit evidence remain mandatory. No silent retention shortening; infeasible profiles require visible correction or authorized policy disposition.
 
 Customers control normal retention and rollups through UI by data class and scope:
 
@@ -475,7 +479,7 @@ Historical telemetry is less important than continuity of live monitoring.
 
 - HA is distinct from DR
 - DR architecture is mandatory in v1.0 business scope
-- Exact contractual RPO/RTO and automated-vs-manual DR activation remain **TBD — Decision Required**
+- F-004 (2026-11-26): customer-specific contractual DR RPO/RTO may be agreed only after applicable recovery-profile certification and Founder approval; no universal commercial guarantee. Internal technical recovery objectives, activation policy, measured recovery and data-integrity evidence remain open under BUILD-125/131. Phase 1 mandatory site-loss recovery and Phase 1.5 certified HA deletion-ACK RPO=0 remain distinct and unchanged.
 - Backup/restore must cover configuration, PostgreSQL state, ClickHouse data/metadata policy, Device Packs, dashboards, reports, integrations, policies, certificates/keys according to secure process and other required state
 - Restore testing/integrity verification is required
 
@@ -554,7 +558,13 @@ Business expectations include bounded on-demand diagnostics, multi-vantage verif
 
 ## 34. Licensing business behavior
 
-Platform licensing may support annual, perpetual, device, element and module-based commercial models. Commercial quantities, packaging and pricing remain Founder-reserved.
+F-010: AmrudAi is software only; customer or partner supplies hardware/VMs. Implementation and onsite support separately chargeable; standard technical support remote. Custom integrations separately scoped and customer-specific development separately evaluated. Managed monitoring through approved MSP partners. No customer-specific Core forks, support SLA, pricing, staffing or contractual delivery/partner commitment inferred.
+
+F-001/F-008 (2026-11-26): annual subscription and perpetual usage rights are supported. Annual subscriptions include support and upgrades during the valid term; additional capacity requires additional subscription entitlement. Perpetual rights continue for the entitled software/version; renewable annual maintenance governs support and upgrade eligibility; additional capacity requires additional perpetual entitlement. Perpetual maintenance expiry MUST NOT stop entitled monitoring or revoke perpetual usage rights. The 30-day expiry warning, T-7 dashboard banner and **15-day post-expiry grace** (`EXPIRED_GRACE_15D`) followed by polling suspension apply to expiring software usage rights (annual subscription), not maintenance expiry. Historical data and authorized licence administration remain available. Exact fees, version-right details and support contracts remain Founder-reserved.
+
+F-006: common base platform includes network and infrastructure monitoring, discovery/inventory, topology, dashboards/reporting, alert/incident management, deterministic RCA, security/administration and basic integrations. Independently configurable optional entitlements: Network Traffic Analytics; Syslog/Log Analytics; Database Monitoring; Cloud/Kubernetes Monitoring; Advanced AIOps; Advanced Synthetic Monitoring; NCM; IPAM; native APM/DPI (Phase 2.5). F-007: standalone Core, additional Sensor software deployments, Sensor redundancy and DR included; two-Core HA and MSP separately entitled. Entitlements do not alter implementation/certification phases, permit a third Core, or imply certified support or unlimited compute. Exact SKU dependencies, quantities, prices and contractual terms remain Founder-reserved.
+
+Detailed measurement and deployment-bound transfer/offline activation: `Platform_02` §33.
 
 ### 34.1 Continuity behavior (non-grace)
 
@@ -564,9 +574,11 @@ Normative licensing continuity that is **not** in commercial conflict:
 - From 7 days before expiry, every dashboard displays a prominent banner with days remaining
 - Historical data remains available and must not be deleted merely because the licence expires
 - Licence administration remains available so authorized users can apply an extension/new licence
-- Slight over-entitlement should generate clear commercial warnings rather than randomly dropping devices; exact overage policy is TBD
+- F-002/F-002A (2026-11-26): up to **10%** temporary over-entitlement for **30 calendar days**; warn immediately on exceeding entitlement. Additional licensed activation during an authorized allowance must stay within cap and entitlement, authorization, capacity and safety checks. Above cap, or after allowance expiry while unregularized, block additional licensed activation. Preserve existing monitoring; do not remove existing resources or delete data to enforce commercial overage. Extension only through authorized commercial approval and audit; no automatic extension. This policy is independent of the existing 15-day grace for expiring software usage rights and does not override actual usage-right expiry, revocation, security or capacity. Counting, rounding, day/window, allowance reset and volume-meter enforcement semantics remain gated; no invented quantities or silent dropping of telemetry.
 
 ### 34.2 Post-expiry grace — Founder-approved 15 days (2026-09-30)
+
+This lifecycle applies to expiring software usage rights only. Perpetual maintenance non-renewal must not suspend entitled monitoring. Overage is independent.
 
 **Authority:** Founder decision **2026-09-30** — post-expiry licence grace is **15 days** (`EXPIRED_GRACE_15D`).
 
@@ -589,7 +601,7 @@ Normative behavior:
 - polling continues during the 15-day post-expiry grace;
 - after the 15-day grace ends, polling stops unless the licence is manually extended/renewed;
 - historical data remains accessible; no licence-expiry data deletion;
-- commercial quantities, packaging, pricing and SKUs remain Founder-reserved.
+- exact quantities, detailed SKU dependencies, pricing, discounts, maintenance fees and contracts remain Founder-reserved; F-005–F-007 fix measurement and high-level packaging.
 
 Historical/superseded provenance only (non-normative): earlier Mother Reference material recorded a seven-day post-expiry grace and temporarily left `FOUNDER-LIC-GRACE` unresolved between 7-day and 15-day historical/source values. Those statements are **superseded** and must not be treated as current commercial truth.
 
@@ -697,13 +709,13 @@ Out of initial product scope:
 | ID | Item | Status |
 |---|---|---|
 | TBD-01 | Final external product/brand name beyond working name “Platform” | Resolved: **AmrudAi** (commercial customer-facing product name; internal engineering remains "Platform") |
-| TBD-02 | Contractual DR RPO/RTO and automated-vs-manual DR failover policy | TBD |
-| TBD-03 | Exact compliance certification roadmap/timeline | TBD |
+| TBD-02 | Contractual DR RPO/RTO and automated-vs-manual DR failover policy | F-004 approved: customer-specific contractual values only after certification; technical activation and measured targets open. |
+| TBD-03 | Exact compliance certification roadmap/timeline | F-003 approved: readiness first, paid certification later. Formal audit scope/timing/budget reserved. |
 | TBD-04 | Final certified Core scale beyond 15,000 devices and exact multi-Core trigger | Benchmark required |
 | TBD-05 | Exact Standard Network Workload Profile values after lab characterization | Engineering benchmark required |
 | TBD-06 | Final GNN implementation framework and optional GPU profile | Architecture benchmark/licence review required |
-| TBD-07 | Exact licensing overage policy before polling suspension | Commercial / Founder-reserved |
-| TBD-08 | Exact default retention durations/rollup periods | Product defaults TBD; UI remains configurable |
+| TBD-07 | Temporary licensing overage | F-002/F-002A approved: 10% for 30 calendar days; preserve existing monitoring; block new activation above cap/after expiry until regularized; authorized extension only. Technical metering/certification open. |
+| TBD-08 | Exact default retention durations/rollup periods | Approved: raw metrics 90d; hourly rollups 365d; logs 7d; Flow 7d; configurable. Sizing/protected-retention gates open. |
 | TBD-09 | Exact numeric UI/API SLOs after performance baseline | Benchmark required |
 | TBD-10 | Future Master Core/Regional Core release scope | Future architecture only |
 | **FOUNDER-LIC-GRACE** | Post-expiry licence grace duration | **RESOLVED 2026-09-30 (Founder):** **15 days** (`EXPIRED_GRACE_15D`). Supersedes prior seven-day post-expiry authority and historical `FOUNDER-LIC-GRACE UNRESOLVED` / 7-vs-15 conflict. T-7 pre-expiry banner remains distinct and governed. |
