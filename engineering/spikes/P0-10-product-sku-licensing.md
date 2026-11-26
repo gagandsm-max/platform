@@ -36,7 +36,7 @@ Preserve these rules (**AUTHORITATIVE FIXED REQUIREMENT**):
 * **historical data remains accessible**;
 * licence administration remains available.
 
-F-002/F-002A approved: up to 10% temporary overage for 30 calendar days, immediate warning, preserve existing monitoring, block additional activation above cap/after expiry until regularized; authorized commercial extension/audit only. Separate from usage-right expiry grace and security/capacity; volume/window and other metering details remain open.
+F-002/F-002A approved: up to 10% temporary overage for 30 calendar days, immediate warning, preserve existing monitoring, block additional activation above cap/after expiry until regularized; authorized commercial extension/audit only. Separate from usage-right expiry grace and security/capacity. Founder-approved Option A: Flow/Syslog daily unique accepted bytes UTC, warn/regularize and restrict additional activation above cap/after expiry, continue existing valid ingestion, no commercial drops/throttles. Physical metering, replay and acceptance evidence remain open.
 
 ---
 
