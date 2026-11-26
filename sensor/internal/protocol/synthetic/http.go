@@ -86,8 +86,7 @@ func cloneInt64Ptr(in *int64) *int64 {
 	return &v
 }
 
-func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, error) {
-	var result HTTPResult
+func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResult, err error) {
 	if c == nil {
 		return result, newError(CodeInvalidRequest, "synthetic collector is nil", nil, false)
 	}
@@ -117,7 +116,7 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, err
 	}
 	transport := &http.Transport{TLSClientConfig: &tls.Config{MinVersion: tls.VersionTLS12, RootCAs: roots}, DialContext: (&net.Dialer{}).DialContext, ForceAttemptHTTP2: true, DisableKeepAlives: true}
 	defer transport.CloseIdleConnections()
-	rec := &timingRecorder{overallStart: time.Now()}
+	rec := &timingRecorder{}
 	trace := &httptrace.ClientTrace{
 		DNSStart: func(httptrace.DNSStartInfo) { rec.setDNSStart(time.Now()) }, DNSDone: func(httptrace.DNSDoneInfo) { rec.setDNSDone(time.Now()) },
 		ConnectStart: func(_, _ string) { rec.setConnectStart(time.Now()) }, ConnectDone: func(_, _ string, e error) { rec.setConnectDone(time.Now(), e) },
@@ -138,6 +137,12 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, err
 		userHeaders[http.CanonicalHeaderKey(k)] = struct{}{}
 	}
 	redirects := 0
+	// Sticky latch: once any redirect crosses scheme/host/effective-port, strip
+	// originally configured header names and any Referer (including net/http-
+	// generated) on that hop and every subsequent hop (including return to the
+	// initial origin). net/http re-copies initial headers on each redirect;
+	// immediate-only stripping is insufficient.
+	originBoundaryCrossed := false
 	client := &http.Client{Transport: transport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		redirects = len(via)
 		if !r.FollowRedirects {
@@ -146,19 +151,27 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (HTTPResult, err
 		if len(via) > r.MaxRedirects {
 			return newError(CodeResourceLimit, "HTTP redirect count exceeds configured bound", nil, false)
 		}
-		if len(via) > 0 && !sameOrigin(via[len(via)-1].URL, next.URL) {
-			for k := range userHeaders {
-				next.Header.Del(k)
+		if len(via) > 0 {
+			if !sameOrigin(via[len(via)-1].URL, next.URL) {
+				originBoundaryCrossed = true
+			}
+			if originBoundaryCrossed {
+				next.Header.Del("Referer")
+				for k := range userHeaders {
+					next.Header.Del(k)
+				}
 			}
 		}
 		return nil
 	}}
-	begin := time.Now()
+	rec.overallStart = time.Now()
+	// Reading and validating the response body are part of the observed probe.
+	defer func() {
+		result.Timings = rec.snapshot(time.Since(rec.overallStart))
+		result.CompletedAt = c.now().UTC()
+	}()
 	resp, doErr := client.Do(req)
-	total := time.Since(begin)
-	result.Timings = rec.snapshot(total)
 	result.Redirects = redirects
-	result.CompletedAt = c.now().UTC()
 	if doErr != nil {
 		err = classifyHTTP(parent, ctx, doErr)
 		result.ErrorCode = CodeOf(err)
