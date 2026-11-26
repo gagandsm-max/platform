@@ -13,7 +13,10 @@ import time
 import unittest
 from unittest.mock import patch
 
-from isolation import Custody, HEALTH_FORMAT, KAFKA_VOLUME_FORMAT, OWNER, PROJECT, docker_gate, supervise
+from isolation import (
+    COMPOSE_SERVICE, INVALID_CONFIG_SERVICE, Custody, HEALTH_FORMAT, KAFKA_VOLUME_FORMAT,
+    OWNER, PROJECT, docker_gate, supervise,
+)
 from test_isolation import PREFIX, TOKEN
 
 
@@ -62,11 +65,20 @@ elif (kind, action) == ("network", "create"):
     objects["a" * 64] = {"Id": "a" * 64, "Name": args[-1], "Driver": "bridge", "Internal": True, "Labels": labels}
     state.write_text(json.dumps(data))
 elif kind == "create":
-    labels = dict(args[i + 1].split("=", 1) for i, v in enumerate(args) if v == "--label")
+    image = args[-1]
+    labels = dict(data["image"][image]["Config"]["Labels"])
+    labels.update(args[i + 1].split("=", 1) for i, v in enumerate(args) if v == "--label")
+    labels.update(data.get("create_labels", {}))
     ref = "d" * 64
-    data["container"][ref] = {"Id": ref, "Name": "/" + args[args.index("--name") + 1],
-                              "Config": {"Labels": labels}, "State": {"Status": "created"}}
+    data["container"][ref] = {
+        "Id": ref, "Name": "/" + args[args.index("--name") + 1],
+        "Image": image, "Config": {"Labels": labels}, "Mounts": [],
+        "HostConfig": {"NetworkMode": args[args.index("--network") + 1]},
+        "State": {"Status": "created"},
+        **data.get("create_fields", {}),
+    }
     state.write_text(json.dumps(data))
+    print(data.get("create_id", ref))
 elif kind == "start" and action == "-a":
     if data.get("invalid_exit_proven"):
         data["container"][args[-1]]["State"] = {
@@ -384,29 +396,73 @@ class CustodyTest(unittest.TestCase):
                          [["container", "rm", "--force", self.container]])
         self.assertEqual((self.directory / "remaining-networks.txt").read_text(), self.custody.anchor + "\n")
 
-    def test_invalid_config_requires_exit_and_removal_proof_to_clear_journal(self):
+    def invalid_config_fixture(self):
         tag = PREFIX + ":agent-runtime"
         image = "sha256:" + "e" * 64
         args = ["run", "--rm", "--name", PREFIX + "-invalid-config", "--label", f"{PROJECT}={PREFIX}",
                 "--network", "none", "--read-only", "--cpus", "0.25", "--memory", "128m",
                 "--pids-limit", "32", "--cap-drop", "ALL", "--security-opt", "no-new-privileges:true",
                 "--entrypoint", "/usr/local/bin/platform-agent-linux", tag]
+        images = {image: {"Id": image, "RepoTags": [tag],
+                          "Config": {"Labels": {**self.labels, COMPOSE_SERVICE: "agent-runtime"}}}}
+        return args, image, images
+
+    def test_invalid_config_requires_exit_and_removal_proof_to_clear_journal(self):
+        args, image, images = self.invalid_config_fixture()
         self.reserve()
         for proven in (True, False):
             with self.subTest(proven=proven):
                 self.update(network=self.anchor_resource(), container={}, invalid_exit_proven=proven,
-                            image={image: {"Id": image, "RepoTags": [tag], "Config": {"Labels": self.labels}}})
+                            image=images)
                 if proven:
                     self.assertEqual(docker_gate(self.custody, args), 1)
                     self.assertFalse(list(self.directory.glob("pending-*")))
                     self.assertEqual(json.loads(self.state.read_text())["container"], {})
                     self.assertIn(["container", "rm", "d" * 64], self.recorded())
-                    self.assertTrue(any(a[0] == "create" and a[-1] == image for a in self.recorded()))
+                    create, = (a for a in self.recorded() if a[0] == "create")
+                    self.assertEqual(create[-1], image)
+                    self.assertIn(f"{COMPOSE_SERVICE}={INVALID_CONFIG_SERVICE}", create)
+                    self.assertIn(["start", "-a", "d" * 64], self.recorded())
                 else:
                     with self.assertRaisesRegex(ValueError, "exit unconfirmed"):
                         docker_gate(self.custody, args)
                     self.assertEqual(len(list(self.directory.glob("pending-*"))), 1)
                     self.assertIn("d" * 64, json.loads(self.state.read_text())["container"])
+
+    def test_invalid_config_rejects_unproven_create_without_start_or_clearance(self):
+        args, _, images = self.invalid_config_fixture()
+        self.reserve()
+        for case, changes in {
+            "legacy inherited label": {"create_labels": {COMPOSE_SERVICE: "agent-runtime"}},
+            "foreign service label": {"create_labels": {COMPOSE_SERVICE: "core"}},
+            "foreign owner": {"create_labels": {OWNER: "foreign"}},
+            "foreign project": {"create_labels": {PROJECT: "foreign"}},
+            "foreign name": {"create_fields": {"Name": "/" + PREFIX + "-parser"}},
+            "foreign image": {"create_fields": {"Image": "sha256:" + "f" * 64}},
+            "mount": {"create_fields": {"Mounts": [{"Type": "bind"}]}},
+            "network": {"create_fields": {"HostConfig": {"NetworkMode": "bridge"}}},
+            "different returned ID": {"create_id": "f" * 64},
+        }.items():
+            with self.subTest(case=case):
+                self.update(network=self.anchor_resource(), container={}, image=images, **changes)
+                offset = len(self.recorded())
+                prior = set(self.directory.glob("pending-*"))
+                with self.assertRaises((ValueError, subprocess.CalledProcessError)):
+                    docker_gate(self.custody, args)
+                receipt, = set(self.directory.glob("pending-*")) - prior
+                self.assertEqual(json.loads(receipt.read_text())["verb"], "create")
+                self.assertFalse(any(a[0] == "start" or a[1] == "rm" for a in self.recorded()[offset:]))
+
+    def test_invalid_config_retains_journal_when_removal_fails(self):
+        args, _, images = self.invalid_config_fixture()
+        self.reserve()
+        self.update(network=self.anchor_resource(), container={}, image=images,
+                    invalid_exit_proven=True, fail=["container", "rm"])
+        with self.assertRaises(subprocess.CalledProcessError):
+            docker_gate(self.custody, args)
+        receipt, = self.directory.glob("pending-*")
+        self.assertEqual(json.loads(receipt.read_text())["verb"], "start")
+        self.assertIn("d" * 64, json.loads(self.state.read_text())["container"])
 
     def test_expected_exec_nonzero_requires_in_container_exit_receipt(self):
         self.reserve()

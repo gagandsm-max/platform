@@ -70,9 +70,12 @@ contains the admitted operation category, verb and applicable fixture service
 names. A positive client exit status is recorded as `returned-nonzero` with its
 exit code. A signal result is `uncertain`. A receipt still marked `submitted`
 means no outcome was recorded. All three states and legacy receipts require
-completion evidence for clearance. For the expected invalid-config exit, the
-runner verifies exit 1 on the created container ID, removes that container, and
-confirms its absence.
+completion evidence for clearance. The invalid-config helper is created from
+the owned Agent image by ID and overrides its inherited Compose service label
+with `agent-runtime-invalid-config`. The runner checks the helper's exact
+name, returned ID, ownership, image, mounts and network before start. It
+verifies application exit 1 on that ID, removes the container, and confirms
+its absence before clearing the receipt.
 Unresolved receipts retain the reservation and make teardown fail even when
 owned-resource cleanup succeeds. Retain the evidence directory and use
 `cleanup.log`, the pending and custody receipts, and a fresh inventory for

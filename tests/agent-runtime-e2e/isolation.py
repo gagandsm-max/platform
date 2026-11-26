@@ -47,7 +47,10 @@ PKI = "pki/deploy/docker/certs"
 POSTGRES_INIT_SOURCE = "deploy/docker/postgres/init.sql"
 POSTGRES_INIT_FIXTURE = "postgres-init.sql"
 POSTGRES_INIT_TARGET = "/docker-entrypoint-initdb.d/01-init.sql"
-HELPERS = {"pki", "parser", "kafka-helper", "invalid-config"}
+HELPERS = {"pki", "parser", "kafka-helper"}
+INVALID_CONFIG = "invalid-config"
+INVALID_CONFIG_SERVICE = "agent-runtime-invalid-config"
+COMPOSE_SERVICE = "com.docker.compose.service"
 ID = re.compile(r"[a-f0-9]{64}")
 REAP_GRACE = 0.1
 GATE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, OSError, subprocess.SubprocessError)
@@ -402,8 +405,10 @@ class Custody:
         if kind != "image":
             require(name == self.prefix + "-" + leaf, f"unexpected name for labelled {kind}: {name}")
         if kind == "container":
-            service = labels.get("com.docker.compose.service")
-            allowed = (leaf in HELPERS and service is None) or (
+            service = labels.get(COMPOSE_SERVICE)
+            allowed = (leaf == INVALID_CONFIG and service == INVALID_CONFIG_SERVICE) or (
+                leaf in HELPERS and service is None
+            ) or (
                 service in IMAGES.keys() | BUILDS.keys() and leaf == service
             ) or (service in {"kafka", "unit-contracts"} and re.fullmatch(service + r"-run-[a-f0-9]{12}", leaf))
             valid = item.get("Name") == "/" + name and item.get("Id") == ref and project == self.prefix and allowed
@@ -426,6 +431,12 @@ class Custody:
             valid = (name in {self.prefix + ":" + service for service in BUILDS}
                      and item.get("Id") == ref and item.get("RepoTags") == [name])
         require(own and valid, f"unproven ownership: {kind} {name}")
+        if kind == "container" and leaf == INVALID_CONFIG:
+            image = item.get("Image", "")
+            require(isinstance(image, str) and image.startswith("sha256:") and ID.fullmatch(image[7:])
+                    and item.get("Mounts") == [] and item.get("HostConfig", {}).get("NetworkMode") == "none",
+                    f"unproven invalid-config isolation: {name}")
+            self.check("image", image, self.prefix + ":agent-runtime", self.inspect("image", image))
 
     def admit(self):
         self.inventory(fresh=True)
@@ -503,12 +514,17 @@ class Custody:
         # Disable auto-removal long enough to prove the exit on an immutable ID.
         services = ["agent-runtime"]
         pending = self.journal("invalid-config", "create", services)
-        create = ["create", *(arg for arg in args[1:] if arg != "--rm")]
-        rc = subprocess.call(self.docker + create, stdout=subprocess.DEVNULL)
-        if rc:
-            self.write_journal(pending, "invalid-config", "create", services, rc)
-        require(rc == 0, "invalid-config creation unconfirmed")
-        ref, _ = owned_target(self.active()["container"], name)
+        # Override the service label inherited from the Compose-built image.
+        create = ["create", "--label", f"{COMPOSE_SERVICE}={INVALID_CONFIG_SERVICE}",
+                  *(arg for arg in args[1:] if arg != "--rm")]
+        result = subprocess.run(self.docker + create, stdout=subprocess.PIPE, text=True)
+        if result.returncode:
+            self.write_journal(pending, "invalid-config", "create", services, result.returncode)
+        require(result.returncode == 0, "invalid-config creation unconfirmed")
+        ref = result.stdout.strip()
+        containers = self.active()["container"]
+        require(ID.fullmatch(ref) and ref in containers and containers[ref][0] == name
+                and containers[ref][1].get("Image") == args[-1], "invalid-config creation unconfirmed")
         self.write_journal(pending, "invalid-config", "start", services)
         rc = subprocess.call(self.docker + ["start", "-a", ref])
         if rc:
@@ -516,11 +532,13 @@ class Custody:
         item = self.inspect("container", ref)
         self.check("container", ref, name, item)
         state = item["State"]
-        require(rc in {0, 1} and state.get("Status") == "exited" and state.get("ExitCode") == 1
+        require(item.get("Image") == args[-1] and rc in {0, 1}
+                and state.get("Status") == "exited" and state.get("ExitCode") == 1
                 and state.get("Error") == "" and state.get("FinishedAt", "") > "0001-01-01T00:00:00Z",
                 "invalid-config exit unconfirmed")
         self.query("container", "rm", ref)
-        require(all(entry != name for entry, _ in self.active()["container"].values()),
+        containers = self.active()["container"]
+        require(ref not in containers and all(entry != name for entry, _ in containers.values()),
                 "invalid-config removal unconfirmed")
         pending.unlink()
         return 1
@@ -751,7 +769,7 @@ def raw_run(args, custody, inventory):
                     and len(command) == 3 and command[:2] == ["node", "-e"],
                     "unexpected parser invocation")
         else:
-            helper = "invalid-config"
+            helper = INVALID_CONFIG
             require(image == custody.prefix + ":agent-runtime"
                     and any(name == image for name, _ in inventory["image"].values()),
                     "unexpected helper image")
@@ -918,7 +936,7 @@ def docker_gate(custody, args):
         inventory = custody.active()
         command = raw_run(args[1:], custody, inventory)
         name = command[2]
-        if name == prefix + "-invalid-config":
+        if name == prefix + "-" + INVALID_CONFIG:
             require(args[1:] == [
                 "--rm", "--name", name, "--label", f"{PROJECT}={prefix}", "--network", "none",
                 "--read-only", "--cpus", "0.25", "--memory", "128m", "--pids-limit", "32",
