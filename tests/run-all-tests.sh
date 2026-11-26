@@ -493,11 +493,15 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=15
 TEST_DESC="Sensor 80% Storage Watermark Protection Logic"
-GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.27.1-alpine3.24 go test -v -run "TestProtectionAndRecoveryAfterFreeSpace|TestFixedWatermarkCannotBeChanged" ./internal/... 2>/dev/null || echo "FAIL")
-if echo "${GUARD_TEST}" | grep -q "PASS"; then
+GUARD_STATUS=0
+GUARD_TEST=$(docker run --rm -v "${ROOT_DIR}/sensor:/app:ro" -w /app golang:1.27.1-alpine3.24 go test -v -count=1 -run "^(TestProtectionAndRecoveryAfterFreeSpace|TestFixedWatermarkCannotBeChanged)$" ./internal/... 2>&1) || GUARD_STATUS=$?
+if [ "${GUARD_STATUS}" -eq 0 ] && \
+   grep -Eq '^--- PASS: TestProtectionAndRecoveryAfterFreeSpace [(]' <<< "${GUARD_TEST}" && \
+   grep -Eq '^--- PASS: TestFixedWatermarkCannotBeChanged [(]' <<< "${GUARD_TEST}"; then
     pass ${TEST_NUM} "${TEST_DESC}"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Watermark threshold unit test failed"
+    printf '%s\n' "${GUARD_TEST}" >&2
+    fail ${TEST_NUM} "${TEST_DESC}" "Watermark tests exited ${GUARD_STATUS} or required PASS evidence is missing"
 fi
 
 # ------------------------------------------------------------------------------
@@ -531,51 +535,11 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=18
 TEST_DESC="Sensor -> Core mTLS Authentication & Access Control Verification"
-CERT_DIR="${ROOT_DIR}/deploy/docker/certs"
-
-# 1. Valid Network Sensor cert -> Accepted (HTTP 200)
-NET_RESP=$(curl -k -s \
-    --cert "${CERT_DIR}/sensor-net.crt" \
-    --key "${CERT_DIR}/sensor-net.key" \
-    -X POST "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/sensor/heartbeat" \
-    -H "Content-Type: application/json" \
-    -d '{"sensor_id":"sensor-net-01"}' 2>/dev/null || echo "")
-
-# 2. Valid Infra Sensor cert -> Accepted (HTTP 200, distinct identity)
-INFRA_RESP=$(curl -k -s \
-    --cert "${CERT_DIR}/sensor-infra.crt" \
-    --key "${CERT_DIR}/sensor-infra.key" \
-    -X POST "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/sensor/heartbeat" \
-    -H "Content-Type: application/json" \
-    -d '{"sensor_id":"sensor-infra-01"}' 2>/dev/null || echo "")
-
-# 3. No client cert -> Rejected (HTTP 401 Unauthorized)
-NO_CERT_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" \
-    -X POST "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/sensor/heartbeat" \
-    -H "Content-Type: application/json" \
-    -d '{"sensor_id":"sensor-anonymous"}' 2>/dev/null || echo "000")
-
-# 4. Untrusted client cert -> Rejected (TLS handshake failure or HTTP 403)
-UNTRUSTED_STATUS=$(curl -k -s -o /dev/null -w "%{http_code}" \
-    --cert "${CERT_DIR}/untrusted-client.crt" \
-    --key "${CERT_DIR}/untrusted-client.key" \
-    -X POST "https://127.0.0.1:${PLATFORM_CORE_HOST_PORT:-28443}/api/v1/sensor/heartbeat" \
-    -H "Content-Type: application/json" \
-    -d '{"sensor_id":"sensor-rogue"}' 2>/dev/null || true)
-
-# Authoritative identity is enrolled Sensor principal ID (not certificate CN).
-NET_OK=$(echo "${NET_RESP}" | grep -q '"sensor_identity":"sensor-net-01"' && echo "true" || echo "false")
-INFRA_OK=$(echo "${INFRA_RESP}" | grep -q '"sensor_identity":"sensor-infra-01"' && echo "true" || echo "false")
-NO_CERT_OK=$([ "${NO_CERT_STATUS}" = "401" ] && echo "true" || echo "false")
-UNTRUSTED_OK=false
-if [ "${UNTRUSTED_STATUS}" = "000" ] || [ "${UNTRUSTED_STATUS}" = "403" ] || [ -z "${UNTRUSTED_STATUS}" ]; then
-    UNTRUSTED_OK=true
-fi
-
-if [ "${NET_OK}" = "true" ] && [ "${INFRA_OK}" = "true" ] && [ "${NO_CERT_OK}" = "true" ] && [ "${UNTRUSTED_OK}" = "true" ]; then
+if source "${ROOT_DIR}/tests/run-security-smoke.sh" &&
+    mtls_heartbeat_guard "${ROOT_DIR}/deploy/docker/certs" "${PLATFORM_CORE_HOST_PORT:-28443}"; then
     pass ${TEST_NUM} "${TEST_DESC} (mTLS valid accepted, missing 401, untrusted rejected)"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "Net: ${NET_OK}, Infra: ${INFRA_OK}, NoCert 401: ${NO_CERT_OK} (${NO_CERT_STATUS}), Untrusted: ${UNTRUSTED_OK} (${UNTRUSTED_STATUS})"
+    fail ${TEST_NUM} "${TEST_DESC}" "mTLS fixture validation or heartbeat evidence failed"
 fi
 
 # ------------------------------------------------------------------------------
@@ -601,36 +565,188 @@ fi
 # ------------------------------------------------------------------------------
 TEST_NUM=20
 TEST_DESC="Persistence, Structured JSON Logs, and Workstation Isolation"
+
+# Start an explicit non-Compose probe so isolation can never pass vacuously.
+# Reuse the already-local Postgres image; do not pull or add a dependency.
+# Cover image VOLUME /var/lib/postgresql/data with bounded tmpfs so the probe
+# cannot retain an anonymous volume. Ownership is run-scoped: unique identity,
+# positive label, immutable container ID. Never delete by name before acquire.
+# Cleanup removes only a verified immutable ID; never rm by name after inspect.
+FOREIGN_PROBE_RUN_ID="$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')"
+FOREIGN_PROBE_LABEL_KEY="io.amrudai.test20.isolation-probe.run"
+FOREIGN_PROBE_NAME=""
+FOREIGN_PROBE_OWNER_LABEL=""
+FOREIGN_PROBE_IMAGE=""
+FOREIGN_PROBE_ID=""
+FOREIGN_PROBE_ACQUIRED=0
+FOREIGN_PROBE_STARTED=false
+FOREIGN_PROBE_CLEANUP_STATUS=0
+FOREIGN_PROBE_DETAIL=""
+
+if [[ "${FOREIGN_PROBE_RUN_ID}" =~ ^[0-9a-f]{32}$ ]]; then
+    FOREIGN_PROBE_NAME="platform-isolation-probe-${FOREIGN_PROBE_RUN_ID}"
+    FOREIGN_PROBE_OWNER_LABEL="${FOREIGN_PROBE_LABEL_KEY}=${FOREIGN_PROBE_RUN_ID}"
+else
+    FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}run_id_generation_failed;"
+fi
+
+inspect_foreign_probe_owner() {
+    local ref="${1:-}"
+    local expected_id="${2:-}"
+    local output identity label
+    [ -n "${ref}" ] || return 1
+    output="$(docker inspect -f '{{.Id}} {{index .Config.Labels "'"${FOREIGN_PROBE_LABEL_KEY}"'"}}' "${ref}" 2>/dev/null)" || return 1
+    identity="${output%% *}"
+    label="${output#* }"
+    [[ "${identity}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [ "${label}" = "${FOREIGN_PROBE_RUN_ID}" ] || return 1
+    [ -z "${expected_id}" ] || [ "${identity}" = "${expected_id}" ] || return 1
+    FOREIGN_PROBE_INSPECT_ID="${identity}"
+    return 0
+}
+
+prove_foreign_probe_absent() {
+    # Failed inspect alone is not absence; require a successful complementary inventory.
+    local ref="${1:-}"
+    local inventory=""
+    [ -n "${ref}" ] || return 1
+    if docker inspect --type container "${ref}" >/dev/null 2>&1; then
+        return 1
+    fi
+    inventory="$(docker ps -aq --no-trunc --filter "id=${ref}" 2>/dev/null)" || return 1
+    [ -z "${inventory}" ]
+}
+
+# Exact-owned cleanup only. Does not replace Test 19's subshell traps.
+# Never removes an unacquired or foreign/ambiguous name. Propagates failure.
+cleanup_foreign_probe() {
+    local status=0
+    if [ "${FOREIGN_PROBE_ACQUIRED}" != "1" ] || [ -z "${FOREIGN_PROBE_ID}" ]; then
+        return 0
+    fi
+    if ! inspect_foreign_probe_owner "${FOREIGN_PROBE_ID}" "${FOREIGN_PROBE_ID}"; then
+        echo "Test20: cleanup refused: ownership/identity of probe could not be established" >&2
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}cleanup_inspect_failed;"
+        FOREIGN_PROBE_CLEANUP_STATUS=1
+        return 1
+    fi
+    # Remove only the inspect-proven immutable ID. Never rm by name: the name may
+    # have been reused by an unrelated container after ownership verification.
+    verified_id="${FOREIGN_PROBE_INSPECT_ID}"
+    if [ -z "${verified_id}" ] || [ "${verified_id}" != "${FOREIGN_PROBE_ID}" ]; then
+        echo "Test20: cleanup refused: verified immutable ID unavailable" >&2
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}cleanup_verified_id_missing;"
+        FOREIGN_PROBE_CLEANUP_STATUS=1
+        return 1
+    fi
+    if ! docker rm -fv "${verified_id}" >/dev/null 2>&1; then
+        echo "Test20: cleanup failed removing owned probe id ${verified_id}" >&2
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}cleanup_remove_failed;"
+        FOREIGN_PROBE_CLEANUP_STATUS=1
+        return 1
+    fi
+    if ! prove_foreign_probe_absent "${FOREIGN_PROBE_ID}"; then
+        echo "Test20: cleanup residue: owned probe identity still present" >&2
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}cleanup_residue;"
+        FOREIGN_PROBE_CLEANUP_STATUS=1
+        return 1
+    fi
+    FOREIGN_PROBE_ACQUIRED=0
+    FOREIGN_PROBE_ID=""
+    FOREIGN_PROBE_STARTED=false
+    return 0
+}
+
+test20_fixture_exit() {
+    local status=$?
+    trap - EXIT
+    if [ "${FOREIGN_PROBE_ACQUIRED}" = "1" ]; then
+        cleanup_foreign_probe || status=1
+    fi
+    if [ "${FOREIGN_PROBE_CLEANUP_STATUS}" -ne 0 ]; then
+        status=1
+    fi
+    exit "${status}"
+}
+
+acquire_foreign_probe() {
+    local created_id=""
+    FOREIGN_PROBE_STARTED=false
+    FOREIGN_PROBE_ACQUIRED=0
+    FOREIGN_PROBE_ID=""
+    [ -n "${FOREIGN_PROBE_NAME}" ] || return 1
+    FOREIGN_PROBE_IMAGE=$(docker inspect -f '{{.Config.Image}}' platform-postgres 2>/dev/null || echo "")
+    [ -n "${FOREIGN_PROBE_IMAGE}" ] || return 1
+    # Prove absence: a pre-existing same-name fixture is a collision, never deleted.
+    if docker inspect --type container "${FOREIGN_PROBE_NAME}" >/dev/null 2>&1; then
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}collision_before_acquire;"
+        echo "Test20: probe name collision before acquire; refusing pre-acquisition deletion" >&2
+        return 1
+    fi
+    created_id="$(docker run -d --name "${FOREIGN_PROBE_NAME}" \
+        --label "${FOREIGN_PROBE_OWNER_LABEL}" \
+        --tmpfs /var/lib/postgresql/data:rw,exec,size=64m \
+        --entrypoint sh "${FOREIGN_PROBE_IMAGE}" \
+        -c 'while :; do sleep 60; done' 2>/dev/null)" || return 1
+    created_id="$(printf '%s' "${created_id}" | tr -d '\r\n')"
+    # Create stdout / short IDs are not ownership. Prove run-scoped label + full ID
+    # via inspect before acquire. On failed/ambiguous ownership: fail visibly and
+    # retain the resource — never rm an unproven ID or name.
+    if [[ ! "${created_id}" =~ ^[0-9a-f]{64}$ ]]; then
+        if ! inspect_foreign_probe_owner "${FOREIGN_PROBE_NAME}"; then
+            FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}acquire_inspect_failed;"
+            echo "Test20: acquire failed: ownership unproven after create; retaining ambiguous resource" >&2
+            return 1
+        fi
+        created_id="${FOREIGN_PROBE_INSPECT_ID}"
+    elif ! inspect_foreign_probe_owner "${created_id}" "${created_id}"; then
+        FOREIGN_PROBE_DETAIL="${FOREIGN_PROBE_DETAIL}acquire_label_mismatch;"
+        echo "Test20: acquire failed: owner label mismatch/missing; retaining unproven create identity" >&2
+        return 1
+    else
+        created_id="${FOREIGN_PROBE_INSPECT_ID}"
+    fi
+    FOREIGN_PROBE_ID="${created_id}"
+    FOREIGN_PROBE_ACQUIRED=1
+    FOREIGN_PROBE_STARTED=true
+    return 0
+}
+
+# Contract harness: exercise ownership/cleanup only (fake Docker; no stack).
+if [ "${PLATFORM_TEST20_FIXTURE_CONTRACT:-0}" = "1" ]; then
+    trap test20_fixture_exit EXIT
+    if ! acquire_foreign_probe; then
+        echo "Test20 fixture contract: acquire failed (${FOREIGN_PROBE_DETAIL:-none})" >&2
+        exit 1
+    fi
+    owned_id_for_absence="${FOREIGN_PROBE_ID}"
+    if ! cleanup_foreign_probe; then
+        echo "Test20 fixture contract: cleanup failed (${FOREIGN_PROBE_DETAIL:-none})" >&2
+        exit 1
+    fi
+    # Absence is proven by the owned immutable ID, not the reusable name.
+    if ! prove_foreign_probe_absent "${owned_id_for_absence}"; then
+        echo "Test20 fixture contract: owned probe identity still present after cleanup" >&2
+        exit 1
+    fi
+    echo "Test20 fixture contract: PASS owned acquire/cleanup"
+    exit 0
+fi
+
 # Marker row in Postgres
 # Day-02 tenant_id is UUID. Shared-file change required so persistence probe matches schema.
 docker exec platform-postgres psql -U platform_app -d platform -c "INSERT INTO platform.tenant (tenant_id, name, mode, status, timezone, created_at, updated_at) VALUES ('018f0e0a-0000-7000-8000-00000000beef'::uuid, 'Restart Test', 'SINGLE', 'ACTIVE', 'UTC', NOW(), NOW()) ON CONFLICT DO NOTHING;" > /dev/null 2>&1
 # Marker key in Valkey
 docker exec platform-valkey valkey-cli -a "${VALKEY_PASSWORD:-platform_dev_valkey_password_change_in_prod}" set restart_persist_key "preserved_across_down" > /dev/null 2>&1
 
-# Start an explicit non-Compose probe so isolation can never pass vacuously.
-# Reuse the already-local Postgres image; do not pull or add a dependency.
-# Cover image VOLUME /var/lib/postgresql/data with bounded tmpfs so the probe
-# cannot retain an anonymous volume; tear down with rm -fv on exact name only.
-FOREIGN_PROBE_NAME="platform-isolation-probe-$$"
-FOREIGN_PROBE_IMAGE=$(docker inspect -f '{{.Config.Image}}' platform-postgres 2>/dev/null || echo "")
-cleanup_foreign_probe() {
-    docker rm -fv "${FOREIGN_PROBE_NAME}" > /dev/null 2>&1 || true
-}
-# Exact-owned failure-safe cleanup (does not replace Test 19's subshell traps).
-trap cleanup_foreign_probe EXIT
-cleanup_foreign_probe
-FOREIGN_PROBE_STARTED=false
-if [ -n "${FOREIGN_PROBE_IMAGE}" ] && \
-   docker run -d --name "${FOREIGN_PROBE_NAME}" \
-     --tmpfs /var/lib/postgresql/data:rw,exec,size=64m \
-     --entrypoint sh "${FOREIGN_PROBE_IMAGE}" \
-     -c 'while :; do sleep 60; done' > /dev/null 2>&1; then
-    FOREIGN_PROBE_STARTED=true
+trap test20_fixture_exit EXIT
+if [ -n "${FOREIGN_PROBE_NAME}" ]; then
+    acquire_foreign_probe || true
 fi
 
-# Snapshot unrelated container state immediately before the destructive
+# Snapshot unrelated container/volume state immediately before the destructive
 # Platform Compose restart. Determine ownership from the exact current Compose
-# stack rather than a name prefix.
+# stack rather than a name prefix. Record immutable container IDs.
 PLATFORM_OWNED_BEFORE=$(docker compose ps -a --format '{{.Name}}' | sort)
 snapshot_foreign_container_states() {
     docker ps -a --format '{{.Names}}' | sort | while IFS= read -r name; do
@@ -638,11 +754,20 @@ snapshot_foreign_container_states() {
         if printf '%s\n' "${PLATFORM_OWNED_BEFORE}" | grep -Fxq "${name}"; then
             continue
         fi
+        id=$(docker inspect -f '{{.Id}}' "${name}" 2>/dev/null || printf 'MISSING')
         running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
-        printf '%s|%s\n' "${name}" "${running}"
+        printf '%s|%s|%s\n' "${name}" "${id}" "${running}"
+    done
+}
+snapshot_foreign_volume_states() {
+    docker volume ls -q 2>/dev/null | sort | while IFS= read -r volume; do
+        [ -n "${volume}" ] || continue
+        labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "issue223.owner"}}|{{index .Labels "'"${FOREIGN_PROBE_LABEL_KEY}"'"}}' "${volume}" 2>/dev/null || printf 'MISSING')
+        printf '%s|%s\n' "${volume}" "${labels}"
     done
 }
 FOREIGN_BEFORE=$(snapshot_foreign_container_states)
+VOLUME_BEFORE=$(snapshot_foreign_volume_states)
 # Restart stack
 bash deploy/docker/kafka/deployment-preflight.sh down > /dev/null 2>&1 || exit 1
 bash deploy/docker/kafka/deployment-preflight.sh up > /dev/null 2>&1 || exit 1
@@ -870,29 +995,48 @@ if [ "${CORE_LOG_VALID}" = "true" ] && [ "${SENSOR_LOG_VALID}" = "true" ] && \
 fi
 
 # Isolation: verify every unrelated container present before the Platform
-# restart still exists with the same running/stopped state afterwards.
+# restart still exists with the same immutable ID and running/stopped state.
 FOREIGN_OK=true
 FOREIGN_COUNT=0
-FOREIGN_DETAIL=""
+FOREIGN_DETAIL="${FOREIGN_PROBE_DETAIL}"
 if [ -n "${FOREIGN_BEFORE}" ]; then
     FOREIGN_COUNT=$(printf '%s\n' "${FOREIGN_BEFORE}" | awk 'NF { count++ } END { print count+0 }')
-    while IFS='|' read -r name was_running; do
+    while IFS='|' read -r name was_id was_running; do
         [ -n "${name}" ] || continue
+        now_id=$(docker inspect -f '{{.Id}}' "${name}" 2>/dev/null || printf 'MISSING')
         now_running=$(docker inspect -f '{{.State.Running}}' "${name}" 2>/dev/null || printf 'MISSING')
-        if [ "${now_running}" != "${was_running}" ]; then
+        if [ "${now_id}" != "${was_id}" ] || [ "${now_running}" != "${was_running}" ]; then
             FOREIGN_OK=false
-            FOREIGN_DETAIL="${FOREIGN_DETAIL}${name}:${was_running}->${now_running};"
+            FOREIGN_DETAIL="${FOREIGN_DETAIL}${name}:${was_id}/${was_running}->${now_id}/${now_running};"
         fi
     done <<< "${FOREIGN_BEFORE}"
 fi
-if [ "${FOREIGN_PROBE_STARTED}" != "true" ] || [ "${FOREIGN_COUNT}" -lt 1 ]; then
+VOLUME_OK=true
+if [ -n "${VOLUME_BEFORE}" ]; then
+    while IFS='|' read -r volume was_labels; do
+        [ -n "${volume}" ] || continue
+        now_labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "issue223.owner"}}|{{index .Labels "'"${FOREIGN_PROBE_LABEL_KEY}"'"}}' "${volume}" 2>/dev/null || printf 'MISSING')
+        if [ "${now_labels}" != "${was_labels}" ]; then
+            VOLUME_OK=false
+            FOREIGN_DETAIL="${FOREIGN_DETAIL}volume:${volume}:${was_labels}->${now_labels};"
+        fi
+    done <<< "${VOLUME_BEFORE}"
+fi
+if [ "${FOREIGN_PROBE_STARTED}" != "true" ] || [ -z "${FOREIGN_PROBE_ID}" ] || [ "${FOREIGN_COUNT}" -lt 1 ]; then
     FOREIGN_OK=false
     FOREIGN_DETAIL="${FOREIGN_DETAIL}synthetic_probe_missing;"
-elif ! printf '%s\n' "${FOREIGN_BEFORE}" | grep -Fq "${FOREIGN_PROBE_NAME}|true"; then
+elif ! printf '%s\n' "${FOREIGN_BEFORE}" | grep -Fq "${FOREIGN_PROBE_NAME}|${FOREIGN_PROBE_ID}|true"; then
     FOREIGN_OK=false
     FOREIGN_DETAIL="${FOREIGN_DETAIL}synthetic_probe_not_running_before_restart;"
 fi
-cleanup_foreign_probe
+if [ "${VOLUME_OK}" != "true" ]; then
+    FOREIGN_OK=false
+fi
+cleanup_foreign_probe || true
+if [ "${FOREIGN_PROBE_CLEANUP_STATUS}" -ne 0 ]; then
+    FOREIGN_OK=false
+    FOREIGN_DETAIL="${FOREIGN_DETAIL}owned_cleanup_failed;"
+fi
 # Host runtime isolation is a developer-workstation policy. GitHub-hosted CI
 # runners intentionally ship Java/Go/Node and other language runtimes. Platform
 # project execution remains containerized in CI, so an ephemeral runner's PATH
@@ -924,6 +1068,7 @@ if [ "${PG_RESTART_VAL}" = "1" ] && [ "${VALKEY_RESTART_VAL}" = "preserved_acros
     PERSIST_OK=true
 fi
 
+trap - EXIT
 if [ "${PERSIST_OK}" = "true" ] && [ "${LOGS_OK}" = "true" ] && [ "${FOREIGN_OK}" = "true" ] && [ "${HOST_ISOLATION_OK}" = "true" ]; then
     pass ${TEST_NUM} "${TEST_DESC} (Persistence verified, JSON logs valid, ${FOREIGN_COUNT} foreign container(s) intact, ${ISOLATION_DETAIL})"
 else
