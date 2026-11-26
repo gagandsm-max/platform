@@ -138,9 +138,10 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResu
 	}
 	redirects := 0
 	// Sticky latch: once any redirect crosses scheme/host/effective-port, strip
-	// originally configured header names on that hop and every subsequent hop
-	// (including return to the initial origin). net/http re-copies initial
-	// headers on each redirect; immediate-only stripping is insufficient.
+	// originally configured header names and any Referer (including net/http-
+	// generated) on that hop and every subsequent hop (including return to the
+	// initial origin). net/http re-copies initial headers on each redirect;
+	// immediate-only stripping is insufficient.
 	originBoundaryCrossed := false
 	client := &http.Client{Transport: transport, CheckRedirect: func(next *http.Request, via []*http.Request) error {
 		redirects = len(via)
@@ -155,6 +156,7 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResu
 				originBoundaryCrossed = true
 			}
 			if originBoundaryCrossed {
+				next.Header.Del("Referer")
 				for k := range userHeaders {
 					next.Header.Del(k)
 				}

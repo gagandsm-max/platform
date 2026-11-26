@@ -213,3 +213,332 @@ func TestHTTPRedirectIsolationStickyOriginBoundary(t *testing.T) {
 		}
 	})
 }
+
+func TestHTTPRedirectGeneratedRefererIsolation(t *testing.T) {
+	const fixturePathQuery = "/start-fixture?marker=fixture-query-marker"
+	const fixtureConfiguredReferer = "https://fixture-configured-referer.example/marker"
+
+	newRecorder := func() (func(string, http.Header), func(string) (bool, int)) {
+		var mu sync.Mutex
+		seen := make(map[string]bool)
+		count := make(map[string]int)
+		record := func(key string, hdr http.Header) {
+			mu.Lock()
+			defer mu.Unlock()
+			count[key]++
+			// Presence only — never store or log Referer values.
+			if len(hdr.Values("Referer")) > 0 {
+				seen[key] = true
+			}
+		}
+		present := func(key string) (bool, int) {
+			mu.Lock()
+			defer mu.Unlock()
+			return seen[key], count[key]
+		}
+		return record, present
+	}
+
+	methods := []struct {
+		name   string
+		isHead bool
+	}{
+		{name: "GET", isHead: false},
+		{name: "HEAD", isHead: true},
+	}
+
+	for _, m := range methods {
+		newReq := func(url string, follow bool, maxRedirects int, expectedStatus int) HTTPRequest {
+			req := HTTPRequest{
+				URL:                 url,
+				Method:              HTTPMethodGET,
+				Timeout:             time.Second,
+				FollowRedirects:     follow,
+				MaxRedirects:        maxRedirects,
+				MaxResponseBytes:    256,
+				ExpectedStatusCodes: []int{expectedStatus},
+			}
+			if m.isHead {
+				req.Method = HTTPMethodHEAD
+			}
+			return req
+		}
+
+		t.Run(m.name+"/multi_hop_foreign_strips_generated_referer", func(t *testing.T) {
+			record, present := newRecorder()
+			var foreign *httptest.Server
+			foreign = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("foreign:"+r.URL.Path, r.Header)
+				switch r.URL.Path {
+				case "/hop1":
+					http.Redirect(w, r, foreign.URL+"/hop2", http.StatusFound)
+				case "/hop2":
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer foreign.Close()
+
+			initial := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("initial:"+r.URL.Path, r.Header)
+				http.Redirect(w, r, foreign.URL+"/hop1", http.StatusFound)
+			}))
+			defer initial.Close()
+
+			c := newTestCollector(t)
+			out, err := c.HTTP(context.Background(), newReq(initial.URL+fixturePathQuery, true, 4, http.StatusOK))
+			if err != nil || !out.Success || out.Redirects != 2 {
+				t.Fatalf("multi-hop foreign failed: success=%v redirects=%d err=%v", out.Success, out.Redirects, err)
+			}
+			if seen, n := present("initial:/start-fixture"); n != 1 || seen {
+				t.Fatalf("initial hop: want no Referer once, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("foreign:/hop1"); n != 1 || seen {
+				t.Fatalf("first foreign hop: want generated Referer stripped, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("foreign:/hop2"); n != 1 || seen {
+				t.Fatalf("second foreign hop: want generated Referer stripped, got present=%v count=%d", seen, n)
+			}
+		})
+
+		t.Run(m.name+"/return_to_initial_origin_keeps_generated_referer_stripped", func(t *testing.T) {
+			record, present := newRecorder()
+			var initial, foreign *httptest.Server
+			initial = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("initial:"+r.URL.Path, r.Header)
+				switch r.URL.Path {
+				case "/start-fixture":
+					http.Redirect(w, r, foreign.URL+"/away", http.StatusFound)
+				case "/back":
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer initial.Close()
+
+			foreign = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("foreign:"+r.URL.Path, r.Header)
+				http.Redirect(w, r, initial.URL+"/back", http.StatusFound)
+			}))
+			defer foreign.Close()
+
+			c := newTestCollector(t)
+			out, err := c.HTTP(context.Background(), newReq(initial.URL+fixturePathQuery, true, 4, http.StatusOK))
+			if err != nil || !out.Success || out.Redirects != 2 {
+				t.Fatalf("return-to-initial failed: success=%v redirects=%d err=%v", out.Success, out.Redirects, err)
+			}
+			if seen, n := present("initial:/start-fixture"); n != 1 || seen {
+				t.Fatalf("initial hop: want no Referer once, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("foreign:/away"); n != 1 || seen {
+				t.Fatalf("foreign hop: want generated Referer stripped, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("initial:/back"); n != 1 || seen {
+				t.Fatalf("return-to-initial hop: want generated Referer still stripped, got present=%v count=%d", seen, n)
+			}
+		})
+
+		t.Run(m.name+"/same_origin_only_preserves_generated_referer", func(t *testing.T) {
+			record, present := newRecorder()
+			var srv *httptest.Server
+			srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("same:"+r.URL.Path, r.Header)
+				switch r.URL.Path {
+				case "/start-fixture":
+					http.Redirect(w, r, srv.URL+"/next", http.StatusFound)
+				case "/next":
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer srv.Close()
+
+			c := newTestCollector(t)
+			out, err := c.HTTP(context.Background(), newReq(srv.URL+fixturePathQuery, true, 2, http.StatusOK))
+			if err != nil || !out.Success || out.Redirects != 1 {
+				t.Fatalf("same-origin failed: success=%v redirects=%d err=%v", out.Success, out.Redirects, err)
+			}
+			if seen, n := present("same:/start-fixture"); n != 1 || seen {
+				t.Fatalf("same-origin start: want no Referer once, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("same:/next"); n != 1 || !seen {
+				t.Fatalf("same-origin redirect: want generated Referer preserved, got present=%v count=%d", seen, n)
+			}
+		})
+
+		t.Run(m.name+"/no_follow_stops_without_contacting_foreign_target", func(t *testing.T) {
+			record, present := newRecorder()
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("target", r.Header)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+
+			source := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("source", r.Header)
+				http.Redirect(w, r, target.URL+"/never", http.StatusFound)
+			}))
+			defer source.Close()
+
+			c := newTestCollector(t)
+			out, err := c.HTTP(context.Background(), newReq(source.URL+fixturePathQuery, false, 0, http.StatusFound))
+			if err != nil || !out.Success || out.StatusCode != http.StatusFound || out.Redirects != 1 {
+				t.Fatalf("no-follow failed: success=%v status=%d redirects=%d err=%v", out.Success, out.StatusCode, out.Redirects, err)
+			}
+			if seen, n := present("source"); n != 1 || seen {
+				t.Fatalf("no-follow source: want no Referer once, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("target"); n != 0 || seen {
+				t.Fatalf("no-follow target: want zero contact, got present=%v count=%d", seen, n)
+			}
+		})
+
+		t.Run(m.name+"/configured_referer_stripped_after_origin_boundary", func(t *testing.T) {
+			record, present := newRecorder()
+			var foreign *httptest.Server
+			foreign = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("foreign:"+r.URL.Path, r.Header)
+				switch r.URL.Path {
+				case "/hop1":
+					http.Redirect(w, r, foreign.URL+"/hop2", http.StatusFound)
+				case "/hop2":
+					w.WriteHeader(http.StatusOK)
+				default:
+					w.WriteHeader(http.StatusNotFound)
+				}
+			}))
+			defer foreign.Close()
+
+			initial := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				record("initial:"+r.URL.Path, r.Header)
+				http.Redirect(w, r, foreign.URL+"/hop1", http.StatusFound)
+			}))
+			defer initial.Close()
+
+			req := newReq(initial.URL+fixturePathQuery, true, 4, http.StatusOK)
+			req.Headers = map[string]string{"Referer": fixtureConfiguredReferer}
+
+			c := newTestCollector(t)
+			out, err := c.HTTP(context.Background(), req)
+			if err != nil || !out.Success || out.Redirects != 2 {
+				t.Fatalf("configured Referer multi-hop failed: success=%v redirects=%d err=%v", out.Success, out.Redirects, err)
+			}
+			if seen, n := present("initial:/start-fixture"); n != 1 || !seen {
+				t.Fatalf("initial hop: want configured Referer once, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("foreign:/hop1"); n != 1 || seen {
+				t.Fatalf("first foreign hop: want configured/generated Referer stripped, got present=%v count=%d", seen, n)
+			}
+			if seen, n := present("foreign:/hop2"); n != 1 || seen {
+				t.Fatalf("second foreign hop: want Referer still stripped, got present=%v count=%d", seen, n)
+			}
+		})
+	}
+
+	t.Run("https_to_https_trusted_ca_strips_generated_referer", func(t *testing.T) {
+		record, present := newRecorder()
+		p := makePKI(t, false)
+
+		var foreign *httptest.Server
+		foreign, _ = startTLSServer(t, p, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record("foreign:"+r.URL.Path, r.Header)
+			switch r.URL.Path {
+			case "/hop1":
+				http.Redirect(w, r, foreign.URL+"/hop2", http.StatusFound)
+			case "/hop2":
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+
+		initial, _ := startTLSServer(t, p, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record("initial:"+r.URL.Path, r.Header)
+			http.Redirect(w, r, foreign.URL+"/hop1", http.StatusFound)
+		}))
+
+		c := newTestCollector(t)
+		out, err := c.HTTP(context.Background(), HTTPRequest{
+			URL: initial.URL + fixturePathQuery, Method: HTTPMethodGET,
+			Timeout: time.Second, FollowRedirects: true, MaxRedirects: 4,
+			MaxResponseBytes: 256, ExpectedStatusCodes: []int{http.StatusOK},
+			CABundlePEM: p.caPEM,
+		})
+		if err != nil || !out.Success || out.Redirects != 2 {
+			t.Fatalf("https-to-https failed: success=%v redirects=%d err=%v", out.Success, out.Redirects, err)
+		}
+		if seen, n := present("initial:/start-fixture"); n != 1 || seen {
+			t.Fatalf("https initial hop: want no Referer once, got present=%v count=%d", seen, n)
+		}
+		if seen, n := present("foreign:/hop1"); n != 1 || seen {
+			t.Fatalf("https first foreign hop: want generated Referer stripped, got present=%v count=%d", seen, n)
+		}
+		if seen, n := present("foreign:/hop2"); n != 1 || seen {
+			t.Fatalf("https second foreign hop: want generated Referer stripped, got present=%v count=%d", seen, n)
+		}
+	})
+
+	t.Run("fresh_probe_resets_origin_boundary_latch", func(t *testing.T) {
+		record, present := newRecorder()
+		var foreign *httptest.Server
+		foreign = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record("foreign:"+r.URL.Path, r.Header)
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer foreign.Close()
+
+		cross := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record("cross:"+r.URL.Path, r.Header)
+			http.Redirect(w, r, foreign.URL+"/land", http.StatusFound)
+		}))
+		defer cross.Close()
+
+		var same *httptest.Server
+		same = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record("same:"+r.URL.Path, r.Header)
+			switch r.URL.Path {
+			case "/start-fixture":
+				http.Redirect(w, r, same.URL+"/next", http.StatusFound)
+			case "/next":
+				w.WriteHeader(http.StatusOK)
+			default:
+				w.WriteHeader(http.StatusNotFound)
+			}
+		}))
+		defer same.Close()
+
+		c := newTestCollector(t)
+
+		// Probe 1: cross-origin — engages sticky latch and strips generated Referer.
+		out1, err := c.HTTP(context.Background(), HTTPRequest{
+			URL: cross.URL + fixturePathQuery, Method: HTTPMethodGET,
+			Timeout: time.Second, FollowRedirects: true, MaxRedirects: 2,
+			MaxResponseBytes: 256, ExpectedStatusCodes: []int{http.StatusOK},
+		})
+		if err != nil || !out1.Success || out1.Redirects != 1 {
+			t.Fatalf("fresh-probe cross failed: success=%v redirects=%d err=%v", out1.Success, out1.Redirects, err)
+		}
+		if seen, n := present("foreign:/land"); n != 1 || seen {
+			t.Fatalf("fresh-probe cross foreign: want Referer stripped, got present=%v count=%d", seen, n)
+		}
+
+		// Probe 2: independent same-origin-only call must not inherit the prior latch.
+		out2, err := c.HTTP(context.Background(), HTTPRequest{
+			URL: same.URL + fixturePathQuery, Method: HTTPMethodGET,
+			Timeout: time.Second, FollowRedirects: true, MaxRedirects: 2,
+			MaxResponseBytes: 256, ExpectedStatusCodes: []int{http.StatusOK},
+		})
+		if err != nil || !out2.Success || out2.Redirects != 1 {
+			t.Fatalf("fresh-probe same-origin failed: success=%v redirects=%d err=%v", out2.Success, out2.Redirects, err)
+		}
+		if seen, n := present("same:/start-fixture"); n != 1 || seen {
+			t.Fatalf("fresh-probe same start: want no Referer once, got present=%v count=%d", seen, n)
+		}
+		if seen, n := present("same:/next"); n != 1 || !seen {
+			t.Fatalf("fresh-probe same redirect: want generated Referer preserved after latch reset, got present=%v count=%d", seen, n)
+		}
+	})
+}
