@@ -1,4 +1,4 @@
-"""Exercise Test 18 and the security smoke entry point with synthetic PKI and curl."""
+"""Exercise Tests 16 and 18 and security smoke with fake Docker, PKI and curl."""
 
 import json
 import os
@@ -20,6 +20,12 @@ FORBIDDEN = '{"status":"ERROR","code":"ERR_SENSOR_CREDENTIAL_UNKNOWN"}'
 SECRET = "fixture-content-must-never-be-logged"
 TRUSTED_CONTROLS = ["sensor-net-01", "sensor-infra-01"]
 INITIAL_PROBES = TRUSTED_CONTROLS + ["sensor-anonymous", "sensor-rogue"]
+
+UI_HEADER = (
+    "Active Internet connections (only servers)\n"
+    "Proto Recv-Q Send-Q Local Address           Foreign Address         State      \n"
+)
+UI_SAFE = UI_HEADER + "tcp        0      0 0.0.0.0:443             0.0.0.0:*               LISTEN\n"
 
 FAKE_TOOLS = r'''
 import json
@@ -58,7 +64,29 @@ if tool == "openssl":
     sys.exit(0)
 
 if tool == "docker":
-    assert args == ["exec", "platform-ui", "netstat", "-tuln"]
+    calls = Path(os.environ["UI_CALLS"])
+    previous = calls.read_text().splitlines() if calls.exists() else []
+    with calls.open("a") as log:
+        log.write(args[0] + "\n")
+    container_id = "a" * 64
+    ui = scenario.get("ui", {})
+    if args[0] == "inspect":
+        assert args == ["inspect", "--type", "container", "--format",
+                        "{{.Id}}|{{.Name}}|{{.State.Running}}", "platform-ui"]
+        phase = "after" if previous else "before"
+        rc, output = ui.get(phase, [0, container_id + "|/platform-ui|true"])
+    else:
+        assert args == ["exec", container_id, "busybox", "netstat", "-lnt"]
+        assert previous == ["inspect"]
+        rc, output = ui.get("exec", [0, os.environ["UI_SAFE"]])
+    print(output, end="")
+    if args[0] == "exec":
+        sys.stderr.write(ui.get("exec_stderr", ""))
+    sys.exit(rc)
+
+if args[-1] == "https://127.0.0.1:23000/":
+    assert args == ["-k", "-s", "-o", "/dev/null", "-w", "%{http_code}", args[-1]]
+    print("200")
     sys.exit(0)
 
 if args[-1].startswith("http://"):
@@ -104,6 +132,9 @@ class MtlsGuardTests(unittest.TestCase):
         test18 = "TEST_NUM=18\n" + script.read_text().split("TEST_NUM=18\n", 1)[1].split(
             "# Test 19:", 1
         )[0]
+        test16 = "TEST_NUM=16\n" + script.read_text().split("TEST_NUM=16\n", 1)[1].split(
+            "# Test 17:", 1
+        )[0]
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             certs = root / "deploy/docker/certs"
@@ -125,14 +156,16 @@ class MtlsGuardTests(unittest.TestCase):
                 path.chmod(0o700)
             calls_path = root / "calls"
             env = dict(
-                os.environ, PATH=f"{root}:{os.defpath}", PLATFORM_CI="1", ROOT_DIR=directory,
+                os.environ, PATH=f"{root}:{os.defpath}", BASH_ENV="/dev/null",
+                PLATFORM_CI="1", ROOT_DIR=directory,
                 PLATFORM_CORE_HOST_PORT="28443", MTLS_SCENARIO=json.dumps(scenario),
                 MTLS_CALLS=str(calls_path), MTLS_FORBIDDEN=FORBIDDEN, MTLS_SECRET=SECRET,
+                UI_CALLS=str(root / "ui_calls"), UI_SAFE=UI_SAFE, PLATFORM_UI_HOST_PORT="23000",
             )
-            if entry == "integration":
+            if entry in ("integration", "test16"):
                 command = ["bash", "-u", "-c",
                            'pass() { echo GUARD_ACCEPTED; }; fail() { echo GUARD_REJECTED; return 1; }\n'
-                           + test18]
+                           + (test16 if entry == "test16" else test18)]
             else:
                 command = ["bash", str(root / "tests/run-security-smoke.sh")]
             result = subprocess.run(command, cwd=root, env=env, text=True, capture_output=True,
@@ -141,6 +174,48 @@ class MtlsGuardTests(unittest.TestCase):
         output = result.stdout + result.stderr
         self.assertNotIn(SECRET, output)
         return result.returncode, calls, output
+
+    def test_ui_listener_evidence_through_both_entry_points(self):
+        identity = "a" * 64 + "|/platform-ui|true"
+        cases = [
+            ({}, None),
+            ({"exec": [0, UI_HEADER + "tcp 0 0 127.0.0.1:8080 192.0.2.1:80 LISTEN\n"
+                       "tcp6 0 0 :::443 :::* LISTEN\n"
+                       "tcp6 0 0 [::1]:443 [::]:* LISTEN\n"
+                       "tcp 0 0 2001:db8::a:23000 ::ffff:192.0.2.2:80 LISTEN\n"]}, None),
+            ({"exec": [0, UI_SAFE + "tcp 0 0 127.0.0.1:80 0.0.0.0:* LISTEN\n"]}, "TCP port 80"),
+            ({"exec": [0, UI_SAFE + "tcp6 0 0 :::80 :::* LISTEN\n"]}, "TCP port 80"),
+            ({"exec": [0, UI_SAFE + "tcp6 0 0 [::1]:80 [::]:* LISTEN\n"]}, "TCP port 80"),
+            ({"exec": [0, ""]}, "empty or malformed"),
+            ({"exec": [0, UI_HEADER]}, "empty or malformed"),
+            ({"exec": [0, UI_SAFE + "tcp 0 0 999.0.0.1:443 0.0.0.0:* LISTEN\n"]}, "empty or malformed"),
+            ({"exec": [0, UI_SAFE + "tcp6 0 0 2001:::1:443 :::* LISTEN\n"]}, "empty or malformed"),
+            ({"exec": [0, UI_SAFE + "tcp 0 0 127.0.0.1:443 0.0.0.0:* ESTABLISHED\n"]}, "empty or malformed"),
+            ({"exec": [127, ""]}, "inventory command failed"),
+            ({"exec": [124, UI_SAFE]}, "inventory command failed"),
+            ({"exec_stderr": "netstat: /proc/net/tcp6: Permission denied\n"}, "empty or malformed"),
+            ({"before": [1, identity]}, "inspection failed"),
+            ({"before": [0, identity.replace("/platform-ui", "/other")]}, "exact running"),
+            ({"before": [0, identity[52:]]}, "full ID"),
+            ({"before": [0, identity.replace("true", "false")]}, "exact running"),
+            ({"after": [1, identity]}, "reinspection failed"),
+            ({"after": [0, "b" * 64 + "|/platform-ui|true"]}, "identity or running state changed"),
+            ({"after": [0, identity.replace("true", "false")]}, "identity or running state changed"),
+        ]
+        for entry in ("test16", "smoke"):
+            for ui, failure in cases:
+                with self.subTest(entry=entry, ui=ui):
+                    rc, calls, output = self.run_guard(entry, ui=ui)
+                    if failure is None:
+                        self.assertEqual(rc, 0, output)
+                        self.assertIn("GUARD_ACCEPTED" if entry == "test16" else
+                                      "no TCP port 80 listener", output)
+                        if entry == "smoke":
+                            self.assertEqual(calls, INITIAL_PROBES + TRUSTED_CONTROLS)
+                    else:
+                        self.assertNotEqual(rc, 0, output)
+                        self.assertIn(failure, output)
+                        self.assertEqual(calls, [])
 
     def test_fixture_failures_prevent_probing(self):
         cases = [
