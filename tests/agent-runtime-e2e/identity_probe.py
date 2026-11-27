@@ -1,5 +1,7 @@
 """Both forged host claims receive Sensor custody and durable Core terminal settlement."""
+import io
 import json
+import tarfile
 import os
 from pathlib import Path
 import subprocess
@@ -20,6 +22,39 @@ def command(args, body=None):
     return subprocess.check_output(args, input=body, text=True, timeout=30)
 
 
+def capture_sequence_metadata(prefix, destination):
+    # Docker cp to stdout returns a tar stream; never extract to a host path.
+    # The owned, paused Agent has a stable sequence file for the forged probe.
+    archive_bytes = subprocess.check_output([
+        "docker", "cp", prefix + "-agent-runtime:/var/lib/platform/agent/queue/sequence.meta", "-"
+    ], timeout=30)
+    if not archive_bytes or len(archive_bytes) > 65536:
+        raise ValueError("invalid sequence metadata archive size")
+    with tarfile.open(fileobj=io.BytesIO(archive_bytes), mode="r:") as archive:
+        members = archive.getmembers()
+        if len(members) != 1:
+            raise ValueError("unexpected sequence metadata archive members")
+        member = members[0]
+        if (member.name not in {"sequence.meta", "./sequence.meta"}
+                or member.type not in {tarfile.REGTYPE, tarfile.AREGTYPE}
+                or not 0 < member.size <= 4096):
+            raise ValueError("invalid sequence metadata archive member")
+        stream = archive.extractfile(member)
+        if stream is None:
+            raise ValueError("missing sequence metadata archive content")
+        raw = stream.read(4097)
+        if len(raw) != member.size:
+            raise ValueError("truncated sequence metadata archive member")
+    meta = json.loads(raw)
+    if (not isinstance(meta, dict) or type(meta.get("highestSequence")) is not int
+            or not 0 <= meta["highestSequence"] < 2**63-1
+            or not isinstance(meta.get("agentStreamId"), str) or not meta["agentStreamId"]):
+        raise ValueError("invalid native Agent sequence metadata")
+    with destination.open("xb") as evidence:
+        evidence.write(raw)
+    return meta
+
+
 def main():
     prefix, receiver, run_id, output = sys.argv[1:]
     output = Path(output)
@@ -30,9 +65,7 @@ def main():
         return command(["docker", "exec", prefix + "-postgres", "psql", "-U", "platform_app",
                         "-d", "platform", "-At", "-v", "ON_ERROR_STOP=1", "-c", query]).strip()
     command(["docker", "pause", prefix + "-agent-runtime"])
-    command(["docker", "cp", prefix + "-agent-runtime:/var/lib/platform/agent/queue/sequence.meta",
-             str(output / "agent-final-sequence.meta")])
-    meta = json.loads((output / "agent-final-sequence.meta").read_text())
+    meta = capture_sequence_metadata(prefix, output / "agent-final-sequence.meta")
     results = []
     for source, target in (("A", "B"), ("B", "A")):
         identity, other = FIXTURES[source], FIXTURES[target]

@@ -970,8 +970,17 @@ def docker_gate(custody, args):
         require(len(args) == 3 and ":" in args[1] and ":" not in args[2], "only copy from fixture containers")
         require(args[2] == "-", "copy destination is outside evidence stream")
         target, path = args[1].split(":", 1)
-        ref, name = owned_target(custody.active()["container"], target)
-        require(name == prefix + "-kafka" and path in KAFKA_COPY_PATHS, "unexpected fixture copy path")
+        containers = custody.active()["container"]
+        ref, name = owned_target(containers, target)
+        if name == prefix + "-agent-runtime":
+            require(path == "/var/lib/platform/agent/queue/sequence.meta", "unexpected fixture copy path")
+            item = custody.inspect("container", ref)
+            custody.check("container", ref, name, item)
+            state = item.get("State") or {}
+            require(state.get("Running") is True and state.get("Paused") is True,
+                    "sequence copy requires the owned paused Agent")
+        else:
+            require(name == prefix + "-kafka" and path in KAFKA_COPY_PATHS, "unexpected fixture copy path")
         args = ["cp", ref + ":" + path, "-"]
     else:
         raise ValueError("unexpected Docker command")

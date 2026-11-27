@@ -165,7 +165,11 @@ dump_evidence() {
         echo "=== sensor-infra logs ==="
         docker logs ${PLATFORM_E2E_PREFIX}-sensor-infra --tail 120 2>/dev/null || true
         echo "=== queue ==="
-        docker exec ${PLATFORM_E2E_PREFIX}-agent-runtime sh -c 'ls -la /var/lib/platform/agent/queue/active 2>/dev/null; ls -la /var/lib/platform/agent/queue 2>/dev/null' || true
+        if [[ "${IDENTITY_PROBE_FROZEN:-0}" == 1 ]]; then
+            echo "Agent queue exec skipped: frozen identity probe; retained sequence snapshot and container state/logs are the evidence."
+        else
+            docker exec ${PLATFORM_E2E_PREFIX}-agent-runtime sh -c 'ls -la /var/lib/platform/agent/queue/active 2>/dev/null; ls -la /var/lib/platform/agent/queue 2>/dev/null' || true
+        fi
         echo "=== sensor agent spool ==="
         docker exec ${PLATFORM_E2E_PREFIX}-sensor-infra sh -c 'ls -la /var/lib/platform/sensor/agent-spool 2>/dev/null | head -40; echo --- poison ---; ls -la /var/lib/platform/sensor/agent-spool/agent-poison 2>/dev/null | head' || true
         echo "=== core agent-ingress ==="
@@ -706,6 +710,9 @@ sample_agent_resources recovered
 # Explicit A/B private identities, each authenticated at Sensor before the same
 # forged record is challenged at Core. Sensor custody is distinct from Core accept.
 kafka_end_offsets > "${EVIDENCE_DIR}/offsets-forged-host.txt"
+# This terminal probe deliberately freezes the Agent until teardown. Even if
+# the probe fails early, diagnostics must not docker exec into that fixture.
+IDENTITY_PROBE_FROZEN=1
 python3 "${E2E_DIR}/identity_probe.py" "$PLATFORM_E2E_PREFIX" \
     "https://127.0.0.1:${RECEIVER_PORT}/api/v1/agent/telemetry" "$RUN_ID" "$EVIDENCE_DIR" \
     || fail_closed "agent-canonical-entity-binding" "See retained Sensor ACK and Core typed rejection evidence"
