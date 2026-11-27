@@ -104,7 +104,8 @@ func TestRFC5424MinimalValid(t *testing.T) {
 
 func TestRFC5424FullMessageAndTimestamps(t *testing.T) {
 	p := mustParser(t, testConfig())
-	for _, ts := range []string{"2003-10-11T22:14:15Z", "2003-10-11T22:14:15.003123456+02:00"} {
+	// RFC 5424 §6 TIME-SECFRAC is "." 1*6DIGIT; nine fractional digits are not valid.
+	for _, ts := range []string{"2003-10-11T22:14:15Z", "2003-10-11T22:14:15.003123+02:00"} {
 		input := `<165>1 ` + ts + ` host app 8710 ID47 [exampleSDID@32473 iut="3" eventSource="Application"] BOMAn application event log entry`
 		e := parse(t, p, input)
 		if e.EventTime == nil || e.TimestampQuality != TimestampAuthoritativeRFC3339 || e.RawTimestamp != ts {
@@ -115,6 +116,94 @@ func TestRFC5424FullMessageAndTimestamps(t *testing.T) {
 		}
 		if e.Message != "BOMAn application event log entry" {
 			t.Fatalf("message=%q", e.Message)
+		}
+		if ts == "2003-10-11T22:14:15.003123+02:00" {
+			want := time.Date(2003, 10, 11, 20, 14, 15, 3123000, time.UTC)
+			if !e.EventTime.Equal(want) {
+				t.Fatalf("UTC conversion wrong: got=%v want=%v", e.EventTime, want)
+			}
+		}
+	}
+}
+
+func TestRFC5424TimestampGrammar(t *testing.T) {
+	p := mustParser(t, testConfig())
+	received := time.Date(2026, 9, 7, 3, 30, 0, 0, time.UTC)
+
+	positives := []struct {
+		ts   string
+		want time.Time
+	}{
+		{"2003-10-11T22:14:15Z", time.Date(2003, 10, 11, 22, 14, 15, 0, time.UTC)},
+		{"2003-10-11T22:14:15.1Z", time.Date(2003, 10, 11, 22, 14, 15, 100000000, time.UTC)},
+		{"2003-10-11T22:14:15.12Z", time.Date(2003, 10, 11, 22, 14, 15, 120000000, time.UTC)},
+		{"2003-10-11T22:14:15.123456Z", time.Date(2003, 10, 11, 22, 14, 15, 123456000, time.UTC)},
+		{"2003-10-11T22:14:15+00:00", time.Date(2003, 10, 11, 22, 14, 15, 0, time.UTC)},
+		{"2003-10-11T22:14:15-00:00", time.Date(2003, 10, 11, 22, 14, 15, 0, time.UTC)},
+		{"2003-10-11T22:14:15+02:00", time.Date(2003, 10, 11, 20, 14, 15, 0, time.UTC)},
+		{"2003-10-11T22:14:15-05:30", time.Date(2003, 10, 12, 3, 44, 15, 0, time.UTC)},
+		{"2003-10-11T22:14:15.003123+02:00", time.Date(2003, 10, 11, 20, 14, 15, 3123000, time.UTC)},
+		{"2003-10-11T00:00:00Z", time.Date(2003, 10, 11, 0, 0, 0, 0, time.UTC)},
+		{"2003-10-11T23:59:59Z", time.Date(2003, 10, 11, 23, 59, 59, 0, time.UTC)},
+		{"2004-02-29T12:00:00Z", time.Date(2004, 2, 29, 12, 0, 0, 0, time.UTC)},
+		{"2000-02-29T12:00:00Z", time.Date(2000, 2, 29, 12, 0, 0, 0, time.UTC)},
+		{"2003-10-11T22:14:15+23:59", time.Date(2003, 10, 10, 22, 15, 15, 0, time.UTC)},
+	}
+	for _, tc := range positives {
+		input := `<34>1 ` + tc.ts + ` h a p m -`
+		e, err := p.Parse([]byte(input), received, SourceMetadata{})
+		if err != nil {
+			t.Fatalf("valid timestamp rejected %q: %v", tc.ts, err)
+		}
+		if e.Format != FormatRFC5424 || e.Quality != QualityGood {
+			t.Fatalf("unexpected event for %q: %+v", tc.ts, e)
+		}
+		if e.EventTime == nil || e.TimestampQuality != TimestampAuthoritativeRFC3339 || e.RawTimestamp != tc.ts {
+			t.Fatalf("timestamp quality/raw lost for %q: %+v", tc.ts, e)
+		}
+		if !e.EventTime.Equal(tc.want) {
+			t.Fatalf("UTC mismatch for %q: got=%v want=%v", tc.ts, e.EventTime, tc.want)
+		}
+	}
+
+	// NILVALUE remains distinct from an authoritative timestamp.
+	e := parse(t, p, `<34>1 - h a p m -`)
+	if e.EventTime != nil || e.RawTimestamp != "" || e.TimestampQuality != TimestampUnavailable {
+		t.Fatalf("NILVALUE timestamp semantics broken: %+v", e)
+	}
+
+	negatives := []string{
+		"2003-10-11T22:14:15.0031234Z",   // 7 fractional digits
+		"2003-10-11T22:14:15.00312345Z",  // 8 fractional digits
+		"2003-10-11T22:14:15.003123456Z", // 9 fractional digits (Go RFC3339Nano-permissive)
+		"2003-10-11T22:14:15.003123456+02:00",
+		"2003-10-11T22:14:15,003Z", // comma fraction
+		"2003-10-11T22:14:15.",     // missing fraction digits
+		"2003-10-11t22:14:15Z",     // lowercase T
+		"2003-10-11T22:14:15z",     // lowercase Z
+		"2003-10-11T2:14:15Z",      // single-digit hour
+		"2003-10-11T22:14:15+24:00",
+		"2003-10-11T22:14:15+01:60",
+		"2003-10-11T22:14:15-24:00",
+		"2003-10-11T22:14:15+02:0",
+		"2003-10-11T22:14:15+2:00",
+		"2003-10-11T22:14:15", // missing offset
+		"2003-10-11T24:00:00Z",
+		"2003-10-11T22:60:00Z",
+		"2003-10-11T22:14:60Z", // leap second rejected
+		"2003-02-29T12:00:00Z", // non-leap day
+		"2003-13-01T12:00:00Z",
+		"2003-10-32T12:00:00Z",
+		"2003-04-31T12:00:00Z",
+		"2003-10-11T22:14:15Zx",
+		"2003-10-11T22:14:15.1234567Z",
+	}
+	for _, ts := range negatives {
+		input := `<34>1 ` + ts + ` h a p m -`
+		ev, err := p.Parse([]byte(input), received, SourceMetadata{})
+		requireCode(t, err, CodeMalformedRFC5424)
+		if ev.EventTime != nil || ev.RawTimestamp != "" || ev.Format != "" || ev.Quality != "" || ev.Message != "" || len(ev.StructuredData) != 0 {
+			t.Fatalf("expected zero Event for invalid timestamp %q, got %+v", ts, ev)
 		}
 	}
 }
@@ -349,4 +438,44 @@ func TestSourceMetadataBoundsAndTransport(t *testing.T) {
 
 func itoa(v int) string {
 	return strconv.Itoa(v)
+}
+
+func TestRFC5424TimestampErrorsAreIndependent(t *testing.T) {
+	p := mustParser(t, testConfig())
+	received := time.Date(2026, 9, 7, 3, 30, 0, 0, time.UTC)
+
+	_, err1 := p.Parse([]byte(`<34>1 2003-10-11T22:14:60Z h a p m -`), received, SourceMetadata{})
+	_, err2 := p.Parse([]byte(`<34>1 2003-10-11t22:14:15Z h a p m -`), received, SourceMetadata{})
+	e1, ok1 := err1.(*Error)
+	e2, ok2 := err2.(*Error)
+	if !ok1 || !ok2 {
+		t.Fatalf("expected *Error values, got %T and %T", err1, err2)
+	}
+	if e1 == e2 {
+		t.Fatal("timestamp errors must be distinct allocations")
+	}
+	if e1.Code != CodeMalformedRFC5424 || e1.Message != "RFC5424 timestamp is invalid" {
+		t.Fatalf("err1 unexpected: %+v", e1)
+	}
+	if e2.Code != CodeMalformedRFC5424 || e2.Message != "RFC5424 timestamp is invalid" {
+		t.Fatalf("err2 unexpected: %+v", e2)
+	}
+
+	e1.Code = ErrorCode("MUTATED")
+	e1.Message = "mutated"
+
+	_, err3 := p.Parse([]byte(`<34>1 2003-02-29T12:00:00Z h a p m -`), received, SourceMetadata{})
+	e3, ok3 := err3.(*Error)
+	if !ok3 {
+		t.Fatalf("expected *Error, got %T", err3)
+	}
+	if e3 == e1 || e3 == e2 {
+		t.Fatal("subsequent timestamp error aliased a prior error")
+	}
+	if e3.Code != CodeMalformedRFC5424 || e3.Message != "RFC5424 timestamp is invalid" {
+		t.Fatalf("subsequent error corrupted: %+v", e3)
+	}
+	if e2.Code != CodeMalformedRFC5424 || e2.Message != "RFC5424 timestamp is invalid" {
+		t.Fatalf("unmutated sibling corrupted: %+v", e2)
+	}
 }

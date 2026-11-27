@@ -125,26 +125,25 @@ func (p *Parser) parseRFC5424(base Event, body string) (Event, error) {
 	if fields[1] == "-" {
 		base.TimestampQuality = TimestampUnavailable
 	} else {
-		parsed, err := time.Parse(time.RFC3339Nano, fields[1])
+		parsed, err := parseRFC5424Timestamp(fields[1])
 		if err != nil {
-			return Event{}, fail(CodeMalformedRFC5424, "RFC5424 timestamp is invalid", nil)
+			return Event{}, err
 		}
-		parsed = parsed.UTC()
 		base.EventTime = &parsed
 		base.RawTimestamp = fields[1]
 		base.TimestampQuality = TimestampAuthoritativeRFC3339
 	}
 	var err error
-	if base.Hostname, err = p.nilOrBounded(fields[2], p.config.MaxHostnameBytes, "hostname"); err != nil {
+	if base.Hostname, err = rfc5424HeaderValue(fields[2], p.config.MaxHostnameBytes, 255, "hostname"); err != nil {
 		return Event{}, err
 	}
-	if base.AppName, err = p.nilOrBounded(fields[3], p.config.MaxAppNameBytes, "app name"); err != nil {
+	if base.AppName, err = rfc5424HeaderValue(fields[3], p.config.MaxAppNameBytes, 48, "app name"); err != nil {
 		return Event{}, err
 	}
-	if base.ProcessID, err = p.nilOrBounded(fields[4], p.config.MaxProcessIDBytes, "process ID"); err != nil {
+	if base.ProcessID, err = rfc5424HeaderValue(fields[4], p.config.MaxProcessIDBytes, 128, "process ID"); err != nil {
 		return Event{}, err
 	}
-	if base.MessageID, err = p.nilOrBounded(fields[5], p.config.MaxMessageIDBytes, "message ID"); err != nil {
+	if base.MessageID, err = rfc5424HeaderValue(fields[5], p.config.MaxMessageIDBytes, 32, "message ID"); err != nil {
 		return Event{}, err
 	}
 
@@ -231,12 +230,23 @@ func (p *Parser) partial(base Event, body string) (Event, error) {
 	return base, nil
 }
 
-func (p *Parser) nilOrBounded(value string, max int, field string) (string, error) {
+// RFC 5424 section 6 restricts these header fields to PRINTUSASCII (33..126)
+// and assigns a separate octet limit to each. MSG and SD-PARAM values have
+// different grammars. Keep the receiver's configured budget error distinct.
+func rfc5424HeaderValue(value string, configMax, wireMax int, field string) (string, error) {
 	if value == "-" {
 		return "", nil
 	}
-	if len(value) > max {
+	if len(value) > configMax {
 		return "", fail(CodeResourceLimit, "RFC5424 "+field+" exceeds configured maximum", nil)
+	}
+	if len(value) > wireMax {
+		return "", fail(CodeMalformedRFC5424, "RFC5424 "+field+" exceeds protocol maximum", nil)
+	}
+	for i := 0; i < len(value); i++ {
+		if value[i] < 33 || value[i] > 126 {
+			return "", fail(CodeMalformedRFC5424, "RFC5424 "+field+" contains a non-PRINTUSASCII byte", nil)
+		}
 	}
 	return value, nil
 }
@@ -412,6 +422,133 @@ func isDecimal(s string) bool {
 		}
 	}
 	return true
+}
+
+// parseRFC5424Timestamp enforces RFC 5424 section 6 TIMESTAMP lexical grammar
+// before semantic time.Parse. Rejects leap seconds, invalid calendar dates,
+// overlong/missing fractions, lowercase T/Z, and illegal offsets. Valid values
+// are converted to UTC. No silent truncation or permissive compatibility.
+func parseRFC5424Timestamp(raw string) (time.Time, error) {
+	if !validRFC5424TimestampLexical(raw) {
+		return time.Time{}, newRFC5424TimestampError()
+	}
+	parsed, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		return time.Time{}, newRFC5424TimestampError()
+	}
+	return parsed.UTC(), nil
+}
+
+func newRFC5424TimestampError() error {
+	return fail(CodeMalformedRFC5424, "RFC5424 timestamp is invalid", nil)
+}
+
+// validRFC5424TimestampLexical checks FULL-DATE "T" FULL-TIME per RFC 5424 §6:
+// fixed-width date/time, uppercase T, optional "." 1*6DIGIT, then "Z" or
+// signed HH:MM offset with hours 00..23 and minutes 00..59; seconds 00..59.
+func validRFC5424TimestampLexical(raw string) bool {
+	// Minimum without fraction: YYYY-MM-DDTHH:MM:SSZ
+	if len(raw) < 20 {
+		return false
+	}
+	if !asciiDigitRun(raw, 0, 4) || raw[4] != '-' ||
+		!asciiDigitRun(raw, 5, 2) || raw[7] != '-' ||
+		!asciiDigitRun(raw, 8, 2) {
+		return false
+	}
+	year := asciiAtoi(raw, 0, 4)
+	month := asciiAtoi(raw, 5, 2)
+	day := asciiAtoi(raw, 8, 2)
+	if month < 1 || month > 12 || day < 1 || day > gregorianDaysInMonth(year, month) {
+		return false
+	}
+	if raw[10] != 'T' {
+		return false
+	}
+	if !asciiDigitRun(raw, 11, 2) || raw[13] != ':' ||
+		!asciiDigitRun(raw, 14, 2) || raw[16] != ':' ||
+		!asciiDigitRun(raw, 17, 2) {
+		return false
+	}
+	hour := asciiAtoi(raw, 11, 2)
+	minute := asciiAtoi(raw, 14, 2)
+	second := asciiAtoi(raw, 17, 2)
+	if hour > 23 || minute > 59 || second > 59 {
+		return false
+	}
+	i := 19
+	if i < len(raw) && raw[i] == '.' {
+		i++
+		start := i
+		for i < len(raw) && raw[i] >= '0' && raw[i] <= '9' {
+			i++
+		}
+		fracLen := i - start
+		if fracLen < 1 || fracLen > 6 {
+			return false
+		}
+	}
+	if i >= len(raw) {
+		return false
+	}
+	switch raw[i] {
+	case 'Z':
+		return i+1 == len(raw)
+	case '+', '-':
+		i++
+		if i+5 != len(raw) {
+			return false
+		}
+		if !asciiDigitRun(raw, i, 2) || raw[i+2] != ':' || !asciiDigitRun(raw, i+3, 2) {
+			return false
+		}
+		offHour := asciiAtoi(raw, i, 2)
+		offMinute := asciiAtoi(raw, i+3, 2)
+		return offHour <= 23 && offMinute <= 59
+	default:
+		return false
+	}
+}
+
+func asciiDigitRun(s string, start, n int) bool {
+	if start < 0 || n < 0 || start+n > len(s) {
+		return false
+	}
+	for i := 0; i < n; i++ {
+		c := s[start+i]
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func asciiAtoi(s string, start, n int) int {
+	v := 0
+	for i := 0; i < n; i++ {
+		v = v*10 + int(s[start+i]-'0')
+	}
+	return v
+}
+
+func gregorianDaysInMonth(year, month int) int {
+	switch month {
+	case 1, 3, 5, 7, 8, 10, 12:
+		return 31
+	case 4, 6, 9, 11:
+		return 30
+	case 2:
+		if gregorianLeapYear(year) {
+			return 29
+		}
+		return 28
+	default:
+		return 0
+	}
+}
+
+func gregorianLeapYear(year int) bool {
+	return year%4 == 0 && (year%100 != 0 || year%400 == 0)
 }
 
 func validSDNameByte(b byte) bool {
