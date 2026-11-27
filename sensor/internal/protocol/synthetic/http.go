@@ -151,6 +151,13 @@ func (c *Collector) HTTP(parent context.Context, r HTTPRequest) (result HTTPResu
 		if len(via) > r.MaxRedirects {
 			return newError(CodeResourceLimit, "HTTP redirect count exceeds configured bound", nil, false)
 		}
+		// URL-only admission on the resolved destination before send. net/http
+		// may synthesize Basic Authorization from URL.User after CheckRedirect;
+		// reject rather than strip. Initial-request validation remains in
+		// validateHTTPRequest with unchanged precedence/codes.
+		if _, err := validateHTTPURL(c.limits, next.URL.String()); err != nil {
+			return err
+		}
 		if len(via) > 0 {
 			if !sameOrigin(via[len(via)-1].URL, next.URL) {
 				originBoundaryCrossed = true
