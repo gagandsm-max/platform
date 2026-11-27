@@ -262,16 +262,44 @@ class Matrix:
         return pending
 
     def kafka_metric(self, metric):
-        lines = []
+        # The outer deadline includes Docker custody inventory, JVM startup,
+        # consumption and JVM shutdown. The inner idle timeout stays at 3 s.
+        # Never turn a transport failure or incomplete read into a zero-hit result.
+        import re
+        hits = []
         for partition in range(3):
             cmd = ["docker", "exec", self.prefix + "-kafka", "/opt/kafka/bin/kafka-console-consumer.sh",
                    "--bootstrap-server", "localhost:9092", "--topic", "telemetry.numeric.v1",
                    "--partition", str(partition), "--from-beginning", "--timeout-ms", "3000"]
-            proc = subprocess.run(cmd, text=True, capture_output=True, timeout=20)
-            assert proc.returncode in (0, 1), proc.stderr[-500:]
-            lines.extend(proc.stdout.splitlines())
-        hits = [json.loads(line) for line in lines if line.startswith("{") and
-                json.loads(line).get("metricId") == metric]
+            started = time.monotonic()
+            try:
+                proc = subprocess.run(cmd, text=True, capture_output=True, timeout=90)
+            except subprocess.TimeoutExpired:
+                print(f"KAFKA_READBACK_OUTER_TIMEOUT partition={partition} elapsed={time.monotonic()-started:.3f}s", flush=True)
+                raise
+            # Kafka 3.8's ConsoleConsumer may return normally even after a
+            # processing exception. Require its normal idle-stop and count.
+            stderr = proc.stderr.splitlines()
+            counts = [re.fullmatch(r"Processed a total of ([0-9]+) messages", s.strip()) for s in stderr]
+            counts = [m for m in counts if m]
+            idle = [s for s in stderr if s.strip() == "org.apache.kafka.common.errors.TimeoutException"]
+            errors = [s for s in stderr if re.search(r"\bERROR\b", s)]
+            rows = proc.stdout.splitlines()
+            if not (proc.returncode == 0 and len(counts) == 1 and len(idle) == 1
+                    and len(errors) == 1 and "Error processing message, terminating consumer process" in errors[0]
+                    and int(counts[0][1]) == len(rows)):
+                reported = int(counts[0][1]) if len(counts) == 1 else -1
+                raise AssertionError(f"KAFKA_READBACK_INCOMPLETE partition={partition} exit={proc.returncode} rows={len(rows)} reported={reported} idle={len(idle)} errors={len(errors)}")
+            for row in rows:
+                try:
+                    item = json.loads(row)
+                except (ValueError, TypeError) as exc:
+                    raise AssertionError(f"KAFKA_READBACK_INVALID_RECORD partition={partition}") from exc
+                if not isinstance(item, dict) or not isinstance(item.get("metricId"), str) or not item["metricId"]:
+                    raise AssertionError(f"KAFKA_READBACK_INVALID_RECORD partition={partition}")
+                if item["metricId"] == metric:
+                    hits.append(item)
+            print(f"KAFKA_READBACK_COMPLETE partition={partition} records={len(rows)} elapsed={time.monotonic()-started:.3f}s", flush=True)
         return hits
 
     def clickhouse_count(self, metric):

@@ -57,6 +57,8 @@ GATE_ERRORS = (ValueError, KeyError, TypeError, AttributeError, OSError, subproc
 
 
 HEALTH_FORMAT = "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
+MATRIX_HEALTH_FORMAT = "{{.State.Health.Status}}"
+MATRIX_STARTED_AT_FORMAT = "{{.State.StartedAt}}"
 KAFKA_VOLUME_FORMAT = '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}'
 KAFKA_CONTAINER_FORMATS = {
     '{{.Name}}|{{index .Config.Labels "com.docker.compose.project"}}|{{index .Config.Labels "com.docker.compose.service"}}|{{join .Config.Entrypoint " "}}|{{.Config.Image}}|{{.State.Status}}',
@@ -851,7 +853,8 @@ def resource_read(custody, args, kind, verb):
     fmt = options.get("--format")
     if verb == "inspect":
         formats = ({None, KAFKA_VOLUME_FORMAT} if kind == "volume" else
-                   {None, HEALTH_FORMAT, "{{.State.ExitCode}}"} | KAFKA_CONTAINER_FORMATS)
+                   {None, HEALTH_FORMAT, "{{.State.ExitCode}}", MATRIX_HEALTH_FORMAT,
+                    MATRIX_STARTED_AT_FORMAT} | KAFKA_CONTAINER_FORMATS)
         require(fmt in formats, "unexpected Docker inspect format")
     elif verb == "logs":
         require(options.get("--tail") in {None, "80", "120"}, "unexpected Docker log tail")
@@ -863,6 +866,12 @@ def resource_read(custody, args, kind, verb):
             and all(target != name for name, _ in inventory.values())):
         return 1
     ref, name = owned_target(inventory, target)
+    if kind == "container" and fmt in {MATRIX_HEALTH_FORMAT, MATRIX_STARTED_AT_FORMAT}:
+        allowed = {custody.prefix + "-core"}
+        if fmt == MATRIX_HEALTH_FORMAT:
+            allowed.add(custody.prefix + "-sensor-infra")
+        require(name in allowed, "unexpected matrix inspect service")
+        custody.check(kind, ref, name, custody.inspect(kind, ref))
     if kind == "volume":
         require(target == name, "volume requires its exact name")
         custody.check(kind, ref, name, custody.inspect(kind, ref))

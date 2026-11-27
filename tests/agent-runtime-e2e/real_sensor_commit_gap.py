@@ -24,6 +24,46 @@ def instant(value):
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def close_psql_sessions(sessions, primary_failure=False):
+    """EOF allows psql and the Docker custody shim to return normally.
+
+    The holder closes first, releasing its advisory locks even on a failure
+    path. A nonzero or interrupted close is not a successful custody receipt.
+    The original workload exception, if any, takes precedence.
+    """
+    failures = []
+    count = 0
+    for proc in sessions:
+        if proc is None:
+            continue
+        count += 1
+        try:
+            proc.communicate(timeout=30)
+            if proc.returncode != 0:
+                failures.append("nonzero")
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            failures.append(type(exc).__name__)
+            # Escalation is for a failed close only. The existing custody
+            # shim must retain any unresolved journal; never clear it here.
+            try:
+                if proc.poll() is None:
+                    proc.terminate()
+                proc.communicate(timeout=5)
+            except (OSError, ValueError, subprocess.SubprocessError):
+                try:
+                    if proc.poll() is None:
+                        proc.kill()
+                    proc.wait(timeout=5)
+                except (OSError, ValueError, subprocess.SubprocessError):
+                    failures.append("reap-unproven")
+    if failures:
+        print("J9_PSQL_SESSION_CLOSE_FAILED count=" + str(len(failures)), file=sys.stderr, flush=True)
+        if not primary_failure:
+            raise RuntimeError("J9_PSQL_SESSION_CLOSE_FAILED")
+    else:
+        print("J9_PSQL_SESSIONS_CLOSED count=" + str(count), flush=True)
+
+
 class Gap(Matrix):
     def __init__(self, prefix, port, evidence):
         super().__init__(prefix, port, evidence)
@@ -254,8 +294,9 @@ class Gap(Matrix):
         self.sql("INSERT INTO platform.entity (entity_id,tenant_id,entity_type,display_name,lifecycle_state,"
                  "first_seen_at,last_seen_at,created_at,updated_at) VALUES ('" + ENTITY_B + "','" + TENANT +
                  "','HOST','j9-entity-b','ACTIVE',now(),now(),now(),now())")
-        holder, t1 = self.session(), self.session()
+        holder, t1 = self.session(), None
         try:
+            t1 = self.session()
             self.statement(holder, f"SELECT 'HELD' FROM (SELECT pg_advisory_lock({BARRIER_KEY})) s;", "HELD")
             self.statement(t1, "BEGIN;")
             self.statement(t1, "SELECT pg_backend_pid()::text || ':' || txid_current()::text;", None)
@@ -310,11 +351,7 @@ class Gap(Matrix):
             self.statement(t1, "COMMIT;")
             self.statement(t1, "SELECT 'COMMITTED';", "COMMITTED")
         finally:
-            for proc in (t1, holder):
-                if proc.poll() is None:
-                    proc.stdin.close()
-                    proc.terminate()
-                    proc.wait(timeout=5)
+            close_psql_sessions((holder, t1), primary_failure=sys.exc_info()[0] is not None)
 
         assert self.current_identifier() == ENTITY_B
         self.activate_identifier_history()
