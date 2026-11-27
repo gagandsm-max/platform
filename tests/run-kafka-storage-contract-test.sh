@@ -9,61 +9,83 @@ REPLACEMENT=${PROJECT}-replacement
 INTERRUPTED=${PROJECT}-interrupted
 FOREIGN=$PROJECT-foreign
 FOREIGN_ACQUISITION_STARTED=0
-export PLATFORM_KAFKA_CLUSTER_ID
-PLATFORM_KAFKA_CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
-    --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
-[[ $PLATFORM_KAFKA_CLUSTER_ID =~ ^[A-Za-z0-9_-]{22}$ ]]
-export PLATFORM_KAFKA_STORAGE_ID=${PROJECT}-identity
-export PLATFORM_KAFKA_DATA_VOLUME=$VOLUME
-# Pin merge semantics and render the base+opt-in service before extending it.
-docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config > "$TASK/guarded.yaml"
-cat > "$TASK/compose.yaml" <<EOF_YAML
-services:
-  kafka:
-    extends:
-      file: $TASK/guarded.yaml
-      service: kafka
-    profiles: []
-    container_name: $PROJECT-kafka
-    restart: "no"
-    labels:
-      issue223.owner: $PROJECT
-    environment:
-      PLATFORM_KAFKA_NEW_VOLUME_CONFIRM: $PLATFORM_KAFKA_STORAGE_ID
-    networks: [platform_net]
-volumes:
-  platform_kafka_data:
-    external: true
-    name: $VOLUME
-networks:
-  platform_net:
-    internal: true
-    labels:
-      issue223.owner: $PROJECT
-EOF_YAML
-DC=(docker compose --profile dev -p "$PROJECT" -f "$TASK/compose.yaml")
-# Default service equality is a recreation-safety invariant, not just syntax.
-git -C "$REPO" show 27fbf8818ed8745fd5a38cb9521adae812224fa8:compose.yaml > "$TASK/legacy.yaml"
-docker compose --profile dev -p "$PROJECT" -f "$TASK/legacy.yaml" config --format json > "$TASK/legacy.json"
-docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" config --format json > "$TASK/default.json"
-docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config --format json > "$TASK/guarded.json"
-docker run --rm --network none --pull never --mount "type=bind,src=$TASK,dst=/evidence,readonly" \
-    --entrypoint node node:20-alpine -e '
-const fs=require("fs"),assert=require("assert");
-const read=n=>JSON.parse(fs.readFileSync("/evidence/"+n+".json"));
-assert.deepStrictEqual(read("default").services.kafka,read("legacy").services.kafka);
-const c=read("guarded"),e=c.services.kafka.environment;
-assert(!Object.hasOwn(e,"KAFKA_CLUSTER_ID"));
-assert.equal(e.KAFKA_LOG_DIRS,"/var/lib/kafka/data/logs");
-assert.equal(e.KAFKA_METADATA_LOG_DIR,e.KAFKA_LOG_DIRS);
-assert.equal(c.volumes.platform_kafka_data.external,true);
-console.log("PASS default Kafka unchanged and pinned Compose environment merge");'
-for profile in dev test ha scale security dr; do
-    docker compose --profile "$profile" -f "$REPO/compose.yaml" config -q
-    docker compose --profile "$profile" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config -q
-done
-echo 'PASS all six default/guarded Compose profiles'
-gate() { local action=$1; shift; bash "$REPO/deploy/docker/kafka/deployment-preflight.sh" "$action" "${DC[@]:2}" "$@"; }
+COMPOSE_ACQUISITION_STARTED=0
+DIRECT_HELPERS=(uuid config-compare interrupted-chown)
+
+direct_helper() {
+    local helper=$1
+    shift
+    # Record intent before contacting the daemon, including in the UUID subshell.
+    : > "$TASK/$helper.pending" || return 1
+    docker run --rm --cidfile "$TASK/$helper.cid" --name "$PROJECT-$helper"         --label "issue223.owner=$PROJECT" --label "com.docker.compose.project=$PROJECT" "$@"
+}
+
+direct_helper_cleanup() {
+    local phase=$1 inventory helper name id listed_id listed_name row record
+    local format='{{.Id}}|{{.Name}}|{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}'
+    local -A ids_by_name=() names_by_id=()
+    for helper in "${DIRECT_HELPERS[@]}"; do
+        [[ -f "$TASK/$helper.pending" ]] || continue
+        if [[ ! -f "$TASK/$helper.cid" ]]; then
+            echo "Pending/unknown Docker acquisition: $PROJECT-$helper (no recorded container ID)" >&2
+            return 1
+        fi
+        id=$(<"$TASK/$helper.cid")
+        if [[ ! $id =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Pending/unknown Docker acquisition: $PROJECT-$helper (invalid container ID)" >&2
+            return 1
+        fi
+    done
+
+    inventory=$(docker ps --all --no-trunc --format '{{.ID}}|{{.Names}}') || {
+        echo "Docker helper inventory unavailable during $phase for $PROJECT" >&2
+        return 1
+    }
+    if [[ -n $inventory ]]; then
+        while IFS= read -r row; do
+            if [[ ! $row =~ ^([0-9a-f]{64})[|]([a-zA-Z0-9][a-zA-Z0-9_.-]*)$ ]]; then
+                echo "Malformed Docker helper inventory during $phase for $PROJECT" >&2
+                return 1
+            fi
+            listed_id=${BASH_REMATCH[1]}
+            listed_name=${BASH_REMATCH[2]}
+            if [[ ${ids_by_name[$listed_name]+present} || ${names_by_id[$listed_id]+present} ]]; then
+                echo "Ambiguous Docker helper inventory during $phase for $PROJECT" >&2
+                return 1
+            fi
+            ids_by_name[$listed_name]=$listed_id
+            names_by_id[$listed_id]=$listed_name
+        done <<< "$inventory"
+    fi
+    for helper in "${DIRECT_HELPERS[@]}"; do
+        [[ -f "$TASK/$helper.pending" ]] || continue
+        id=$(<"$TASK/$helper.cid")
+        name=$PROJECT-$helper
+        listed_id=${ids_by_name[$name]-}
+        listed_name=${names_by_id[$id]-}
+        if [[ -z $listed_id && -z $listed_name ]]; then
+            continue
+        fi
+        if [[ $listed_id != "$id" || $listed_name != "$name" ]]; then
+            echo "Refuse deletion: Docker helper identity changed for $name" >&2
+            return 1
+        fi
+        if [[ $phase == verify ]]; then
+            echo "Cleanup residue: $name ($id)" >&2
+            return 1
+        fi
+        record=$(docker inspect --type container --format "$format" "$id") || {
+            echo "Docker helper inspection failed for $name ($id)" >&2
+            return 1
+        }
+        if [[ $record != "$id|/$name|$PROJECT|$PROJECT" ]]; then
+            echo "Refuse deletion: unverified Docker helper ownership for $name" >&2
+            return 1
+        fi
+        docker rm --force "$id" >/dev/null || return 1
+    done
+}
+
 new_volume() {
     local names containers
     names=$(docker volume ls --format '{{.Name}}') || return 1
@@ -103,6 +125,9 @@ cleanup() {
         (( budget > grace )) || return 124
         timeout --signal=TERM --kill-after="$grace" "$((budget - grace))" docker "$@"
     }
+    direct_helper_cleanup remove || return 1
+    direct_helper_cleanup verify || return 1
+    (( COMPOSE_ACQUISITION_STARTED )) || return 0
     # An API failure is unknown provenance, never an empty resource inventory.
     volume_names=$(docker volume ls --format '{{.Name}}') || return 1
     network_ids=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") || return 1
@@ -151,7 +176,7 @@ cleanup() {
             return 1
         fi
     done
-    return 0
+    direct_helper_cleanup verify
 }
 on_exit() {
     local result=$? cleanup_status=0
@@ -171,6 +196,61 @@ on_exit() {
 trap on_exit EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+export PLATFORM_KAFKA_CLUSTER_ID
+PLATFORM_KAFKA_CLUSTER_ID=$(direct_helper uuid --network none --tmpfs /etc/kafka/secrets \
+    --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
+[[ $PLATFORM_KAFKA_CLUSTER_ID =~ ^[A-Za-z0-9_-]{22}$ ]]
+export PLATFORM_KAFKA_STORAGE_ID=${PROJECT}-identity
+export PLATFORM_KAFKA_DATA_VOLUME=$VOLUME
+# Pin merge semantics and render the base+opt-in service before extending it.
+docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config > "$TASK/guarded.yaml"
+cat > "$TASK/compose.yaml" <<EOF_YAML
+services:
+  kafka:
+    extends:
+      file: $TASK/guarded.yaml
+      service: kafka
+    profiles: []
+    container_name: $PROJECT-kafka
+    restart: "no"
+    labels:
+      issue223.owner: $PROJECT
+    environment:
+      PLATFORM_KAFKA_NEW_VOLUME_CONFIRM: $PLATFORM_KAFKA_STORAGE_ID
+    networks: [platform_net]
+volumes:
+  platform_kafka_data:
+    external: true
+    name: $VOLUME
+networks:
+  platform_net:
+    internal: true
+    labels:
+      issue223.owner: $PROJECT
+EOF_YAML
+DC=(docker compose --profile dev -p "$PROJECT" -f "$TASK/compose.yaml")
+# Default service equality is a recreation-safety invariant, not just syntax.
+git -C "$REPO" show 27fbf8818ed8745fd5a38cb9521adae812224fa8:compose.yaml > "$TASK/legacy.yaml"
+docker compose --profile dev -p "$PROJECT" -f "$TASK/legacy.yaml" config --format json > "$TASK/legacy.json"
+docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" config --format json > "$TASK/default.json"
+docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config --format json > "$TASK/guarded.json"
+direct_helper config-compare --network none --pull never --mount "type=bind,src=$TASK,dst=/evidence,readonly" \
+    --entrypoint node node:20-alpine -e '
+const fs=require("fs"),assert=require("assert");
+const read=n=>JSON.parse(fs.readFileSync("/evidence/"+n+".json"));
+assert.deepStrictEqual(read("default").services.kafka,read("legacy").services.kafka);
+const c=read("guarded"),e=c.services.kafka.environment;
+assert(!Object.hasOwn(e,"KAFKA_CLUSTER_ID"));
+assert.equal(e.KAFKA_LOG_DIRS,"/var/lib/kafka/data/logs");
+assert.equal(e.KAFKA_METADATA_LOG_DIR,e.KAFKA_LOG_DIRS);
+assert.equal(c.volumes.platform_kafka_data.external,true);
+console.log("PASS default Kafka unchanged and pinned Compose environment merge");'
+for profile in dev test ha scale security dr; do
+    docker compose --profile "$profile" -f "$REPO/compose.yaml" config -q
+    docker compose --profile "$profile" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config -q
+done
+echo 'PASS all six default/guarded Compose profiles'
+gate() { local action=$1; shift; bash "$REPO/deploy/docker/kafka/deployment-preflight.sh" "$action" "${DC[@]:2}" "$@"; }
 run() { "${DC[@]}" run -T --rm --no-deps --entrypoint /bin/bash kafka "$@"; }
 cli() { "${DC[@]}" exec -T kafka /opt/kafka/bin/"$1" --bootstrap-server kafka:9092 "${@:2}"; }
 mutate() { run -c "$1"; }
@@ -206,6 +286,7 @@ transaction() { cli kafka-transactions.sh describe --transactional-id issue223-t
 [[ -z $(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") ]]
 new_volume "$VOLUME"
 new_volume "$REPLACEMENT"
+COMPOSE_ACQUISITION_STARTED=1
 # Legacy overlay fixture: a sleeping synthetic container, never the live broker.
 docker run -d --rm --name "$PROJECT-kafka" --network none --tmpfs /etc/kafka/secrets \
     --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data \
@@ -294,7 +375,7 @@ new_volume "$INTERRUPTED"
 docker volume create --label "issue223.owner=$PROJECT" --label "platform.kafka.project=$PROJECT" \
     --label "platform.kafka.storage-id=$INTERRUPTED" --label platform.kafka.resource=platform_kafka_data "$INTERRUPTED" >/dev/null
 owned_volume "$INTERRUPTED" "$PROJECT" "$INTERRUPTED"
-docker run --rm --network none --user 0 --tmpfs /etc/kafka/secrets --tmpfs /mnt/shared/config \
+direct_helper interrupted-chown --network none --user 0 --tmpfs /etc/kafka/secrets --tmpfs /mnt/shared/config \
     --mount "type=volume,src=$INTERRUPTED,dst=/var/lib/kafka/data" --entrypoint /bin/bash apache/kafka:3.8.0 \
     -c 'test -z "$(find /var/lib/kafka/data -mindepth 1 -maxdepth 1 -print -quit)" && chown 1000:1000 /var/lib/kafka/data'
 printf '#!/usr/bin/env bash\n[[ $1 == format ]] || exit 1\nexec sleep 600\n' > "$TASK/pause-format.sh"

@@ -510,12 +510,10 @@ fi
 TEST_NUM=16
 TEST_DESC="UI HTTPS-Only Port 23000 & Port 80 Listener Absence"
 UI_HTTPS=$(curl -k -s -o /dev/null -w "%{http_code}" "https://127.0.0.1:${PLATFORM_UI_HOST_PORT:-23000}/" 2>/dev/null || echo "000")
-PORT_80_LISTENER=$(docker exec platform-ui netstat -tuln 2>/dev/null | grep ":80 " || true)
-
-if [ "${UI_HTTPS}" = "200" ] && [ -z "${PORT_80_LISTENER}" ]; then
+if source "${ROOT_DIR}/tests/run-security-smoke.sh" && ui_port80_absent && [ "${UI_HTTPS}" = "200" ]; then
     pass ${TEST_NUM} "${TEST_DESC} (HTTP ${UI_HTTPS}, Port 80 absent)"
 else
-    fail ${TEST_NUM} "${TEST_DESC}" "UI HTTPS status: ${UI_HTTPS}, port 80 listener: ${PORT_80_LISTENER}"
+    fail ${TEST_NUM} "${TEST_DESC}" "UI HTTPS status: ${UI_HTTPS}, or port 80 absence proof failed"
 fi
 
 # ------------------------------------------------------------------------------
