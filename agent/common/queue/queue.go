@@ -2313,15 +2313,6 @@ func (q *DurableQueue) Len() int {
 	return q.activeCount
 }
 
-func syncDir(dir string) error {
-	f, err := os.Open(dir)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	return f.Sync()
-}
-
 func generateRecordID() string {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
