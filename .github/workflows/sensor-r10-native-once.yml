@@ -1,0 +1,68 @@
+# CONSULT-005 isolated engineering test; no package/release or protected merge.
+name: R10 Sensor component and pipeline qualification (one-shot)
+on:
+  push:
+    branches:
+      - verify/sensor-r10-20261128-consult005
+permissions:
+  contents: read
+concurrency:
+  group: sensor-r10-20261128-consult005
+  cancel-in-progress: false
+jobs:
+  sensor-r10:
+    name: R10 Sensor tests and build
+    if: ${{ github.event.created == true && github.run_attempt == '1' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Checkout exact verification source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Verify source lineage and isolated target
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REPOSITORY" == "gagandsm-max/platform" && "$GITHUB_REF" == "refs/heads/verify/sensor-r10-20261128-consult005" && "$GITHUB_RUN_ATTEMPT" == 1 ]]
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          [[ "$(git rev-parse HEAD^)" == "5442f2b502533ac021fc4e2486120e39acd83a38" ]]
+          [[ "$(git rev-parse HEAD^^{tree})" == "944e90a21399f4f0c7ef5fbaaf5aa1e966795886" ]]
+          [[ "$(git diff --name-only HEAD^ HEAD)" == ".github/workflows/sensor-r10-native-once.yml" ]]
+          [[ -z "$(git status --porcelain)" ]]
+          printf "R10_EXACT_SOURCE=%s\nR10_TREE=%s\n" "5442f2b502533ac021fc4e2486120e39acd83a38" "944e90a21399f4f0c7ef5fbaaf5aa1e966795886"
+      - name: Execute existing Sensor unit and pipeline recipes on isolated runner
+        run: |
+          set -euo pipefail
+          # Same Go image and bounded executable tmpfs as tests/run-unit-tests.sh.
+          docker pull golang:1.27.1-alpine3.24
+          image="$(docker image inspect --format "{{.Id}}" golang:1.27.1-alpine3.24)"
+          [[ "$image" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker image inspect --format "{{.Id}} {{json .RepoDigests}}" "$image"
+          label="io.amrudai.verify.run=${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          common=(--rm --label "$label" --tmpfs "/tmp:rw,exec,size=1073741824,mode=1777" -e GOTOOLCHAIN=local -e GOWORK=off)
+          docker run "${common[@]}" --name "amrudai-r10-unit-${GITHUB_RUN_ID}" \
+            -v "${GITHUB_WORKSPACE}/sensor:/app/sensor:ro" -w /app/sensor \
+            -e GOFLAGS=-mod=readonly "$image" sh -euc '
+              go version
+              test "$(go env GOOS)/$(go env GOARCH)" = linux/amd64
+              go mod download
+              go mod verify
+              go test -v -count=1 -timeout=10m ./...
+              go vet ./...
+              CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o /tmp/platform-sensor ./cmd/sensor
+              sha256sum /tmp/platform-sensor
+              echo R10_SENSOR_UNIT_VET_BUILD_PASS'
+          docker run "${common[@]}" --name "amrudai-r10-pipeline-${GITHUB_RUN_ID}" \
+            -v "${GITHUB_WORKSPACE}/sensor:/src/sensor:ro" -v "${GITHUB_WORKSPACE}/agent:/src/agent:ro" -w /build \
+            "$image" sh -euc 'cp -a /src/sensor /build/sensor && cd /build/sensor && go mod edit -require=platform/agent@v0.0.0 -replace=platform/agent=/src/agent && go mod tidy && go test -tags=pipeline -v -count=1 -timeout=5m ./internal/agentreceiver/ && echo R10_AGENT_RECEIVER_PIPELINE_PASS'
+          [[ -z "$(git status --porcelain)" ]]
+          echo R10_COMPONENT_ENGINEERING_GATE_PASS
+      - name: Verify run-owned fixture absence
+        if: always()
+        run: |
+          set -euo pipefail
+          label="io.amrudai.verify.run=${GITHUB_RUN_ID}_${GITHUB_RUN_ATTEMPT}"
+          ids="$(docker ps -aq --filter "label=$label")"
+          [[ -z "$ids" ]] || { echo "::error::R10 disposable fixture residue remains; no broad removal authorized"; exit 1; }
+          echo R10_FIXTURE_ABSENCE_PASS
