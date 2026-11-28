@@ -11,7 +11,8 @@ import (
 func testV9Stream(t *testing.T, ids, fields int) (*V9Stream, V9StreamKey, time.Time) {
 	t.Helper()
 	key := V9StreamKey{ExporterBinding: "fixture", Source: netip.MustParseAddrPort("192.0.2.1:12345"), Collector: netip.MustParseAddrPort("[2001:db8::1]:2055"), SourceID: 0xdeadbeef, Epoch: 1}
-	s, err := NewV9Stream(key, V9StreamLimits{Timeout: 10 * time.Second, MaxTemplates: ids, MaxFields: fields})
+	const testOnlyExpandedFieldBudget = 16 * 1024 * 1024
+	s, err := NewV9Stream(key, V9StreamLimits{Timeout: 10 * time.Second, MaxTemplates: ids, MaxFields: fields, MaxExpandedFields: testOnlyExpandedFieldBudget})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -179,14 +179,19 @@ func validateHTTPHeaders(l Limits, h map[string]string) error {
 	return nil
 }
 
-func validateHTTPRequest(l Limits, r HTTPRequest) (*url.URL, error) {
-	if len(r.URL) == 0 {
+// validateHTTPURL applies the URL-only admission rules shared by the initial
+// HTTP synthetic request and every resolved followed-redirect destination:
+// absolute http/https, size bound, no userinfo, no fragment, valid host/port.
+// Method, timeout, header, redirect-policy and body expectations remain in
+// validateHTTPRequest so initial-request precedence and codes stay unchanged.
+func validateHTTPURL(l Limits, raw string) (*url.URL, error) {
+	if len(raw) == 0 {
 		return nil, newError(CodeInvalidRequest, "HTTP URL is required", nil, false)
 	}
-	if len(r.URL) > l.MaxURLBytes {
+	if len(raw) > l.MaxURLBytes {
 		return nil, newError(CodeResourceLimit, "HTTP URL exceeds configured bound", nil, false)
 	}
-	u, err := url.Parse(r.URL)
+	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		return nil, newError(CodeInvalidRequest, "HTTP URL must be absolute http or https URL", nil, false)
 	}
@@ -204,6 +209,14 @@ func validateHTTPRequest(l Limits, r HTTPRequest) (*url.URL, error) {
 		if e != nil || validatePort(n) != nil {
 			return nil, newError(CodeInvalidRequest, "HTTP URL port is invalid", nil, false)
 		}
+	}
+	return u, nil
+}
+
+func validateHTTPRequest(l Limits, r HTTPRequest) (*url.URL, error) {
+	u, err := validateHTTPURL(l, r.URL)
+	if err != nil {
+		return nil, err
 	}
 	if r.Method != HTTPMethodGET && r.Method != HTTPMethodHEAD {
 		return nil, newError(CodeInvalidRequest, "HTTP method must be GET or HEAD", nil, false)

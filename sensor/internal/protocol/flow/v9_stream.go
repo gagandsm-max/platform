@@ -18,6 +18,7 @@ var (
 	ErrV9SequenceCollision = errors.New("NetFlow v9 packet sequence collision")
 	ErrV9EpochRequired     = errors.New("NetFlow v9 continuity requires a new epoch")
 	ErrV9StreamCapacity    = errors.New("NetFlow v9 template cache capacity exceeded")
+	ErrV9ExpansionBudget   = errors.New("NetFlow v9 expanded-field budget exceeded")
 )
 
 // V9StreamKey comes from a trusted ingress binding. The caller must assign a
@@ -34,6 +35,7 @@ type V9StreamKey struct {
 type V9StreamLimits struct {
 	Timeout                 time.Duration
 	MaxTemplates, MaxFields int // Simultaneous entries and total descriptors.
+	MaxExpandedFields       int // Required maximum total row fields per packet.
 }
 
 type v9CacheEntry struct {
@@ -52,12 +54,12 @@ type V9Stream struct {
 	lastReceive            time.Time
 	sequence, uptime, unix uint32
 	digest                 [sha256.Size]byte
-	lastRefused            bool
+	lastRefusal            error
 	ended                  bool
 }
 
 func NewV9Stream(key V9StreamKey, limits V9StreamLimits) (*V9Stream, error) {
-	if strings.TrimSpace(key.ExporterBinding) == "" || key.Epoch == 0 || !validV9Endpoint(key.Source) || !validV9Endpoint(key.Collector) || limits.Timeout <= 0 || limits.MaxFields <= 0 || limits.MaxTemplates <= 0 {
+	if strings.TrimSpace(key.ExporterBinding) == "" || key.Epoch == 0 || !validV9Endpoint(key.Source) || !validV9Endpoint(key.Collector) || limits.Timeout <= 0 || limits.MaxFields <= 0 || limits.MaxTemplates <= 0 || limits.MaxExpandedFields <= 0 {
 		return nil, ErrV9StreamConfig
 	}
 	return &V9Stream{key: key, limits: limits, cache: make(map[uint16]v9CacheEntry)}, nil
@@ -102,8 +104,8 @@ func (s *V9Stream) Decode(key V9StreamKey, receivedAt time.Time, datagram []byte
 		switch {
 		case delta == 0:
 			if s.digest == digest {
-				if s.lastRefused {
-					return nil, ErrV9StreamCapacity
+				if s.lastRefusal != nil {
+					return nil, s.lastRefusal
 				}
 				return nil, ErrV9DuplicatePacket
 			}
@@ -136,6 +138,8 @@ func (s *V9Stream) Decode(key V9StreamKey, receivedAt time.Time, datagram []byte
 		SequenceNumber: env.SequenceNumber, MissingPackets: gap,
 		UnixSecs: env.UnixSecs, SysUpTime: env.SysUpTime,
 	}
+	remaining := s.limits.MaxExpandedFields
+	var refusal error
 	for _, set := range env.FlowSets {
 		start := int(set.Offset)
 		end := start + int(set.Length)
@@ -147,11 +151,20 @@ func (s *V9Stream) Decode(key V9StreamKey, receivedAt time.Time, datagram []byte
 			}
 		case set.ID >= 256:
 			entry, _ := tx.get(set.ID)
-			data, err := v9DataSet(set.ID, body, end, entry, receivedAt, s.limits.Timeout, !tx.checkOnly)
+			emit := !tx.checkOnly && refusal == nil
+			data, err := v9DataSet(set.ID, body, end, entry, receivedAt, s.limits.Timeout, emit)
 			if err != nil {
 				return nil, err
 			}
-			if !tx.checkOnly {
+			if emit {
+				if data.Status == V9Decoded {
+					var fits bool
+					remaining, fits = v9ChargeExpandedFields(remaining, data.Count, data.Layout.FieldCount())
+					if !fits {
+						refusal = ErrV9ExpansionBudget
+						continue
+					}
+				}
 				packet.Sets = append(packet.Sets, data)
 			}
 		}
@@ -164,21 +177,24 @@ func (s *V9Stream) Decode(key V9StreamKey, receivedAt time.Time, datagram []byte
 		return nil, discontinuity
 	}
 	s.lastReceive, s.sequence, s.uptime, s.unix, s.digest = receivedAt, env.SequenceNumber, env.SysUpTime, env.UnixSecs, digest
-	s.lastRefused = tx.checkOnly
+	if tx.checkOnly {
+		refusal = ErrV9StreamCapacity
+	}
+	s.lastRefusal = refusal
 	if tx.base == nil {
 		clear(s.cache)
 		s.fields = 0
 	}
-	if tx.checkOnly {
-		// The packet was well-formed, but its definitions could not all be
-		// admitted. Prior meanings of every ID it defines are now unsafe.
+	if refusal != nil {
+		// The packet was well-formed and refused. Prior meanings of every ID
+		// it defines are now unsafe.
 		for id := range tx.pending {
 			if prior, ok := s.cache[id]; ok {
 				s.fields -= len(prior.layout.fields)
 				delete(s.cache, id)
 			}
 		}
-		return nil, ErrV9StreamCapacity
+		return nil, refusal
 	}
 	if tx.prune {
 		for id, entry := range s.cache {
@@ -192,6 +208,15 @@ func (s *V9Stream) Decode(key V9StreamKey, receivedAt time.Time, datagram []byte
 	}
 	s.fields = tx.fields
 	return packet, nil
+}
+
+// Check the product against the remaining budget before multiplying. A
+// decoded set has a positive row count and nonnegative descriptor count.
+func v9ChargeExpandedFields(remaining, rows, fields int) (int, bool) {
+	if fields > remaining/rows {
+		return remaining, false
+	}
+	return remaining - rows*fields, true
 }
 
 // Whole-second export times permit up to 999 ms of skew in elapsed time.
