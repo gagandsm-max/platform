@@ -1,0 +1,148 @@
+# Isolated engineering test only; never a release or SCM/MSI certification.
+name: BUILD016 Windows native queue qualification (one-shot)
+on:
+  push:
+    branches:
+      - verify/build016-windows-queue-native-20261128-consult004
+permissions:
+  contents: read
+concurrency:
+  group: build016-windows-queue-native-20261128-consult004
+  cancel-in-progress: false
+jobs:
+  windows-queue:
+    name: Native Windows queue scheduler delivery
+    if: ${{ github.event.created == true && github.run_attempt == '1' }}
+    runs-on: windows-2025
+    timeout-minutes: 40
+    defaults:
+      run:
+        shell: pwsh
+    env:
+      GOTOOLCHAIN: local
+      GOWORK: 'off'
+      GOFLAGS: '-mod=readonly'
+      CGO_ENABLED: '0'
+    steps:
+      - name: Check exact one-shot target and record start
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $ist = [DateTime]::UtcNow.AddMinutes(330)
+          Write-Output "RUN_START_IST=$($ist.ToString('yyyy-MM-ddTHH:mm:ss'))"
+          if ($env:GITHUB_REPOSITORY -cne 'gagandsm-max/platform' -or $env:GITHUB_REF -cne 'refs/heads/verify/build016-windows-queue-native-20261128-consult004') { throw 'STOP=TARGET_MISMATCH' }
+      - name: Checkout immutable source and baseline parent
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 3
+          persist-credentials: false
+      - name: Verify exact ancestry, blob identities and scope
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          function GitValue([string[]]$Arguments) {
+            $v = @(& git @Arguments)
+            if ($LASTEXITCODE -ne 0) { throw 'STOP=GIT_READ_FAILED' }
+            return ($v -join "`n").Trim()
+          }
+          if ((GitValue @('rev-parse','HEAD')) -cne $env:GITHUB_SHA) { throw 'STOP=HEAD_MISMATCH' }
+          if ((GitValue @('rev-parse','HEAD^')) -cne '73db9dbc4d555e3fcd50d2611e576f52f0ed91d1') { throw 'STOP=SOURCE_PARENT_MISMATCH' }
+          if ((GitValue @('rev-parse','HEAD^^')) -cne '8adae453ddb79a1b924dd6ec32f579a0b8de0856') { throw 'STOP=BASE_MISMATCH' }
+          if ((GitValue @('rev-parse','HEAD^^{tree}')) -cne 'c673eac4b1473d6c1f4ea3d53cc5d4e8f147bbd7') { throw 'STOP=SOURCE_TREE_MISMATCH' }
+          $delta = GitValue @('diff','--name-only','HEAD^','HEAD')
+          if ($delta -cne '.github/workflows/build016-windows-queue-native-once.yml') { throw 'STOP=WORKFLOW_DELTA' }
+          $pins = @{
+            'agent/common/queue/queue.go' = 'decd18c1d19aac82b040e3f9fe52d22aa70e016c'
+            'agent/common/queue/syncdir_nonwindows.go' = '7a82b2f112d5a68066325eee8838de733a9eb811'
+            'agent/common/queue/syncdir_windows.go' = 'ee7c7184b88b98149081b98285f6626ef89f8afb'
+            'agent/common/queue/syncdir_windows_test.go' = 'fd6b9e3e88678d11ac84df1913cc3967bbad9a31'
+          }
+          $sourceDelta = @( (GitValue @('diff','--name-only','HEAD^^','HEAD^')) -split "`n" | Sort-Object )
+          if ($sourceDelta.Count -ne $pins.Count -or (Compare-Object $sourceDelta @($pins.Keys | Sort-Object))) { throw 'STOP=SOURCE_DELTA' }
+          foreach ($p in $pins.Keys) {
+            if ((GitValue @('rev-parse',"HEAD:$p")) -cne $pins[$p]) { throw 'STOP=SOURCE_BLOB_MISMATCH' }
+          }
+          if (GitValue @('status','--porcelain')) { throw 'STOP=DIRTY_CHECKOUT' }
+          Write-Output 'EXACT_WINDOWS_SOURCE_VERIFIED'
+      - name: Install pinned Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version: '1.27.1'
+          cache: false
+      - name: Native runner and baseline controls
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $version = (& go version)
+          if ($LASTEXITCODE -ne 0 -or $version -notmatch 'go1\.27\.1 windows/amd64') { throw 'STOP=NONNATIVE_GO_TOOLCHAIN' }
+          $version
+          $target = @(& go env GOOS GOARCH)
+          if ($LASTEXITCODE -ne 0 -or $target.Count -ne 2 -or $target[0] -cne 'windows' -or $target[1] -cne 'amd64') { throw 'STOP=WRONG_GO_TARGET' }
+          $principal = [Security.Principal.WindowsPrincipal]::new([Security.Principal.WindowsIdentity]::GetCurrent())
+          Write-Output "RUNNER_TOKEN_ADMIN=$($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+          $drive = [IO.DriveInfo]::new([IO.Path]::GetPathRoot($env:TEMP))
+          Write-Output "TEMP_FILESYSTEM=$($drive.DriveFormat)"
+          $baseline = Join-Path $env:RUNNER_TEMP 'amrudai-353-baseline'
+          if (Test-Path -LiteralPath $baseline) { throw 'STOP=BASELINE_PATH_EXISTS' }
+          & git worktree add --detach $baseline 8adae453ddb79a1b924dd6ec32f579a0b8de0856
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=BASELINE_WORKTREE' }
+          $unexpected = $false
+          try {
+            Push-Location (Join-Path $baseline 'agent')
+            try {
+              $controls = @(
+                @{ package='./common/queue'; test='TestDurableQueueV3EmptyPersistsStreamWithoutLineageStart' },
+                @{ package='./common/scheduler'; test='TestIssue302EncodedCollectionBoundaries' }
+              )
+              foreach ($control in $controls) {
+                $log = Join-Path $env:RUNNER_TEMP ($control.test + '.jsonl')
+                & go test -json -count=1 -timeout=2m -run ('^' + $control.test + '$') $control.package | Tee-Object -FilePath $log
+                $rc = $LASTEXITCODE
+                $events = @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json })
+                $testEvents = @($events | Where-Object { $_.Test -eq $control.test })
+                $outputs = ($events | ForEach-Object { $_.Output }) -join ' '
+                if ($rc -eq 0 -and @($testEvents | Where-Object { $_.Action -eq 'pass' }).Count -eq 1) {
+                  Write-Output "BASELINE=$($control.test):FAILURE_NOT_REPRODUCED"
+                } elseif ($rc -ne 0 -and @($testEvents | Where-Object { $_.Action -eq 'fail' }).Count -eq 1 -and $outputs -match 'QUEUE_META_UNCERTAIN' -and $outputs -match 'Access is denied') {
+                  Write-Output "BASELINE=$($control.test):EXPECTED_NATIVE_FAILURE_REPRODUCED"
+                } else {
+                  Write-Output "BASELINE=$($control.test):UNEXPECTED_RESULT"
+                  $unexpected = $true
+                }
+              }
+            } finally { Pop-Location }
+          } finally {
+            & git worktree remove $baseline
+            if ($LASTEXITCODE -ne 0) { throw 'STOP=BASELINE_CLEANUP_FAILED' }
+          }
+          if ($unexpected) { throw 'STOP=BASELINE_UNCLASSIFIED' }
+      - name: Execute full native queue scheduler delivery tests and build
+        working-directory: agent
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $false
+          $log = Join-Path $env:RUNNER_TEMP 'amrudai-353-native.jsonl'
+          & go test -json -count=1 -p=2 -timeout=10m ./common/queue ./common/scheduler ./common/delivery | Tee-Object -FilePath $log
+          $rc = $LASTEXITCODE
+          if ($rc -ne 0) { throw "STOP=NATIVE_TEST_EXIT_$rc" }
+          $events = @(Get-Content -LiteralPath $log | Where-Object { $_.StartsWith('{') } | ForEach-Object { $_ | ConvertFrom-Json })
+          if (@($events | Where-Object { $_.Action -in @('fail','build-fail') }).Count -ne 0) { throw 'STOP=NATIVE_FAILED_EVENT' }
+          foreach ($pkg in @('platform/agent/common/queue','platform/agent/common/scheduler','platform/agent/common/delivery')) {
+            if (@($events | Where-Object { $_.Package -eq $pkg -and $_.Action -eq 'pass' -and -not $_.Test }).Count -ne 1) { throw "STOP=MISSING_PACKAGE_PASS:$pkg" }
+          }
+          foreach ($test in @('TestWindowsSyncDir','TestWindowsDurableQueueSyncDirLifecycle','TestDurableQueueV3EmptyPersistsStreamWithoutLineageStart','TestDurableQueueMetaDirSyncAfterRenameFailsClosed','TestDurableQueueMetaPersistFailureDeletesNothing','TestDurableQueuePostMetaDeleteFailureReconcilesOnRestart','TestIssue302AdmissionProcessCrashRecovery','TestIssue302EncodedCollectionBoundaries')) {
+            if (@($events | Where-Object { $_.Test -eq $test -and $_.Action -eq 'pass' }).Count -ne 1) { throw "STOP=MISSING_REQUIRED_TEST_PASS:$test" }
+          }
+          & go mod verify
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=MOD_VERIFY' }
+          & go vet ./common/queue ./common/scheduler ./common/delivery
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=NATIVE_VET' }
+          & go build ./common/queue ./common/scheduler ./common/delivery
+          if ($LASTEXITCODE -ne 0) { throw 'STOP=NATIVE_BUILD' }
+          $dirty = @(& git status --porcelain)
+          if ($LASTEXITCODE -ne 0 -or $dirty.Count -ne 0) { throw 'STOP=SOURCE_CHANGED' }
+          $ist = [DateTime]::UtcNow.AddMinutes(330)
+          Write-Output "RUN_FINISH_IST=$($ist.ToString('yyyy-MM-ddTHH:mm:ss'))"
+          Write-Output 'WINDOWS_NATIVE_QUEUE_ENGINEERING_GATE_PASS'
+          Write-Output 'INSTALLED_SERVICE_TOKEN=NOT_TESTED'
+          Write-Output 'POWER_LOSS_DURABILITY=NOT_TESTED'
+          Write-Output 'SCM_MSI_REBOOT=NOT_TESTED'
