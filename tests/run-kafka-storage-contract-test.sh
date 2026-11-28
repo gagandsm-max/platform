@@ -7,8 +7,197 @@ PROJECT=issue223-storage-$(cat /proc/sys/kernel/random/uuid)
 VOLUME=ci_${PROJECT}_1_kafka_data
 REPLACEMENT=${PROJECT}-replacement
 INTERRUPTED=${PROJECT}-interrupted
+FOREIGN=$PROJECT-foreign
+FOREIGN_ACQUISITION_STARTED=0
+COMPOSE_ACQUISITION_STARTED=0
+DIRECT_HELPERS=(uuid config-compare interrupted-chown)
+
+direct_helper() {
+    local helper=$1
+    shift
+    # Record intent before contacting the daemon, including in the UUID subshell.
+    : > "$TASK/$helper.pending" || return 1
+    docker run --rm --cidfile "$TASK/$helper.cid" --name "$PROJECT-$helper"         --label "issue223.owner=$PROJECT" --label "com.docker.compose.project=$PROJECT" "$@"
+}
+
+direct_helper_cleanup() {
+    local phase=$1 inventory helper name id listed_id listed_name row record
+    local format='{{.Id}}|{{.Name}}|{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}'
+    local -A ids_by_name=() names_by_id=()
+    for helper in "${DIRECT_HELPERS[@]}"; do
+        [[ -f "$TASK/$helper.pending" ]] || continue
+        if [[ ! -f "$TASK/$helper.cid" ]]; then
+            echo "Pending/unknown Docker acquisition: $PROJECT-$helper (no recorded container ID)" >&2
+            return 1
+        fi
+        id=$(<"$TASK/$helper.cid")
+        if [[ ! $id =~ ^[0-9a-f]{64}$ ]]; then
+            echo "Pending/unknown Docker acquisition: $PROJECT-$helper (invalid container ID)" >&2
+            return 1
+        fi
+    done
+
+    inventory=$(docker ps --all --no-trunc --format '{{.ID}}|{{.Names}}') || {
+        echo "Docker helper inventory unavailable during $phase for $PROJECT" >&2
+        return 1
+    }
+    if [[ -n $inventory ]]; then
+        while IFS= read -r row; do
+            if [[ ! $row =~ ^([0-9a-f]{64})[|]([a-zA-Z0-9][a-zA-Z0-9_.-]*)$ ]]; then
+                echo "Malformed Docker helper inventory during $phase for $PROJECT" >&2
+                return 1
+            fi
+            listed_id=${BASH_REMATCH[1]}
+            listed_name=${BASH_REMATCH[2]}
+            if [[ ${ids_by_name[$listed_name]+present} || ${names_by_id[$listed_id]+present} ]]; then
+                echo "Ambiguous Docker helper inventory during $phase for $PROJECT" >&2
+                return 1
+            fi
+            ids_by_name[$listed_name]=$listed_id
+            names_by_id[$listed_id]=$listed_name
+        done <<< "$inventory"
+    fi
+    for helper in "${DIRECT_HELPERS[@]}"; do
+        [[ -f "$TASK/$helper.pending" ]] || continue
+        id=$(<"$TASK/$helper.cid")
+        name=$PROJECT-$helper
+        listed_id=${ids_by_name[$name]-}
+        listed_name=${names_by_id[$id]-}
+        if [[ -z $listed_id && -z $listed_name ]]; then
+            continue
+        fi
+        if [[ $listed_id != "$id" || $listed_name != "$name" ]]; then
+            echo "Refuse deletion: Docker helper identity changed for $name" >&2
+            return 1
+        fi
+        if [[ $phase == verify ]]; then
+            echo "Cleanup residue: $name ($id)" >&2
+            return 1
+        fi
+        record=$(docker inspect --type container --format "$format" "$id") || {
+            echo "Docker helper inspection failed for $name ($id)" >&2
+            return 1
+        }
+        if [[ $record != "$id|/$name|$PROJECT|$PROJECT" ]]; then
+            echo "Refuse deletion: unverified Docker helper ownership for $name" >&2
+            return 1
+        fi
+        docker rm --force "$id" >/dev/null || return 1
+    done
+}
+
+new_volume() {
+    local names containers
+    names=$(docker volume ls --format '{{.Name}}') || return 1
+    ! grep -Fxq "$1" <<< "$names" || { echo 'Primary test-volume collision rejected' >&2; return 1; }
+    containers=$(docker ps -aq --filter "name=$PROJECT") || return 1
+    [[ -z $containers ]] || return 1
+    containers=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") || return 1
+    [[ -z $containers ]] || return 1
+    containers=$(docker ps -aq --filter "label=issue223.owner=$PROJECT") || return 1
+    [[ -z $containers ]] || return 1
+}
+owned_volume() {
+    local volume=$1 owner=${2:-$PROJECT} storage=${3:-$PLATFORM_KAFKA_STORAGE_ID}
+    local labels
+    labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "$volume" 2>/dev/null) || return 1
+    [[ "$labels" == "$owner|$owner|$storage|platform_kafka_data" ]]
+}
+remove_owned_volume() {
+    owned_volume "$@" || { echo "Refuse deletion: unowned volume $1" >&2; return 1; }
+    local users
+    users=$(docker ps -aq --filter "volume=$1") || return 1
+    [[ -z $users ]] || return 1
+    docker volume rm "$1" > /dev/null
+}
+cleanup() {
+    local deadline=$((SECONDS + 45)) grace=2 volume storage
+    local volume_names network_ids container_ids network cid labels
+    local -a fixture_volumes=("$VOLUME" "$REPLACEMENT" "$INTERRUPTED")
+    if (( FOREIGN_ACQUISITION_STARTED )); then
+        fixture_volumes+=("$FOREIGN")
+    fi
+    # The EXIT handler invokes this in a subshell. Bound each CLI call by
+    # the same remaining deadline, including its TERM-to-KILL interval.
+    docker() {
+        local budget=$((deadline - SECONDS))
+        (( budget <= 15 )) || budget=15
+        (( budget > grace )) || return 124
+        timeout --signal=TERM --kill-after="$grace" "$((budget - grace))" docker "$@"
+    }
+    direct_helper_cleanup remove || return 1
+    direct_helper_cleanup verify || return 1
+    (( COMPOSE_ACQUISITION_STARTED )) || return 0
+    # An API failure is unknown provenance, never an empty resource inventory.
+    volume_names=$(docker volume ls --format '{{.Name}}') || return 1
+    network_ids=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") || return 1
+    container_ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") || return 1
+    # Verify every resource before teardown; never delete volumes through Compose.
+    for volume in "${fixture_volumes[@]}"; do
+        case "$volume" in
+            "$INTERRUPTED"|"$FOREIGN") storage=$volume ;;
+            *) storage=$PLATFORM_KAFKA_STORAGE_ID ;;
+        esac
+        if grep -Fxq "$volume" <<< "$volume_names"; then
+            if [[ "$volume" == "$FOREIGN" ]]; then
+                owned_volume "$volume" "$FOREIGN" "$storage" || return 1
+            else
+                owned_volume "$volume" "$PROJECT" "$storage" || return 1
+            fi
+        fi
+    done
+    for network in $network_ids; do
+        labels=$(docker network inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "com.docker.compose.project"}}' "$network") || return 1
+        [[ "$labels" == "$PROJECT|$PROJECT" ]] || return 1
+    done
+    for cid in $container_ids; do
+        labels=$(docker inspect -f '{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}' "$cid") || return 1
+        [[ "$labels" == "$PROJECT|$PROJECT" ]] || return 1
+    done
+    if (( result != 0 )) && [[ -n "$container_ids" ]]; then
+        "${DC[@]}" logs --no-color --tail 100 || true
+    fi
+    "${DC[@]}" down > /dev/null || return 1
+    for volume in "${fixture_volumes[@]}"; do
+        grep -Fxq "$volume" <<< "$volume_names" || continue
+        case "$volume" in
+            "$FOREIGN") remove_owned_volume "$volume" "$FOREIGN" "$FOREIGN" || return 1 ;;
+            "$INTERRUPTED") remove_owned_volume "$volume" "$PROJECT" "$INTERRUPTED" || return 1 ;;
+            *) remove_owned_volume "$volume" || return 1 ;;
+        esac
+    done
+    volume_names=$(docker volume ls --format '{{.Name}}') || return 1
+    network_ids=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") || return 1
+    container_ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") || return 1
+    [[ -z "$network_ids" && -z "$container_ids" ]] || return 1
+    for volume in "$VOLUME" "$REPLACEMENT" "$INTERRUPTED" "$FOREIGN"; do
+        if grep -Fxq "$volume" <<< "$volume_names"; then
+            echo "Cleanup residue: $volume" >&2
+            return 1
+        fi
+    done
+    direct_helper_cleanup verify
+}
+on_exit() {
+    local result=$? cleanup_status=0
+    trap - EXIT
+    trap '' INT TERM
+    ( cleanup ) || cleanup_status=$?
+    if (( cleanup_status != 0 )); then
+        echo "FAIL: owned Kafka cleanup or absence proof failed for $PROJECT" >&2
+    fi
+    if (( result != 0 || cleanup_status != 0 )); then
+        echo "FAIL: evidence retained at $TASK" >&2
+        (( result != 0 )) && exit "$result"
+        exit "$cleanup_status"
+    fi
+    echo "PASS guarded Kafka storage contract; project=$PROJECT evidence=$TASK"
+}
+trap on_exit EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 export PLATFORM_KAFKA_CLUSTER_ID
-PLATFORM_KAFKA_CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
+PLATFORM_KAFKA_CLUSTER_ID=$(direct_helper uuid --network none --tmpfs /etc/kafka/secrets \
     --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
 [[ $PLATFORM_KAFKA_CLUSTER_ID =~ ^[A-Za-z0-9_-]{22}$ ]]
 export PLATFORM_KAFKA_STORAGE_ID=${PROJECT}-identity
@@ -45,7 +234,7 @@ git -C "$REPO" show 27fbf8818ed8745fd5a38cb9521adae812224fa8:compose.yaml > "$TA
 docker compose --profile dev -p "$PROJECT" -f "$TASK/legacy.yaml" config --format json > "$TASK/legacy.json"
 docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" config --format json > "$TASK/default.json"
 docker compose --profile dev -p "$PROJECT" -f "$REPO/compose.yaml" -f "$REPO/compose.kafka-guarded.yaml" config --format json > "$TASK/guarded.json"
-docker run --rm --network none --pull never --mount "type=bind,src=$TASK,dst=/evidence,readonly" \
+direct_helper config-compare --network none --pull never --mount "type=bind,src=$TASK,dst=/evidence,readonly" \
     --entrypoint node node:20-alpine -e '
 const fs=require("fs"),assert=require("assert");
 const read=n=>JSON.parse(fs.readFileSync("/evidence/"+n+".json"));
@@ -62,60 +251,6 @@ for profile in dev test ha scale security dr; do
 done
 echo 'PASS all six default/guarded Compose profiles'
 gate() { local action=$1; shift; bash "$REPO/deploy/docker/kafka/deployment-preflight.sh" "$action" "${DC[@]:2}" "$@"; }
-new_volume() {
-    local names containers
-    names=$(docker volume ls --format '{{.Name}}') || return 1
-    ! grep -Fxq "$1" <<< "$names" || { echo 'Primary test-volume collision rejected' >&2; return 1; }
-    containers=$(docker ps -aq --filter "name=$PROJECT") || return 1
-    [[ -z $containers ]] || return 1
-    containers=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") || return 1
-    [[ -z $containers ]] || return 1
-    containers=$(docker ps -aq --filter "label=issue223.owner=$PROJECT") || return 1
-    [[ -z $containers ]] || return 1
-}
-owned_volume() {
-    local volume=$1 owner=${2:-$PROJECT} storage=${3:-$PLATFORM_KAFKA_STORAGE_ID}
-    [[ $(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "$volume" 2>/dev/null) == "$owner|$owner|$storage|platform_kafka_data" ]]
-}
-remove_owned_volume() {
-    owned_volume "$@" || { echo "Refuse deletion: unowned volume $1" >&2; return 1; }
-    local users
-    users=$(docker ps -aq --filter "volume=$1") || return 1
-    [[ -z $users ]] || return 1
-    docker volume rm "$1" > /dev/null
-}
-cleanup() {
-    result=$?
-    if (( result != 0 )); then
-        "${DC[@]}" logs --no-color --tail 100 || true
-        echo "FAIL: evidence retained at $TASK"
-    fi
-    # An API failure is unknown provenance, never an empty resource inventory.
-    local volume_names network_ids container_ids
-    volume_names=$(docker volume ls --format '{{.Name}}') || exit 1
-    network_ids=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") || exit 1
-    container_ids=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT") || exit 1
-    # Verify every resource before teardown; never delete volumes through Compose.
-    for volume in "$VOLUME" "$REPLACEMENT" "$INTERRUPTED"; do
-        storage=$PLATFORM_KAFKA_STORAGE_ID; [[ $volume != "$INTERRUPTED" ]] || storage=$INTERRUPTED
-        if grep -Fxq "$volume" <<< "$volume_names"; then owned_volume "$volume" "$PROJECT" "$storage" || { echo 'Foreign volume: cleanup refused' >&2; exit 1; }; fi
-    done
-    for network in $network_ids; do
-        [[ $(docker network inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "com.docker.compose.project"}}' "$network") == "$PROJECT|$PROJECT" ]] || { echo 'Foreign network: cleanup refused' >&2; exit 1; }
-    done
-    for cid in $container_ids; do
-        [[ $(docker inspect -f '{{index .Config.Labels "issue223.owner"}}|{{index .Config.Labels "com.docker.compose.project"}}' "$cid") == "$PROJECT|$PROJECT" ]] || { echo 'Foreign container: cleanup refused' >&2; exit 1; }
-    done
-    "${DC[@]}" down > /dev/null || exit 1
-    for volume in "$VOLUME" "$REPLACEMENT" "$INTERRUPTED"; do
-        storage=$PLATFORM_KAFKA_STORAGE_ID; [[ $volume != "$INTERRUPTED" ]] || storage=$INTERRUPTED
-        if grep -Fxq "$volume" <<< "$volume_names"; then remove_owned_volume "$volume" "$PROJECT" "$storage" || exit 1; fi
-    done
-    exit "$result"
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM
 run() { "${DC[@]}" run -T --rm --no-deps --entrypoint /bin/bash kafka "$@"; }
 cli() { "${DC[@]}" exec -T kafka /opt/kafka/bin/"$1" --bootstrap-server kafka:9092 "${@:2}"; }
 mutate() { run -c "$1"; }
@@ -151,6 +286,7 @@ transaction() { cli kafka-transactions.sh describe --transactional-id issue223-t
 [[ -z $(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT") ]]
 new_volume "$VOLUME"
 new_volume "$REPLACEMENT"
+COMPOSE_ACQUISITION_STARTED=1
 # Legacy overlay fixture: a sleeping synthetic container, never the live broker.
 docker run -d --rm --name "$PROJECT-kafka" --network none --tmpfs /etc/kafka/secrets \
     --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data \
@@ -239,7 +375,7 @@ new_volume "$INTERRUPTED"
 docker volume create --label "issue223.owner=$PROJECT" --label "platform.kafka.project=$PROJECT" \
     --label "platform.kafka.storage-id=$INTERRUPTED" --label platform.kafka.resource=platform_kafka_data "$INTERRUPTED" >/dev/null
 owned_volume "$INTERRUPTED" "$PROJECT" "$INTERRUPTED"
-docker run --rm --network none --user 0 --tmpfs /etc/kafka/secrets --tmpfs /mnt/shared/config \
+direct_helper interrupted-chown --network none --user 0 --tmpfs /etc/kafka/secrets --tmpfs /mnt/shared/config \
     --mount "type=volume,src=$INTERRUPTED,dst=/var/lib/kafka/data" --entrypoint /bin/bash apache/kafka:3.8.0 \
     -c 'test -z "$(find /var/lib/kafka/data -mindepth 1 -maxdepth 1 -print -quit)" && chown 1000:1000 /var/lib/kafka/data'
 printf '#!/usr/bin/env bash\n[[ $1 == format ]] || exit 1\nexec sleep 600\n' > "$TASK/pause-format.sh"
@@ -527,13 +663,13 @@ grep -q KAFKA_STORAGE_UNFORMATTED "$TASK/replaced.log"
 if gate up -f "$TASK/replacement.yaml" > "$TASK/missing-storage.log" 2>&1; then exit 1; fi
 grep -q KAFKA_STORAGE_UNFORMATTED "$TASK/missing-storage.log"
 # Independent foreign-provenance fixture: refusal first, verified fixture cleanup later.
-FOREIGN=$PROJECT-foreign
+new_volume "$FOREIGN"
+# Record the acquisition attempt before Docker can reserve the name.
+FOREIGN_ACQUISITION_STARTED=1
 docker volume create --label "issue223.owner=$FOREIGN" --label "platform.kafka.project=$FOREIGN" \
     --label "platform.kafka.storage-id=$FOREIGN" --label platform.kafka.resource=platform_kafka_data "$FOREIGN" > /dev/null
 if remove_owned_volume "$FOREIGN" > "$TASK/foreign-cleanup.log" 2>&1; then exit 1; fi
 docker volume inspect "$FOREIGN" >/dev/null
-remove_owned_volume "$FOREIGN" "$FOREIGN" "$FOREIGN"
 echo 'PASS cleanup refuses foreign provenance; exact labels required for both primary and replacement'
 # Source assertion plus direct entrypoint ensure no wrapper/format is reachable.
 ! grep -E 'KafkaDockerWrapper|/etc/kafka/docker/(run|launch)' "$REPO/deploy/docker/kafka/guarded-start.sh" | grep -v '^#'
-echo "PASS guarded Kafka storage contract; project=$PROJECT evidence=$TASK"

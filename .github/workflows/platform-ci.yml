@@ -5,14 +5,15 @@ on:
   push:
     branches:
       - main
-  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # PRs share a stable group so superseding commits cancel stale PR checks.
+  # Push/main uses run_id so a later merge cannot cancel earlier main evidence.
+  group: platform-ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   PLATFORM_CI: "1"
@@ -20,7 +21,7 @@ env:
 jobs:
   static-contracts:
     name: Static contracts
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Remove leftover root-owned Maven target
@@ -31,7 +32,7 @@ jobs:
           # git clean can run. Bind only core/; no prune, no worktree wipe.
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -45,15 +46,43 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      - &install-compose
+        name: Install and verify job-local Docker Compose 5.5.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          plugin_dir="$RUNNER_TEMP/platform-ci-docker-cli/cli-plugins"
+          mkdir -p "$plugin_dir"
+          curl --fail --location --retry 2 --silent --show-error https://github.com/docker/compose/releases/download/v5.5.0/docker-compose-linux-x86_64 --output "$plugin_dir/docker-compose"
+          printf '%s  %s\n' c57ab918abd5b05ca7e7d0f275875dd1330a695074f309dc9eab1b49efafcd4b "$plugin_dir/docker-compose" | sha256sum --check --status
+          chmod 0755 "$plugin_dir/docker-compose"
+          export DOCKER_CONFIG="$RUNNER_TEMP/platform-ci-docker-cli"
+          compose_version=$(docker compose version --short)
+          echo "Job-local Docker Compose version: $compose_version"
+          test "$compose_version" = '5.5.0'
+          echo "DOCKER_CONFIG=$DOCKER_CONFIG" >> "$GITHUB_ENV"
+
       - name: Verify changed-file whitespace
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
           set -euo pipefail
-          if [ -n "${BASE_SHA:-}" ] && git cat-file -e "${BASE_SHA}^{commit}" 2>/dev/null; then
-            git diff --check "${BASE_SHA}...HEAD"
+          # A clean working tree is not evidence that committed changes have no
+          # whitespace defects. Never replace an unknown comparison with an
+          # uncommitted-working-tree-only check.
+          if [[ ! "${BASE_SHA:-}" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::Missing or malformed committed comparison SHA"
+            exit 1
+          fi
+          if [[ "$BASE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            empty_tree=$(git hash-object -t tree /dev/null)
+            git diff --check "$empty_tree" HEAD
           else
-            git diff --check
+            git cat-file -e "${BASE_SHA}^{commit}" || {
+              echo "::error::Required committed comparison SHA is unavailable: $BASE_SHA"
+              exit 1
+            }
+            git diff --check "${BASE_SHA}...HEAD"
           fi
 
       - name: Prepare deterministic environment
@@ -106,7 +135,7 @@ jobs:
 
   unit:
     name: Unit tests
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     steps:
       - name: Remove leftover root-owned Maven target
@@ -114,7 +143,7 @@ jobs:
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -127,6 +156,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - *install-compose
 
       - name: Prepare environment
         env:
@@ -167,7 +198,7 @@ jobs:
 
   ui-build:
     name: UI test and production build
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Remove leftover root-owned Maven target
@@ -175,7 +206,7 @@ jobs:
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -201,15 +232,40 @@ jobs:
 
   integration-security:
     name: Integration, PostgreSQL, contract, security
-    runs-on: [self-hosted, Linux, X64, platform-ci]
+    runs-on: ubuntu-24.04
+    # Job ceiling remains 50 without Master approval to raise it.
+    # Measured normal overnight integration ≈19m (1140s). Worst-case ≠ normal.
+    # Enforceable work cutoff: 44m from job-start epoch; reserved diagnostics+cleanup
+    # headroom: 6m (diagnostics ≤2 + cleanup/inventory ≤4). 44+6=50, never 60.
+    # Informative hang-guards inside the work cutoff (sum ≤44, not a second ceiling):
+    # setup/preload ≤6; kafka contract ≤5; kafka provision ≤3; clickhouse ≤6;
+    # integration ≤12; postgres ≤4; contract ≤3; security ≤3 (=39 ≤44).
     timeout-minutes: 50
     steps:
+      # Establish job-start epoch before checkout/compose/setup so the 44m work
+      # cutoff accounts for earlier steps and preserves the 6m teardown reserve.
+      - name: Establish hosted work cutoff with teardown reserve
+        run: |
+          set -euo pipefail
+          job_ceiling_seconds=$((50 * 60))
+          reserved_teardown_seconds=$((6 * 60))
+          work_budget_seconds=$((job_ceiling_seconds - reserved_teardown_seconds))
+          start_epoch=$(date +%s)
+          cutoff_epoch=$((start_epoch + work_budget_seconds))
+          {
+            echo "PLATFORM_CI_JOB_START_EPOCH=${start_epoch}"
+            echo "PLATFORM_CI_WORK_CUTOFF_EPOCH=${cutoff_epoch}"
+            echo "PLATFORM_CI_RESERVED_TEARDOWN_SECONDS=${reserved_teardown_seconds}"
+            echo "PLATFORM_CI_JOB_DEADLINE_EPOCH=$((start_epoch + job_ceiling_seconds))"
+          } >> "$GITHUB_ENV"
+          echo "Hosted timing budget: ceiling=${job_ceiling_seconds}s work_cutoff=${work_budget_seconds}s reserved_teardown=${reserved_teardown_seconds}s (normal overnight ≈1140s)."
+
       - name: Remove leftover root-owned Maven target
         run: |
           set -euo pipefail
           core_dir="${GITHUB_WORKSPACE}/core"
           if [ ! -d "${core_dir}" ] || [ ! -e "${core_dir}/target" ]; then
-            echo "[OK] No leftover core/target in the self-hosted workspace."
+            echo "[OK] No leftover core/target in the job workspace."
             exit 0
           fi
           docker run --rm --user 0:0 --network none \
@@ -222,6 +278,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - *install-compose
 
       - name: Preflight host container and port collision safety
         run: |
@@ -249,7 +307,7 @@ jobs:
           done
           if [ ${#COLLISIONS[@]} -gt 0 ]; then
             echo "[ERROR] Pre-existing Platform development containers detected: ${COLLISIONS[*]}"
-            echo "Platform development containers are present. Preserve developer data and run 'make dev-down' before self-hosted CI."
+            echo "Refusing to start CI with existing Platform development containers."
             exit 1
           fi
           echo "[OK] No normal development container collisions detected."
@@ -257,7 +315,7 @@ jobs:
           echo "==> [Preflight 2/2] Checking CI host port availability..."
           CI_PORTS=(21443 21000 21432 21123 21900 21379)
           OCCUPIED_PORTS=()
-          SS_LISTENERS=$(ss -tuln 2>/dev/null || netstat -tuln 2>/dev/null || true)
+          SS_LISTENERS=$(ss -tuln)
           for port in "${CI_PORTS[@]}"; do
             if printf '%s\n' "${SS_LISTENERS}" | grep -Eq "[:.]${port}[[:space:]]"; then
               OCCUPIED_PORTS+=("${port}")
@@ -275,7 +333,8 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          cp .env.example .env
+          # Provisioning writes the ownership marker before creating run-owned storage.
+          sed '/^[[:space:]]*COMPOSE_PROJECT_NAME=/d' .env.example > .env
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
 
           # Assign coherent CI-only ports (20000-29999, non-overlapping with dev/HA defaults)
@@ -304,7 +363,7 @@ jobs:
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, subprocess, sys
+          import json, os, subprocess, sys
 
           raw = subprocess.check_output(
               ["docker", "compose", "config", "--format", "json"],
@@ -312,30 +371,17 @@ jobs:
           )
           cfg = json.loads(raw)
 
+          run_identity = f"{os.environ['GITHUB_RUN_ID']}_{os.environ['GITHUB_RUN_ATTEMPT']}"
           expected_volumes = {
-              "platform_pg_data",
-              "platform_ch_data",
-              "platform_kafka_data",
-              "platform_valkey_data",
-              "platform_sensor_net_spool",
-              "platform_sensor_infra_spool",
+              f"platform_{suffix}": f"ci_{run_identity}_{suffix}"
+              for suffix in ("pg_data", "ch_data", "kafka_data", "valkey_data",
+                             "sensor_net_spool", "sensor_infra_spool")
           }
-          forbidden_names = set(expected_volumes)
 
           volumes = cfg.get("volumes", {})
-          missing = expected_volumes - set(volumes.keys())
-          if missing:
-              print(f"[ERROR] Rendered Compose missing volume definitions: {sorted(missing)}")
-              sys.exit(1)
-
-          for v_key in expected_volumes:
-              target = volumes[v_key].get("name", "")
-              if not target.startswith("ci_"):
-                  print(f"[ERROR] Volume target {v_key}='{target}' is not CI-prefixed")
-                  sys.exit(1)
-              if target in forbidden_names:
-                  print(f"[ERROR] Volume target {v_key} matches persistent dev volume '{target}'")
-                  sys.exit(1)
+          actual_volumes = {key: value.get("name") for key, value in volumes.items()}
+          if actual_volumes != expected_volumes:
+              sys.exit("[ERROR] Rendered Compose volumes differ from the six exact run/attempt targets.")
 
           expected_ports = {"21443", "21000", "21432", "21123", "21900", "21379"}
           dev_ports = {"28443", "23000", "25432", "28123", "29000", "26379", "25442"}
@@ -361,8 +407,372 @@ jobs:
           print("[OK] Rendered Compose safety gate PASSED: 6 isolated CI volumes and 6 CI ports verified.")
           PY
 
+      - name: Set up hosted disk checks and preload Kafka fixture images
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/platform-ci-disk" <<'BASH'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          reserve_kib=$((2 * 1024 * 1024))
+          if [[ ${1:-} == --initial ]]; then
+            reserve_kib=$((8 * 1024 * 1024))
+            shift
+          fi
+          # Use the earlier absolute limit even if a caller supplies only the job deadline.
+          work_deadline=${PLATFORM_CI_WORK_CUTOFF_EPOCH:-0}
+          job_deadline=${PLATFORM_CI_JOB_DEADLINE_EPOCH:-0}
+          if (( job_deadline > 0 && (work_deadline == 0 || job_deadline < work_deadline) )); then
+            work_deadline=$job_deadline
+          fi
+          work_cutoff_reached() {
+            (( work_deadline > 0 && EPOCHSECONDS >= work_deadline ))
+          }
+
+          disk_duration() {
+            local limit_ms=$1 now=$EPOCHREALTIME remaining_ms
+            if (( work_deadline > 0 )); then
+              remaining_ms=$(( (work_deadline - ${now%.*}) * 1000 - 10#${now#*.} / 1000 - 1 ))
+              (( remaining_ms > 0 )) || return 75
+              (( remaining_ms >= limit_ms )) || limit_ms=$remaining_ms
+            fi
+            printf '%d.%03ds' "$((limit_ms / 1000))" "$((limit_ms % 1000))"
+          }
+
+          disk_command() {
+            local limit_ms=$1 duration
+            shift
+            duration=$(disk_duration "$limit_ms") || return 75
+            if [[ $1 == df ]]; then
+              # Install a second timer under sudo so the root-owned df is
+              # killable. Recalculate remaining work time after sudo starts.
+              # Keep that timer in a child so the outer timer cannot kill it first.
+              timeout --signal=KILL "$duration" sudo -n bash -euo pipefail -c "
+                $(declare -f disk_duration)
+                work_deadline=\$1
+                duration=\$(disk_duration "\$2")
+                shift 2
+                timeout --signal=KILL "\$duration" "\$@"
+                exit 0
+              " bash "$work_deadline" "$limit_ms" "$@"
+            else
+              timeout --signal=KILL "$duration" "$@"
+            fi
+          }
+
+          sample() {
+            local blocks inodes
+            date -u
+            blocks=$(disk_command 5000 df -Pk -- "${paths[@]}") || return 1
+            inodes=$(disk_command 5000 df -Pi -- "${paths[@]}") || return 1
+            printf '%s\n' "$blocks" "$inodes"
+            awk -v minimum="$reserve_kib" 'NR > 1 && $4 < minimum { bad=1 } END { exit (NR < 2 || bad) }' <<< "$blocks" &&
+              awk 'NR > 1 && $4 < 16384 { bad=1 } END { exit (NR < 2 || bad) }' <<< "$inodes"
+          }
+
+          snapshot() {
+            disk_command 20000 docker system df && sample && ! work_cutoff_reached
+          }
+
+          echo "Hosted cumulative peak capacity is UNKNOWN. Required free reserve: ${reserve_kib} KiB and 16384 inodes."
+          if work_cutoff_reached; then
+            echo "::error::Hosted work cutoff reached; reserved diagnostics/cleanup headroom must remain"
+            exit 75
+          fi
+          docker_root=$(disk_command 20000 docker info --format '{{.DockerRootDir}}') && [[ "$docker_root" == /* ]] ||
+            { echo "::error::Hosted Docker root discovery failed or timed out"; exit 75; }
+          paths=("$docker_root" "$GITHUB_WORKSPACE" "$RUNNER_TEMP" /tmp)
+          if [[ -d /var/lib/containerd ]]; then
+            paths+=(/var/lib/containerd)
+          fi
+          snapshot || { echo "::error::Hosted disk preflight failed for $*"; exit 75; }
+          # Isolate only this command's subprocess group: a failing sampler must
+          # stop a blocked test rather than wait for the 50-minute job timeout.
+          command -v setsid >/dev/null || { echo "::error::setsid unavailable"; exit 75; }
+          # The parent alone signals and waits for the workload session.
+          # `( exec setsid … ) &` makes the workload its own session/process-group
+          # leader. Bare `setsid … &` keeps the launcher in this shell's group so
+          # `kill -- -PGID` would TERM the disk wrapper itself.
+          term_grace_seconds=${PLATFORM_CI_TERM_GRACE_SECONDS:-15}
+          sampler_interval_seconds=${PLATFORM_CI_SAMPLER_INTERVAL_SECONDS:-15}
+          sampler_fail_marker="$RUNNER_TEMP/platform-ci-disk-sampler-failed.$$"
+          sampler_stop_marker="$RUNNER_TEMP/platform-ci-disk-sampler-stop.$$"
+          cutoff_fail_marker="$RUNNER_TEMP/platform-ci-disk-cutoff-failed.$$"
+          rm -f "$sampler_fail_marker" "$sampler_stop_marker" "$cutoff_fail_marker"
+          workload_pid=""
+          sampler=""
+          shutdown_deadline=0
+          shutdown_term_sent=0
+          workload_members() {
+            # GNU timeout can create another PGID inside this setsid session.
+            # Filter before signaling and ignore zombies, including the leader.
+            ps -eo sid=,pid=,stat= | awk -v sid="${1:-$workload_pid}" '$1 == sid && $3 !~ /^Z/ {print $2}'
+          }
+          # kill -0 succeeds on zombies; treat zombie/self-exit as exited.
+          pid_has_exited() {
+            local pid="$1" state=""
+            [[ -n "$pid" ]] || return 0
+            if [[ -r "/proc/$pid/status" ]]; then
+              state=$(awk '/^State:/ {print $2; exit}' "/proc/$pid/status" 2>/dev/null || true)
+              [[ "$state" == "Z" ]] && return 0
+              return 1
+            fi
+            ! kill -0 "$pid" 2>/dev/null
+          }
+          signal_workload_members() {
+            local signal="$1" members="$2" pid
+            for pid in $members; do
+              kill "-$signal" "$pid" 2>/dev/null || true
+            done
+          }
+          publish_sampler_failure() {
+            # Sticky failure BEFORE TERM. Parent observes even if sampler still live
+            # and the workload traps TERM to exit 0.
+            printf '%s\n' "${1:-1}" > "$sampler_fail_marker"
+          }
+          publish_cutoff_failure() {
+            # Sticky aggregate-deadline failure BEFORE TERM. A workload that traps
+            # TERM and exits 0 must still fail closed once the work cutoff is crossed.
+            printf '%s\n' "${1:-75}" > "$sampler_fail_marker"
+            printf 'cutoff\n' > "$cutoff_fail_marker"
+          }
+          mark_sampler_stop_intentional() {
+            printf 'stop\n' > "$sampler_stop_marker"
+          }
+          reap_workload_session() {
+            local members
+            if (( shutdown_deadline == 0 )); then
+              shutdown_deadline=$((SECONDS + term_grace_seconds))
+            fi
+            if (( shutdown_term_sent == 0 )); then
+              members=$(workload_members) || return 75
+              if [[ -z "$members" ]] && ! pid_has_exited "$workload_pid"; then
+                members=$workload_pid
+              fi
+              signal_workload_members TERM "$members"
+              shutdown_term_sent=1
+            fi
+            while :; do
+              members=$(workload_members) || return 75
+              [[ -n "$members" ]] || return 0
+              if (( SECONDS >= shutdown_deadline )) || work_cutoff_reached; then
+                echo "::warning::Workload session still active; sending SIGKILL"
+                signal_workload_members KILL "$members"
+                sleep 0.1
+                members=$(workload_members) || return 75
+                signal_workload_members KILL "$members"
+                sleep 0.1
+                members=$(workload_members) || return 75
+                [[ -z "$members" ]] && return 0
+                echo "::error::Workload session still active after TERM/KILL"
+                return 75
+              fi
+              sleep 0.1
+            done
+          }
+          stop_helper_pid() {
+            local pid="$1"
+            [[ -n "$pid" ]] || return 0
+            local members result=0
+            # Measurements can have timeout children in separate process groups.
+            kill -STOP "$pid" 2>/dev/null || true
+            members=$(workload_members "$pid") || result=75
+            signal_workload_members KILL "$pid $members"
+            wait "$pid" 2>/dev/null || true
+            members=$(workload_members "$pid") || return 75
+            signal_workload_members KILL "$members"
+            return "$result"
+          }
+          cancel_workload() {
+            # Ignore further INT/TERM so restoring default cannot redeliver the
+            # original SIGTERM and kill this shell before exit 130 / reap completes.
+            trap '' INT TERM
+            mark_sampler_stop_intentional || true
+            # $! covers a signal between asynchronous launch and PID assignment.
+            workload_pid="${workload_pid:-${!:-}}"
+            if [[ -n "$workload_pid" ]]; then
+              reap_workload_session || true
+              if pid_has_exited "$workload_pid"; then
+                wait "$workload_pid" 2>/dev/null || true
+              fi
+            fi
+            stop_helper_pid "${sampler:-}" || echo "::warning::Could not inventory the sampler session"
+            echo "::error::Hosted test command cancelled; owned resource absence is unverified by the watchdog"
+            exit "${1:-130}"
+          }
+          trap cancel_workload INT TERM
+          if work_cutoff_reached; then
+            echo "::error::Hosted work cutoff reached after disk preflight"
+            exit 75
+          fi
+          (
+            exec setsid "$@"
+          ) &
+          workload_pid=$!
+          # Prevent group-start race: do not arm sampler until PGID is addressable
+          # or the workload has already exited.
+          group_ready_deadline=$((SECONDS + 5))
+          while ! kill -0 -- "-$workload_pid" 2>/dev/null && ! pid_has_exited "$workload_pid"; do
+            if work_cutoff_reached; then
+              publish_cutoff_failure 75
+              echo "::error::Hosted work cutoff reached during workload session startup"
+              cancel_workload 75
+            fi
+            if (( SECONDS >= group_ready_deadline )); then
+              echo "::error::Workload process group failed to become addressable"
+              cancel_workload 75
+            fi
+            sleep 0.1
+          done
+          sampler_loop() {
+            while [[ ! -f "$sampler_stop_marker" ]]; do
+              # Only the idle timer is interruptible on a normal stop request.
+              sleep "$sampler_interval_seconds" &
+              interval_timer=$!
+              while kill -0 "$interval_timer" 2>/dev/null; do
+                if [[ -f "$sampler_stop_marker" ]]; then
+                  kill "$interval_timer" 2>/dev/null || true
+                  wait "$interval_timer" 2>/dev/null || true
+                  exit 0
+                fi
+                sleep 0.1
+              done
+              wait "$interval_timer" || exit 1
+              [[ ! -f "$sampler_stop_marker" ]] || exit 0
+              if ! sample; then
+                echo "::error::Hosted free-space/inode reserve crossed or measurement failed during $*"
+                publish_sampler_failure 1
+                exit 1
+              fi
+            done
+            exit 0
+          }
+          (
+            exec setsid bash -euo pipefail -c "
+              $(declare -p work_deadline reserve_kib paths sampler_interval_seconds sampler_stop_marker sampler_fail_marker)
+              $(declare -f disk_duration disk_command sample publish_sampler_failure sampler_loop)
+              sampler_loop \"\$@\"
+            " bash "$@"
+          ) &
+          sampler=$!
+          # The parent owns the shutdown deadline. A leader exit cannot cancel
+          # cleanup running in a descendant or in a nested timeout process group.
+          status=0
+          sampler_status=0
+          sampler_failed=0
+          sticky_rc=""
+          session_failed=0
+          interrupted=0
+          while ! pid_has_exited "$workload_pid"; do
+            if work_cutoff_reached; then
+              echo "::error::Hosted work cutoff reached during active command; reserved diagnostics/cleanup headroom must remain"
+              publish_cutoff_failure 75
+              interrupted=1
+              break
+            fi
+            if [[ -f "$sampler_fail_marker" ]]; then
+              interrupted=1
+              break
+            fi
+            if pid_has_exited "$sampler"; then
+              # A sampler that exits before the stop request cannot guard work.
+              sampler_failed=1
+              interrupted=1
+              break
+            fi
+            sleep 0.1
+          done
+          if work_cutoff_reached && [[ ! -f "$cutoff_fail_marker" ]]; then
+            publish_cutoff_failure 75
+            interrupted=1
+          fi
+          members=$(workload_members) || session_failed=1
+          if (( interrupted == 0 )) && [[ -n "$members" ]]; then
+            echo "::error::Workload leader exited with live session members"
+            session_failed=1
+          fi
+          if (( interrupted != 0 || session_failed != 0 )); then
+            reap_workload_session || session_failed=1
+            # Docker resources require independent fixture inventory even when
+            # the workload session is empty after a signal.
+            echo "::warning::Workload interrupted or left live processes; owned resource absence is unverified by the watchdog"
+          fi
+          if pid_has_exited "$workload_pid"; then
+            wait "$workload_pid" || status=$?
+          else
+            session_failed=1
+          fi
+          # The sampler acknowledges stop by exiting cleanly after any in-flight
+          # measurement has succeeded or published its failure.
+          mark_sampler_stop_intentional || sampler_failed=1
+          join_deadline=$((SECONDS + (term_grace_seconds < 15 ? term_grace_seconds : 15)))
+          while ! pid_has_exited "$sampler" && (( SECONDS < join_deadline )) && ! work_cutoff_reached; do
+            sleep 0.1
+          done
+          if pid_has_exited "$sampler"; then
+            wait "$sampler" 2>/dev/null || sampler_status=$?
+            if (( sampler_status != 0 )); then
+              sampler_failed=1
+            fi
+          else
+            echo "::error::Hosted disk sampler did not acknowledge stop before its deadline"
+            sampler_failed=1
+            stop_helper_pid "$sampler" || echo "::warning::Could not inventory the sampler session"
+          fi
+          sampler=""
+          # Read the sticky result after the sampler has been joined or stopped.
+          if [[ -f "$sampler_fail_marker" ]]; then
+            sampler_failed=1
+            sticky_rc=$(tr -cd '0-9' < "$sampler_fail_marker" | head -c 3 || true)
+            [[ -n "$sticky_rc" ]] || sticky_rc=1
+          fi
+          if (( session_failed != 0 )); then
+            (( status != 0 )) || status=75
+          fi
+
+          # Check after the command even when it failed. Preserve primary status.
+          observed=0
+          if ! work_cutoff_reached; then
+            snapshot || observed=$?
+          fi
+          if work_cutoff_reached; then
+            echo "::error::Hosted work cutoff reached before disk checks completed"
+            observed=75
+          fi
+          if (( sampler_failed != 0 )); then
+            # Prefer sticky failure over helper-reap 137/143; never invent success.
+            if [[ -n "${sticky_rc:-}" && "$sticky_rc" != 0 ]]; then
+              if (( sampler_status == 0 || sampler_status == 137 || sampler_status == 143 )); then
+                sampler_status=$sticky_rc
+              fi
+            fi
+            (( sampler_status != 0 )) || sampler_status=75
+            if [[ -f "$cutoff_fail_marker" ]]; then
+              echo "::error::Hosted work cutoff enforced for $* (exit=${sampler_status})"
+            else
+              echo "::error::Hosted disk sampler failed for $* (exit=${sampler_status})"
+            fi
+            (( status != 0 )) || status=$sampler_status
+            (( status != 0 )) || status=75
+          fi
+          if (( observed != 0 )); then
+            echo "::error::Hosted disk check failed for $*"
+            (( status != 0 )) || status=75
+          fi
+          rm -f "$sampler_fail_marker" "$sampler_stop_marker" "$cutoff_fail_marker"
+          exit "$status"
+          BASH
+          chmod 0755 "$RUNNER_TEMP/platform-ci-disk"
+          "$RUNNER_TEMP/platform-ci-disk" --initial bash -e -c '
+            docker pull node:20-alpine
+            docker pull apache/kafka:3.8.0
+            docker image inspect --format "{{.Id}} {{json .RepoDigests}}" node:20-alpine apache/kafka:3.8.0
+          '
+
       - name: Prove isolated guarded Kafka storage contract
-        run: ./tests/run-kafka-storage-contract-test.sh
+        env:
+          # Allow the fixture's 45s cleanup plus signal-delivery headroom.
+          PLATFORM_CI_TERM_GRACE_SECONDS: "50"
+        run: '"$RUNNER_TEMP/platform-ci-disk" ./tests/run-kafka-storage-contract-test.sh'
 
       - name: Explicitly provision fresh run-scoped Kafka storage
         env:
@@ -373,44 +783,84 @@ jobs:
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
           EXPECTED_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${EXPECTED_VOLUME}" .env
-          # Never adopt an existing volume, including a partial earlier attempt.
-          if docker volume inspect "${EXPECTED_VOLUME}" >/dev/null 2>&1; then
-            echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
-            exit 1
-          fi
-          CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
-            --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
-            -c '/opt/kafka/bin/kafka-storage.sh random-uuid')
-          [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
-          STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
-          printf '\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n' \
-            "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
-          printf 'COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n' \
-            "${RUN_IDENTITY}" >> .env
-          PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
-            bash deploy/docker/kafka/deployment-preflight.sh provision
-          bash deploy/docker/kafka/deployment-preflight.sh check
+          # Include the existing-volume probe in the cap. Kill the entire timeout
+          # group at expiry even if the provisioning shell exits ahead of its children.
+          now=$EPOCHREALTIME
+          budget_ms=180000
+          for deadline in "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" "${PLATFORM_CI_JOB_DEADLINE_EPOCH:-}"; do
+            [[ -n "$deadline" ]] || continue
+            remaining_ms=$(( (deadline - ${now%.*}) * 1000 - 10#${now#*.} / 1000 - 1 ))
+            (( remaining_ms >= budget_ms )) || budget_ms=$remaining_ms
+          done
+          (( budget_ms > 0 )) || { echo "::error::Hosted work cutoff reached; reserved diagnostics/cleanup headroom must remain"; exit 75; }
+          printf -v duration '%d.%03ds' "$((budget_ms / 1000))" "$((budget_ms % 1000))"
+          timeout --signal=KILL "$duration" bash -euo pipefail -c '
+            RUN_IDENTITY=$1
+            EXPECTED_VOLUME=$2
+            # Never adopt an existing volume, including a partial earlier attempt.
+            if docker volume inspect "${EXPECTED_VOLUME}" >/dev/null 2>&1; then
+              echo "[ERROR] Fresh CI Kafka volume already exists; refusing provisioning."
+              exit 1
+            fi
+            CLUSTER_ID=$(docker run --rm --network none --tmpfs /etc/kafka/secrets \
+              --tmpfs /mnt/shared/config --tmpfs /var/lib/kafka/data --entrypoint /bin/bash apache/kafka:3.8.0 \
+              -c "/opt/kafka/bin/kafka-storage.sh random-uuid")
+            [[ "${CLUSTER_ID}" =~ ^[A-Za-z0-9_-]{22}$ ]]
+            STORAGE_ID="ci_${RUN_IDENTITY}_kafka_identity"
+            printf "\nPLATFORM_KAFKA_CLUSTER_ID=%s\nPLATFORM_KAFKA_STORAGE_ID=%s\n" \
+              "${CLUSTER_ID}" "${STORAGE_ID}" >> .env
+            printf "COMPOSE_FILE=compose.yaml:compose.kafka-guarded.yaml\nCOMPOSE_PROJECT_NAME=ci_%s\n" \
+              "${RUN_IDENTITY}" >> .env
+            PLATFORM_KAFKA_NEW_VOLUME_CONFIRM="${STORAGE_ID}" \
+              bash deploy/docker/kafka/deployment-preflight.sh provision
+            bash deploy/docker/kafka/deployment-preflight.sh check
+          ' bash "$RUN_IDENTITY" "$EXPECTED_VOLUME"
+          for deadline in "${PLATFORM_CI_WORK_CUTOFF_EPOCH:-}" "${PLATFORM_CI_JOB_DEADLINE_EPOCH:-}"; do
+            if [[ -n "$deadline" ]] && (( EPOCHSECONDS >= deadline )); then
+              echo "::error::Hosted work cutoff reached during Kafka provisioning"
+              exit 75
+            fi
+          done
 
       - name: Prove ClickHouse legacy upgrade and replay-safe canonical reads
-        run: make test-clickhouse-replay-migration
+        env:
+          # Routing marker for #344 hosted-ci fixture profile. Not isolation proof;
+          # external verified GitHub-hosted VM admission remains the authority.
+          AMRUDAI_REPLAY_RUNTIME_PROFILE: hosted-ci
+          # Allow the fixture's 45s cleanup plus signal-delivery headroom.
+          PLATFORM_CI_TERM_GRACE_SECONDS: "50"
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-clickhouse-replay-migration'
 
       - name: Run 20-test integration suite
-        run: make test-integration
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-integration'
 
       - name: Run mandatory PostgreSQL suite
-        run: ./tests/run-core-day02-tests.sh
+        run: '"$RUNNER_TEMP/platform-ci-disk" ./tests/run-core-day02-tests.sh'
 
       - name: Run API and data contract suite
-        run: make test-contract
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-contract'
 
       - name: Run security smoke suite
-        run: make test-security-smoke
+        run: '"$RUNNER_TEMP/platform-ci-disk" make test-security-smoke'
 
       - name: Capture diagnostics on failure
         if: failure()
         run: |
-          docker compose ps || true
-          docker compose logs --no-color --tail=250 || true
+          [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 0
+          # Bounded diagnostics inside the reserved teardown window (≤2m).
+          diagnostics_deadline=$((EPOCHSECONDS + 120))
+          if [[ -n "${PLATFORM_CI_JOB_DEADLINE_EPOCH:-}" ]]; then
+            reserve_start=$((PLATFORM_CI_JOB_DEADLINE_EPOCH - 240))
+            (( reserve_start >= diagnostics_deadline )) || diagnostics_deadline=$reserve_start
+          fi
+          diagnostic() {
+            local remaining=$((diagnostics_deadline - EPOCHSECONDS))
+            (( remaining > 0 )) || return 0
+            (( remaining <= 60 )) || remaining=60
+            timeout --signal=KILL "${remaining}s" docker compose "$@" || true
+          }
+          diagnostic ps
+          diagnostic logs --no-color --tail=250
 
       - name: Clean CI stack
         if: always()
@@ -419,23 +869,69 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
+          cleanup_budget=240
+          if [[ -n "${PLATFORM_CI_JOB_DEADLINE_EPOCH:-}" ]]; then
+            remaining=$((PLATFORM_CI_JOB_DEADLINE_EPOCH - EPOCHSECONDS))
+            (( remaining >= cleanup_budget )) || cleanup_budget=$remaining
+          fi
+          (( cleanup_budget > 2 )) || { echo "::error::CI teardown deadline exhausted"; exit 75; }
+          # One group timer includes ownership, escalation and final inventory.
+          timeout --signal=TERM --kill-after=2 "$((cleanup_budget - 2))s" bash -euo pipefail <<'BASH'
           # CI-only disposable fixture cleanup. Production preflight has no volume-rm path.
+          # Interrupted cleanup is positively owned and fails closed (never silent success).
+          cleanup_interrupted() {
+            echo "::error::Owned CI Kafka/stack cleanup interrupted; failing closed"
+            # Keep the timer alive through its KILL interval if another member
+            # of the teardown group is still ignoring TERM.
+            trap '' INT TERM
+            sleep 2
+            exit 75
+          }
+          trap cleanup_interrupted INT TERM
           [[ "${GITHUB_ACTIONS:-}" == "true" ]] || { echo "[ERROR] Kafka volume cleanup requires GitHub Actions."; exit 1; }
           [[ "${RUN_ID}" =~ ^[0-9]+$ && "${RUN_ATTEMPT}" =~ ^[0-9]+$ ]] || exit 1
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
           PROJECT="ci_${RUN_IDENTITY}"
           KAFKA_VOLUME="ci_${RUN_IDENTITY}_kafka_data"
           KAFKA_STORAGE="ci_${RUN_IDENTITY}_kafka_identity"
-          grep -Fxq "COMPOSE_PROJECT_NAME=${PROJECT}" .env || exit 1
+          # Read-only proof of canonical stack teardown.
+          verify_teardown() {
+            containers=$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")
+            networks=$(docker network ls -q --filter "label=com.docker.compose.project=$PROJECT")
+            volumes=$(docker volume ls --format '{{.Name}}')
+            if [[ -n "$containers" || -n "$networks" ]] ||
+               grep -Eq "^${PROJECT}_(kafka_data|pg_data|ch_data|valkey_data|sensor_net_spool|sensor_infra_spool)$" <<< "$volumes"; then
+              echo "::error::Run-owned Compose resources remain for $PROJECT"
+              exit 1
+            fi
+          }
+          # Ambiguous/unproven ownership: .env declares a different project than this
+          # run identity. Never mutate or volume-delete by fallback.
+          project_marker=""
+          if [[ -f .env ]]; then
+            project_marker=$(grep '^COMPOSE_PROJECT_NAME=' .env) || [[ $? == 1 ]] || exit 1
+          fi
+          if [[ -n "$project_marker" && "$project_marker" != "COMPOSE_PROJECT_NAME=${PROJECT}" ]]; then
+            echo "::error::Ambiguous/unproven Compose project ownership; refusing cleanup mutation"
+            exit 1
+          fi
+          if [[ -z "$project_marker" ]]; then
+            echo "Canonical provisioning marker absent; verify residuals only (no volume-delete fallback)."
+            verify_teardown
+            trap - INT TERM
+            exit 0
+          fi
+          [[ "${DOCKER_CONFIG:-}" == "$RUNNER_TEMP/platform-ci-docker-cli" ]] || exit 1
           grep -Fxq "PLATFORM_KAFKA_DATA_VOLUME=${KAFKA_VOLUME}" .env || exit 1
           # Non-deleting host gate only; never call a production cleanup/volume-rm action.
-          bash deploy/docker/kafka/deployment-preflight.sh down
+          bash deploy/docker/kafka/deployment-preflight.sh down -p "$PROJECT"
           # Kafka volume: positive disposable provenance = this Actions run identity +
           # exact ownership labels + no remaining attachments. Matching STORAGE alone
           # is not deletion authorization.
-          if docker volume inspect "${KAFKA_VOLUME}" >/dev/null 2>&1; then
+          volume_names=$(docker volume ls --format '{{.Name}}')
+          if grep -Fxq "${KAFKA_VOLUME}" <<< "$volume_names"; then
             [[ "${KAFKA_VOLUME}" =~ ^ci_[0-9]+_[0-9]+_kafka_data$ ]] || exit 1
-            kafka_labels=$(docker volume inspect -f '{{index .Labels "issue223.owner"}}|{{index .Labels "platform.kafka.project"}}|{{index .Labels "platform.kafka.storage-id"}}|{{index .Labels "platform.kafka.resource"}}' "${KAFKA_VOLUME}")
+            kafka_labels=$(docker volume inspect -f "{{index .Labels \"issue223.owner\"}}|{{index .Labels \"platform.kafka.project\"}}|{{index .Labels \"platform.kafka.storage-id\"}}|{{index .Labels \"platform.kafka.resource\"}}" "${KAFKA_VOLUME}")
             [[ "${kafka_labels}" == "${PROJECT}|${PROJECT}|${KAFKA_STORAGE}|platform_kafka_data" ]] || exit 1
             users=$(docker ps -aq --filter "volume=${KAFKA_VOLUME}") || exit 1
             [[ -z "$users" ]] || exit 1
@@ -446,11 +942,19 @@ jobs:
               platform_valkey_data:valkey_data platform_sensor_net_spool:sensor_net_spool \
               platform_sensor_infra_spool:sensor_infra_spool; do
             resource=${pair%%:*}; volume="ci_${RUN_IDENTITY}_${pair#*:}"
-            if docker volume inspect "$volume" >/dev/null 2>&1; then
-              labels=$(docker volume inspect -f '{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}' "$volume")
+            if grep -Fxq "$volume" <<< "$volume_names"; then
+              labels=$(docker volume inspect -f "{{index .Labels \"com.docker.compose.project\"}}|{{index .Labels \"com.docker.compose.volume\"}}" "$volume")
               [[ "$labels" == "$PROJECT|$resource" ]] || exit 1
               users=$(docker ps -aq --filter "volume=$volume") || exit 1
               [[ -z "$users" ]] || exit 1
               docker volume rm "$volume"
             fi
           done
+          verify_teardown
+          df -h
+          df -i
+          docker system df
+          docker ps -a --format '{{.Names}}'
+          docker network ls
+          docker volume ls
+          BASH

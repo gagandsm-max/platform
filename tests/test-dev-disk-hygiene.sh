@@ -143,9 +143,9 @@ PY
 pass "docker compose config renders with bounded logging"
 pass "rendered clickhouse-migrate covers /var/lib/clickhouse via tmpfs; named volumes unchanged"
 
-# Issue #266: foreign-probe source must use bounded PG data tmpfs and exact rm -fv.
+# Foreign-probe source must use bounded PG data tmpfs and immutable-ID cleanup.
 python3 - <<'PY'
-import pathlib, re, sys
+import pathlib, re
 src = pathlib.Path("tests/run-all-tests.sh").read_text(encoding="utf-8")
 # Locate the synthetic isolation probe docker run (not unrelated docker run calls).
 probe_run = None
@@ -156,14 +156,45 @@ if not probe_run:
     raise SystemExit("foreign probe docker run not found in run-all-tests.sh")
 if not re.search(r"--tmpfs\s+/var/lib/postgresql/data(?::|\s|$)", probe_run):
     raise SystemExit("foreign probe docker run missing --tmpfs /var/lib/postgresql/data")
-# Exact-owned cleanup must use docker rm -fv on FOREIGN_PROBE_NAME (function or direct).
-if not re.search(
-    r'docker rm -fv "\$\{FOREIGN_PROBE_NAME\}"',
-    src,
-):
-    raise SystemExit("foreign probe cleanup must use docker rm -fv \"${FOREIGN_PROBE_NAME}\"")
-if "cleanup_foreign_probe" not in src:
-    raise SystemExit("foreign probe missing failure-safe cleanup_foreign_probe")
+
+def function_lines(name):
+    body = re.search(rf"(?m)^{name}\(\) \{{\n([\s\S]*?)^\}}$", src)
+    if not body:
+        raise SystemExit(f"foreign probe missing {name} function")
+    return [line.strip() for line in body[1].splitlines()]
+
+# Check complete command lines in the actual functions so comments and messages
+# cannot stand in for commands. The Test20 fake-Docker tests exercise behavior.
+checks = {
+    "cleanup_foreign_probe": (
+        'if ! inspect_foreign_probe_owner "${FOREIGN_PROBE_ID}" "${FOREIGN_PROBE_ID}"; then',
+        'verified_id="${FOREIGN_PROBE_INSPECT_ID}"',
+        'if ! docker rm -fv "${verified_id}" >/dev/null 2>&1; then',
+        'if ! prove_foreign_probe_absent "${FOREIGN_PROBE_ID}"; then',
+    ),
+    "inspect_foreign_probe_owner": (
+        r'[[ "${identity}" =~ ^[0-9a-f]{64}$ ]] || return 1',
+        '[ "${label}" = "${FOREIGN_PROBE_RUN_ID}" ] || return 1',
+        '[ -z "${expected_id}" ] || [ "${identity}" = "${expected_id}" ] || return 1',
+    ),
+    "prove_foreign_probe_absent": (
+        'if docker inspect --type container "${ref}" >/dev/null 2>&1; then',
+        'inventory="$(docker ps -aq --no-trunc --filter "id=${ref}" 2>/dev/null)" || return 1',
+        '[ -z "${inventory}" ]',
+    ),
+}
+for name, commands in checks.items():
+    lines = iter(function_lines(name))
+    for command in commands:
+        if command not in lines:
+            raise SystemExit(f"{name} missing executable cleanup contract: {command}")
+
+removal = re.compile(r"(?m)^[ \t]*(?:if[ \t]+!?[ \t]*)?docker[ \t]+(?:container[ \t]+)?rm\b.*$")
+if any("FOREIGN_PROBE_NAME" in command for command in removal.findall(src)):
+    raise SystemExit("foreign probe cleanup must never delete by reusable name")
+cleanup = "\n".join(function_lines("cleanup_foreign_probe"))
+if removal.findall(cleanup) != [checks["cleanup_foreign_probe"][2]]:
+    raise SystemExit("foreign probe cleanup must remove only the verified immutable ID")
 # Guardrail: no broad anonymous-volume deletion authorization in this harness.
 forbidden = [
     r"docker volume prune",
@@ -186,9 +217,9 @@ dangerous = [
 for pat in dangerous:
     if re.search(pat, src):
         raise SystemExit(f"run-all-tests.sh authorizes unsafe volume deletion pattern: {pat}")
-print("foreign probe source supplies tmpfs + rm -fv; no prune/64-hex deletion")
+print("foreign probe source supplies tmpfs and immutable-ID cleanup; no prune/64-hex deletion")
 PY
-pass "foreign probe source has PG data tmpfs, docker rm -fv, and failure-safe exact cleanup"
+pass "foreign probe source has PG data tmpfs, verified-ID removal, and absence checks"
 
 # Issue #266: integration harness must not grow prune-based volume deletion.
 if awk '
