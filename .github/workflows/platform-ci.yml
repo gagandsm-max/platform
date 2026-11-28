@@ -333,7 +333,8 @@ jobs:
           RUN_ATTEMPT: ${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          cp .env.example .env
+          # Provisioning writes the ownership marker before creating run-owned storage.
+          sed '/^[[:space:]]*COMPOSE_PROJECT_NAME=/d' .env.example > .env
           RUN_IDENTITY="${RUN_ID}_${RUN_ATTEMPT}"
 
           # Assign coherent CI-only ports (20000-29999, non-overlapping with dev/HA defaults)

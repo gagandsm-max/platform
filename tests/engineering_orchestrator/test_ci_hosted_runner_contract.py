@@ -1272,7 +1272,7 @@ exit 99
 
 
 class TestCIStackTeardownMocks(unittest.TestCase):
-    def run_cleanup(self, mode, *, provisioned=False):
+    def run_cleanup(self, mode, *, provisioned=False, producer_stage=None, extra_marker=""):
         _, _, jobs, errors = _parse_workflow(WORKFLOW_PATH.read_text())
         self.assertFalse(errors)
         step = next(step for step in jobs["integration-security"] if "name: Clean CI stack" in step)
@@ -1281,7 +1281,12 @@ class TestCIStackTeardownMocks(unittest.TestCase):
             root = Path(tmp)
             (root / "deploy/docker/kafka").mkdir(parents=True)
             (root / "deploy/docker/kafka/deployment-preflight.sh").write_text(
-                '[[ "$*" == "down -p ci_12_1" ]]\n'
+                'printf "preflight %s\\n" "$*" >> calls\n'
+                'case "$*" in\n'
+                '  provision) cp .env provision.env ;;\n'
+                '  check|"down -p ci_12_1") ;;\n'
+                '  *) exit 1 ;;\n'
+                'esac\n'
             )
             if provisioned:
                 (root / ".env").write_text(
@@ -1292,6 +1297,10 @@ class TestCIStackTeardownMocks(unittest.TestCase):
                 #!/bin/bash
                 printf '%s\\n' "$*" >> calls
                 case "$FIXTURE_MODE:$1 $2" in
+                    "owned:volume inspect")
+                        if [[ ! -f provision.env && -f .env.example ]]; then exit 1; fi
+                        echo 'ci_12_1|ci_12_1|ci_12_1_kafka_identity|platform_kafka_data' ;;
+                    "owned:run --rm") echo AAAAAAAAAAAAAAAAAAAAAA ;;
                     "hang_inventory:ps -aq"|"hang_ownership:volume inspect")
                         trap '' TERM
                         exec /bin/sleep 25 ;;
@@ -1301,7 +1310,7 @@ class TestCIStackTeardownMocks(unittest.TestCase):
                     "owned:volume ls")
                         if [[ ! -f removed ]]; then echo ci_12_1_kafka_data; fi ;;
                     "foreign:volume inspect") echo 'foreign|foreign|foreign|platform_kafka_data' ;;
-                    "owned:volume inspect"|"residue:volume inspect")
+                    "residue:volume inspect")
                         echo 'ci_12_1|ci_12_1|ci_12_1_kafka_identity|platform_kafka_data' ;;
                     "owned:volume rm"|"residue:volume rm") touch removed ;;
                     *) ;;
@@ -1318,12 +1327,66 @@ class TestCIStackTeardownMocks(unittest.TestCase):
             }
             if mode == "already_expired":
                 env["PLATFORM_CI_JOB_DEADLINE_EPOCH"] = str(int(time.time()) - 1)
+            if producer_stage:
+                (root / ".env.example").write_bytes(
+                    (ROOT / ".env.example").read_bytes()
+                )
+                make = root / "make"
+                make.write_text('#!/bin/bash\n[[ "$*" == certs ]]\n')
+                make.chmod(0o700)
+                stages = ["Prepare deterministic environment"]
+                if producer_stage == "provision":
+                    stages.append("Explicitly provision fresh run-scoped Kafka storage")
+                for stage in stages:
+                    producer = next(step for step in jobs["integration-security"]
+                                    if f"name: {stage}" in step)
+                    setup = subprocess.run(
+                        ["bash", "-c", _step_run_raw(producer)], cwd=root, env=env,
+                        text=True, capture_output=True, timeout=7,
+                    )
+                    self.assertEqual(setup.returncode, 0, setup.stdout + setup.stderr)
+                (root / "calls").unlink(missing_ok=True)
+            if extra_marker:
+                with (root / ".env").open("a") as env_file:
+                    env_file.write(extra_marker)
             result = subprocess.run(
                 ["bash", "-c", script], cwd=root, env=env, text=True, capture_output=True,
                 timeout=7, start_new_session=True,
             )
             calls = (root / "calls").read_text().splitlines() if (root / "calls").exists() else []
+            if producer_stage == "provision":
+                self.assertEqual(
+                    re.findall(r"(?m)^COMPOSE_PROJECT_NAME=.*$", (root / "provision.env").read_text()),
+                    ["COMPOSE_PROJECT_NAME=ci_12_1"],
+                    result.stdout + result.stderr,
+                )
             return result, calls
+
+    def test_actual_producer_emits_one_marker_before_provision(self):
+        result, calls = self.run_cleanup("owned", producer_stage="provision")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("preflight down -p ci_12_1", calls)
+        self.assertIn("volume rm ci_12_1_kafka_data", calls)
+
+    def test_actual_prepare_leaves_marker_absent_until_provision(self):
+        result, calls = self.run_cleanup("normal", producer_stage="prepare")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Canonical provisioning marker absent", result.stdout)
+        self.assertEqual(calls, [
+            "ps -aq --filter label=com.docker.compose.project=ci_12_1",
+            "network ls -q --filter label=com.docker.compose.project=ci_12_1",
+            "volume ls --format {{.Name}}",
+        ])
+
+    def test_duplicate_and_mismatched_markers_refuse_all_mutation(self):
+        for provisioned, project in ((True, "ci_12_1"), (True, "foreign"), (False, "foreign")):
+            with self.subTest(provisioned=provisioned, project=project):
+                result, calls = self.run_cleanup(
+                    "normal", provisioned=provisioned, extra_marker=f"COMPOSE_PROJECT_NAME={project}\n",
+                )
+                self.assertEqual(result.returncode, 1, result.stdout + result.stderr)
+                self.assertIn("Ambiguous/unproven Compose project ownership", result.stdout)
+                self.assertEqual(calls, [])
 
     def test_marker_absent_inventory_is_bounded_and_fail_closed(self):
         for mode, status in (("normal", 0), ("inventory_failure", 41), ("already_expired", 75),
